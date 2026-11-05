@@ -1,68 +1,68 @@
 import React, { useState } from 'react';
-import { Users, Clock, ChevronRight, Eye, RefreshCw, X, AlertCircle, ShieldAlert, Pill, TestTube, Activity, FileText, Check } from 'lucide-react';
+import { Users, Clock, ChevronRight, Eye, RefreshCw, X, AlertCircle, ShieldAlert, Pill, TestTube, Activity, FileText, Check, BedDouble, Lock, Zap, Stethoscope, AlertTriangle } from 'lucide-react';
+import { AvatarPlaceholder } from '../../components/common/AvatarPlaceholder';
 
 interface WaitingRoomProps {
   waitingQueue: any[];
+  inProgressQueue?: any[];
+  hospitalizedQueue?: any[];
+  paymentRequests?: any[];
   onStartConsultation: (patient: any) => void;
   onCancelPatient?: (patient: any, reason: string) => void;
   onReorientPatient?: (patient: any, targetService: string) => void;
+  onResumeConsultation?: (patient: any) => void;
+  onManageDischarge?: (patient: any) => void;
 }
 
 // Built-in clinical summary profiles mapping by ID or generic fallback
-const PATIENT_SUMMARIES_DB: Record<string, any> = {
-  'DME-4452': {
-    allergies: ['Pénicilline'],
-    treatments: ['Amlodipine 5mg (1x/j)', 'Metformine 500mg (2x/j)'],
-    consultations: [
-      { date: '12/03/2026', motif: 'Suivi HTA', diagnosis: 'HTA Stade 1 équilibrée', doctor: 'Dr. Sarr' },
-      { date: '15/01/2026', motif: 'Syndrome grippal', diagnosis: 'Rhinopharyngite aiguë', doctor: 'Dr. Diallo' }
-    ],
-    exams: [
-      { date: '12/03/2026', type: 'Créatininémie', result: '9.2 mg/L (Normal)' },
-      { date: '12/03/2026', type: 'Iogramme sanguin', result: 'Normal' }
-    ],
-    hospitalisations: [
-      { date: 'Mai 2025', duration: '3 jours', motif: 'Crise de paludisme aigu', service: 'Médecine Générale' }
-    ]
-  },
-  'DME-9012': {
-    allergies: [],
-    treatments: ['Aucun traitement de fond'],
-    consultations: [
-      { date: '10/02/2026', motif: 'Douleur abdominale', diagnosis: 'Spasmes intestinaux', doctor: 'Dr. Keita' }
-    ],
-    exams: [
-      { date: '10/02/2026', type: 'Échographie abdominale', result: 'Pas d\'anomalie détectée' }
-    ],
-    hospitalisations: []
-  },
-  'DME-7721': {
-    allergies: ['Aspirine'],
-    treatments: ['Amlodipine 10mg (1x/j)', 'Ramipril 5mg (1x/j)'],
-    consultations: [
-      { date: '18/02/2026', motif: 'Dyspnée d\'effort', diagnosis: 'HTA Stade 2', doctor: 'Dr. Sarr' }
-    ],
-    exams: [
-      { date: '18/02/2026', type: 'ECG de repos', result: 'Surcharge ventriculaire gauche légère' }
-    ],
-    hospitalisations: [
-      { date: 'Novembre 2025', duration: '5 jours', motif: 'Poussée hypertensive sévère', service: 'Soins Intensifs / Cardiologie' }
-    ]
-  }
-};
+const PATIENT_SUMMARIES_DB: Record<string, any> = {};
 
 const WaitingRoom: React.FC<WaitingRoomProps> = ({ 
   waitingQueue, 
+  inProgressQueue = [],
+  hospitalizedQueue = [],
+  paymentRequests = [],
   onStartConsultation,
   onCancelPatient,
-  onReorientPatient
+  onReorientPatient,
+  onResumeConsultation,
+  onManageDischarge
 }) => {
+  const [activeTab, setActiveTab] = useState<'WAITING' | 'IN_PROGRESS' | 'HOSPITALIZED'>('WAITING');
   // Modal states
   const [summaryPatient, setSummaryPatient] = useState<any | null>(null);
   const [reorientPatient, setReorientPatient] = useState<any | null>(null);
   const [cancelPatient, setCancelPatient] = useState<any | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelError, setCancelError] = useState('');
+
+  const checkPatientIsPaid = (patient: any): boolean => {
+    if (!patient) return false;
+    const pStatus = (patient.paymentStatus || '').toUpperCase();
+    if (['SOLDE', 'PAID', 'PAYE', 'PAYÉ', 'VALIDE', 'EXONERE', 'ASSURANCE', 'PEC', 'ADVANCE', 'PARTIAL', 'TIERS_PAYANT', 'PRIS_EN_CHARGE'].includes(pStatus)) {
+      return true;
+    }
+    const tStatus = (patient.ticketStatut || '').toUpperCase();
+    if (['PAYE', 'PAYÉ', 'VALIDE', 'SOLDE', 'OK'].includes(tStatus)) {
+      return true;
+    }
+    if (patient.hospitalizedOrigin || patient.isExempt || patient.fee === 0 || patient.emergencyBypass) {
+      return true;
+    }
+    const pid = patient.id || patient.patientId || patient.dmeId;
+    const pName = `${patient.lastName || ''} ${patient.firstName || ''}`.trim().toLowerCase();
+
+    if (paymentRequests && paymentRequests.length > 0) {
+      const hasPaid = paymentRequests.some(pr => {
+        const matchesPatient = (pid && (pr.patientId === pid || (pr as any).dmeId === pid)) ||
+          (pName.length > 3 && pr.patientName && pr.patientName.toLowerCase().includes(pName));
+        const isHandled = pr.status === 'PAID' || pr.status === 'VALIDATED' || ((pr.amountPaid || 0) >= (pr.totalAmount || 0) && (pr.totalAmount || 0) > 0) || (pr.amountPaid || 0) > 0;
+        return matchesPatient && isHandled;
+      });
+      if (hasPaid) return true;
+    }
+    return false;
+  };
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -85,21 +85,12 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
     const staticSummary = PATIENT_SUMMARIES_DB[patient.id];
     if (staticSummary) return staticSummary;
 
-    // Smart fallback generator to make every record extremely complete
-    const isFemale = patient.gender === 'F';
+    // Minimal fallback
     return {
       allergies: patient.allergies || [],
-      treatments: patient.motif?.toLowerCase().includes('hta') 
-        ? ['Amlodipine 5mg (1x/j)'] 
-        : patient.motif?.toLowerCase().includes('diabète') 
-        ? ['Metformine 500mg (2x/j)'] 
-        : ['Néant'],
-      consultations: [
-        { date: '10/05/2026', motif: patient.motif || 'Contrôle', diagnosis: 'À préciser', doctor: 'Dr. Clinique' }
-      ],
-      exams: [
-        { date: '10/05/2026', type: 'Constantes cliniques', result: `T°: ${patient.vitals?.temp || 37}°C, TA: ${patient.vitals?.bp || '120/80'}` }
-      ],
+      treatments: ['À préciser'],
+      consultations: [],
+      exams: [],
       hospitalisations: []
     };
   };
@@ -127,118 +118,385 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-6 duration-700">
-      <div className="flex justify-between items-end mb-10">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-end gap-6 mb-10">
         <div>
           <h1 className="text-4xl font-black tracking-tight text-slate-900">Salle d'Attente Médicale</h1>
-          <p className="text-slate-500 font-medium italic">Gérez le flux des patients entrants et priorisez les urgences.</p>
+          <p className="text-slate-500 font-medium italic">Gérez le flux des patients entrants, suivez les consultations actives, et libérez les dossiers.</p>
         </div>
-        <div className="bg-blue-600 text-white px-6 py-3 rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-blue-600/20">
-          {waitingQueue.length} Patients en attente
+
+        {/* Tab Switcher buttons */}
+        <div className="flex bg-slate-100 p-1.5 rounded-[22px] border border-slate-200 shrink-0 w-full lg:w-auto">
+          <button
+            onClick={() => setActiveTab('WAITING')}
+            className={`flex-1 lg:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-[16px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'WAITING'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Users size={14} /> File d'attente ({waitingQueue.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('IN_PROGRESS')}
+            className={`flex-1 lg:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-[16px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'IN_PROGRESS'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Activity size={14} /> Patients en cours ({inProgressQueue.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('HOSPITALIZED')}
+            className={`flex-1 lg:flex-none flex items-center justify-center gap-2 px-6 py-3 rounded-[16px] text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === 'HOSPITALIZED'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <BedDouble size={14} /> Hospitalisés ({hospitalizedQueue.length})
+          </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {waitingQueue.map((p, idx) => (
-          <div key={`${p.id || idx}-${idx}`} className="bg-white rounded-[40px] border border-slate-200 p-8 hover:border-blue-500 hover:shadow-2xl transition-all group relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform">
-              <Clock size={100} />
-            </div>
-            
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors">
-                  <Users size={20} />
+        {activeTab === 'WAITING' && (
+          <>
+            {waitingQueue.map((p, idx) => (
+              <div key={`${p.queueDocId || p.id || 'patient'}-waiting-${idx}`} className="bg-white rounded-[40px] border border-slate-200 p-8 hover:border-blue-500 hover:shadow-2xl transition-all group relative overflow-hidden">
+                <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform">
+                  <Clock size={100} />
                 </div>
-                <span className="text-[10px] font-black text-slate-400 font-mono tracking-widest uppercase">{p.id}</span>
-              </div>
-              <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${getPriorityColor(p.priority || 'normal')}`}>
-                {p.priority || 'NORMAL'}
-              </div>
-            </div>
-
-            <h3 className="text-2xl font-black mb-1 text-slate-900">{p.lastName} {p.firstName}</h3>
-            <p className="text-sm text-slate-500 font-medium mb-4">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
-
-            <div className="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-100">
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Motif & Aperçu</p>
-              <p className="text-xs font-bold text-slate-700 mb-2">{p.motif}</p>
-              <div className="flex flex-wrap gap-2">
-                {p.allergies && p.allergies.length > 0 && (
-                  <span className="bg-rose-50 text-rose-600 px-2 py-1 rounded-lg text-[9px] font-black uppercase border border-rose-100 flex items-center gap-1">
-                    <AlertCircle size={10} /> Allergies
-                  </span>
-                )}
-                <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-[9px] font-black uppercase border border-blue-100">
-                  Dernier passage: 12/03
-                </span>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3 mb-8">
-              <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
-                <p className="text-[8px] font-black text-slate-400 uppercase mb-1">T°</p>
-                <p className="text-sm font-black text-rose-600">{p.vitals?.temp || '--'}°C</p>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
-                <p className="text-[8px] font-black text-slate-400 uppercase mb-1">TA</p>
-                <p className="text-sm font-black text-slate-900">{p.vitals?.bp || '--'}</p>
-              </div>
-              <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
-                <p className="text-[8px] font-black text-slate-400 uppercase mb-1">SPO2</p>
-                <p className="text-sm font-black text-emerald-600">{p.vitals?.spo2 || '--'}%</p>
-              </div>
-            </div>
-
-            <div className="flex flex-col gap-3 pt-6 border-t border-slate-50">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${getPriorityDot(p.priority || 'normal')} animate-pulse`}></div>
-                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Arrivé à {p.time}</span>
+                
+                <div className="flex justify-between items-start mb-6">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors">
+                      <Users size={20} />
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black text-slate-400 font-mono tracking-widest uppercase">{p.id}</span>
+                      {p.hospitalizedOrigin && (
+                        <span className="text-[9px] font-black text-blue-600 uppercase tracking-tighter bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 mt-0.5 flex items-center gap-1">
+                          <Activity size={10} /> Hospitalisé ({p.hospitalizedOrigin})
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${getPriorityColor(p.priority || 'normal')}`}>
+                    {p.priority || 'NORMAL'}
+                  </div>
                 </div>
-                <div className="flex gap-2">
+
+                <h3 className="text-2xl font-black mb-1 text-slate-900">{p.lastName} {p.firstName}</h3>
+                <p className="text-sm text-slate-500 font-medium mb-4">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
+
+                <div className="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-100">
+                  <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Motif & Aperçu</p>
+                  <p className="text-xs font-bold text-slate-700 mb-2">{p.motifLabel || p.motif}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {p.allergies && p.allergies.length > 0 && (
+                      <span className="bg-rose-50 text-rose-600 px-2 py-1 rounded-lg text-[9px] font-black uppercase border border-rose-100 flex items-center gap-1">
+                        <AlertCircle size={10} /> Allergies
+                      </span>
+                    )}
+                    <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-[9px] font-black uppercase border border-blue-100">
+                      Dernier passage: 12/03
+                    </span>
+                  </div>
+                </div>
+
+                {/* Financial & Triage status badges */}
+                {(() => {
+                  const isPaid = checkPatientIsPaid(p);
+                  const isEmergency = p.priority === 'critique' || p.priority === 'urgent';
+
+                  return (
+                    <>
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {isPaid ? (
+                          <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
+                            <Check size={11} className="text-emerald-600" />
+                            <span>Ticket Réglé (Caisse)</span>
+                          </span>
+                        ) : isEmergency ? (
+                          <span className="bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm animate-pulse">
+                            <Zap size={11} className="text-rose-600" />
+                            <span>Urgence Vitale (Priorité Médicale)</span>
+                          </span>
+                        ) : (
+                          <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm">
+                            <AlertTriangle size={11} className="text-amber-600" />
+                            <span>Ticket Non Encaissé (Règlement Différé)</span>
+                          </span>
+                        )}
+
+                        {p.status === 'waiting_triage' && (
+                          <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1.5">
+                            <Activity size={11} className="text-indigo-600" />
+                            <span>En attente de Triage Infirmier</span>
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3 mb-8">
+                        <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
+                          <p className="text-[8px] font-black text-slate-400 uppercase mb-1">T°</p>
+                          <p className="text-sm font-black text-rose-600">{p.vitals?.temp || '--'}°C</p>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
+                          <p className="text-[8px] font-black text-slate-400 uppercase mb-1">TA</p>
+                          <p className="text-sm font-black text-slate-900">{p.vitals?.bp || (p.vitals?.bpSys && p.vitals?.bpDia ? `${p.vitals.bpSys}/${p.vitals.bpDia}` : '--')}</p>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
+                          <p className="text-[8px] font-black text-slate-400 uppercase mb-1">SPO2</p>
+                          <p className="text-sm font-black text-emerald-600">{p.vitals?.spo2 || '--'}%</p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-3 pt-6 border-t border-slate-50">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${getPriorityDot(p.priority || 'normal')} animate-pulse`}></div>
+                            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Arrivé à {p.time}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => setSummaryPatient(p)}
+                              className="p-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all cursor-pointer" 
+                              title="Voir résumé"
+                            >
+                              <Eye size={16} />
+                            </button>
+                            <button 
+                              onClick={() => setReorientPatient(p)}
+                              className="p-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all cursor-pointer" 
+                              title="Réorienter"
+                            >
+                              <RefreshCw size={16} />
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setCancelPatient(p);
+                                setCancelReason('');
+                                setCancelError('');
+                              }}
+                              className="p-2 bg-rose-50 text-rose-600 rounded-xl hover:bg-rose-600 hover:text-white transition-all cursor-pointer" 
+                              title="Annuler"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                        </div>
+                        
+                        {/* Financial Gatekeeper: Disabled if unpaid, unless Emergency (Critique/Urgent) */}
+                        {isPaid ? (
+                          <button 
+                            onClick={() => onStartConsultation(p)}
+                            className="w-full bg-slate-900 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-blue-600/20 cursor-pointer"
+                          >
+                            <Stethoscope size={14} />
+                            <span>Démarrer consultation</span>
+                            <ChevronRight size={14} />
+                          </button>
+                        ) : isEmergency ? (
+                          <button 
+                            onClick={() => onStartConsultation(p)}
+                            className="w-full bg-gradient-to-r from-rose-600 to-amber-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:brightness-110 transition-all flex items-center justify-center gap-2 shadow-lg shadow-rose-600/25 cursor-pointer"
+                          >
+                            <Zap size={14} className="animate-pulse" />
+                            <span>Prise en charge Immédiate (Urgence)</span>
+                            <ChevronRight size={14} />
+                          </button>
+                        ) : (
+                          <button 
+                            onClick={() => onStartConsultation(p)}
+                            className="w-full bg-slate-900 hover:bg-amber-600 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-amber-600/20 cursor-pointer"
+                            title="Ouvrir la consultation (ticket en attente d'encaissement à la Caisse)"
+                          >
+                            <AlertTriangle size={14} className="text-amber-400" />
+                            <span>Démarrer Consultation (Non Encaissé)</span>
+                            <ChevronRight size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            ))}
+
+            {waitingQueue.length === 0 && (
+              <div className="col-span-full py-32 text-center bg-slate-100 rounded-[50px] border-4 border-dashed border-slate-200">
+                <Users size={64} className="mx-auto text-slate-300 mb-6 opacity-20" />
+                <h3 className="text-xl font-black text-slate-400 uppercase tracking-widest">Aucun patient en attente</h3>
+                <p className="text-slate-500 mt-2 font-medium italic">Reposez-vous docteur, la file est vide.</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === 'IN_PROGRESS' && (
+          <>
+            {inProgressQueue.map((p, idx) => (
+              <div key={`${p.queueDocId || p.appointmentId || p.id || 'patient'}-inprog-${idx}`} className="bg-white rounded-[40px] border border-slate-200 p-8 hover:border-blue-500 hover:shadow-2xl transition-all group relative overflow-hidden flex flex-col justify-between">
+                <div>
+                  <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform">
+                    <Activity size={100} />
+                  </div>
+                  
+                  <div className="flex justify-between items-start mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors">
+                        <Users size={20} />
+                      </div>
+                      <span className="text-[10px] font-black text-slate-400 font-mono tracking-widest uppercase">{p.id}</span>
+                    </div>
+                    <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${
+                      p.status === 'ready_for_discharge' 
+                        ? 'bg-emerald-100 text-emerald-600 border-emerald-200' 
+                        : 'bg-blue-100 text-blue-600 border-blue-200'
+                    }`}>
+                      {p.status === 'ready_for_discharge' ? 'Prêt pour sortie' : 'En consultation'}
+                    </div>
+                  </div>
+
+                  <h3 className="text-2xl font-black mb-1 text-slate-900">{p.lastName} {p.firstName}</h3>
+                  <p className="text-sm text-slate-500 font-medium mb-4">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
+
+                  <div className="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Motif d'admission</p>
+                    <p className="text-xs font-bold text-slate-700 mb-2">{p.motifLabel || p.motif}</p>
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border ${
+                        p.status === 'ready_for_discharge'
+                          ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
+                          : 'bg-blue-50 border-blue-100 text-blue-600'
+                      }`}>
+                        {p.status === 'ready_for_discharge' ? '✓ Diagnostic & Ordonnance Établis' : '● Dossier en cours de saisie'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3 mb-8">
+                    <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">T°</p>
+                      <p className="text-sm font-black text-rose-600">{p.vitals?.temp || '--'}°C</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">TA</p>
+                      <p className="text-sm font-black text-slate-900">{p.vitals?.bp || '--'}</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">SPO2</p>
+                      <p className="text-sm font-black text-emerald-600">{p.vitals?.spo2 || '--'}%</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-slate-100">
+                  {p.status === 'ready_for_discharge' ? (
+                    <button 
+                      onClick={() => onManageDischarge && onManageDischarge(p)}
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-emerald-600/15 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Check size={14} /> Gérer la sortie (Décharge) <ChevronRight size={14} />
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => onResumeConsultation && onResumeConsultation(p)}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-blue-600/15 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <Activity size={14} /> Reprendre Consultation <ChevronRight size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {inProgressQueue.length === 0 && (
+              <div className="col-span-full py-32 text-center bg-slate-100 rounded-[50px] border-4 border-dashed border-slate-200">
+                <Activity size={64} className="mx-auto text-slate-300 mb-6 opacity-20 animate-pulse" />
+                <h3 className="text-xl font-black text-slate-400 uppercase tracking-widest">Aucune consultation en cours</h3>
+                <p className="text-slate-500 font-medium italic mt-2">Tous les patients appelés ont été libérés.</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {activeTab === 'HOSPITALIZED' && (
+          <>
+            {hospitalizedQueue.map((p, idx) => (
+              <div key={`${p.id || 'hosp'}-hosp-${idx}`} className="bg-white rounded-[40px] border border-slate-200 p-8 hover:border-blue-500 hover:shadow-2xl transition-all group relative overflow-hidden flex flex-col justify-between">
+                <div>
+                  <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:scale-110 transition-transform">
+                    <BedDouble size={100} />
+                  </div>
+                  
+                  <div className="flex justify-between items-start mb-6">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors">
+                        <Users size={20} />
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-slate-400 font-mono tracking-widest uppercase">{p.id}</span>
+                        <span className="text-[9px] font-black text-blue-600 uppercase tracking-tighter bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 mt-0.5 flex items-center gap-1">
+                          <Activity size={10} /> {p.hospitalizedOrigin}
+                        </span>
+                      </div>
+                    </div>
+                    <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest border ${getPriorityColor(p.priority || 'normal')}`}>
+                      {p.priority || 'NORMAL'}
+                    </div>
+                  </div>
+
+                  <h3 className="text-2xl font-black mb-1 text-slate-900">{p.lastName} {p.firstName}</h3>
+                  <p className="text-sm text-slate-500 font-medium mb-4">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
+
+                  <div className="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-2">Motif d'hospitalisation</p>
+                    <p className="text-xs font-bold text-slate-700 mb-2 truncate">{p.motif}</p>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-[9px] font-black uppercase border border-blue-100">
+                        Admis le: {p.time}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-3 mb-8">
+                    <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">T°</p>
+                      <p className="text-sm font-black text-rose-600">{p.vitals?.temp || '--'}°C</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">TA</p>
+                      <p className="text-sm font-black text-slate-900">{p.vitals?.bp || '--'}</p>
+                    </div>
+                    <div className="bg-slate-50 p-3 rounded-2xl text-center border border-slate-100">
+                      <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Pouls</p>
+                      <p className="text-sm font-black text-emerald-600">{p.vitals?.pulse || '--'} bpm</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-slate-100">
                   <button 
-                    onClick={() => setSummaryPatient(p)}
-                    className="p-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all cursor-pointer" 
-                    title="Voir résumé"
+                    onClick={() => onStartConsultation(p)}
+                    className="w-full bg-slate-900 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-blue-600/20"
                   >
-                    <Eye size={16} />
-                  </button>
-                  <button 
-                    onClick={() => setReorientPatient(p)}
-                    className="p-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all cursor-pointer" 
-                    title="Réorienter"
-                  >
-                    <RefreshCw size={16} />
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setCancelPatient(p);
-                      setCancelReason('');
-                      setCancelError('');
-                    }}
-                    className="p-2 bg-rose-50 text-rose-600 rounded-xl hover:bg-rose-600 hover:text-white transition-all cursor-pointer" 
-                    title="Annuler"
-                  >
-                    <X size={16} />
+                    Visite médicale <ChevronRight size={14} />
                   </button>
                 </div>
               </div>
-              <button 
-                onClick={() => onStartConsultation(p)}
-                className="w-full bg-slate-900 text-white px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-blue-600/20"
-              >
-                Démarrer consultation <ChevronRight size={14} />
-              </button>
-            </div>
-          </div>
-        ))}
+            ))}
 
-        {waitingQueue.length === 0 && (
-          <div className="col-span-full py-32 text-center bg-slate-100 rounded-[50px] border-4 border-dashed border-slate-200">
-            <Users size={64} className="mx-auto text-slate-300 mb-6 opacity-20" />
-            <h3 className="text-xl font-black text-slate-400 uppercase tracking-widest">Aucun patient en attente</h3>
-            <p className="text-slate-500 mt-2 font-medium italic">Reposez-vous docteur, la file est vide.</p>
-          </div>
+            {hospitalizedQueue.length === 0 && (
+              <div className="col-span-full py-32 text-center bg-slate-100 rounded-[50px] border-4 border-dashed border-slate-200">
+                <BedDouble size={64} className="mx-auto text-slate-300 mb-6 opacity-20" />
+                <h3 className="text-xl font-black text-slate-400 uppercase tracking-widest">Aucun patient hospitalisé</h3>
+                <p className="text-slate-500 font-medium italic mt-2">Le service est actuellement vide.</p>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -256,9 +514,7 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
               </button>
 
               <div className="flex gap-6 items-center mb-8 pb-6 border-b border-slate-100">
-                <div className="w-16 h-16 bg-blue-50 border-2 border-blue-200 rounded-[28px] overflow-hidden flex items-center justify-center text-blue-600 text-xl font-bold">
-                  <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${summaryPatient.lastName}`} alt="Patient" referrerPolicy="no-referrer" />
-                </div>
+                <AvatarPlaceholder size={64} iconSize={32} className="rounded-[28px] border-2 border-slate-200 dark:border-zinc-800" alt={`${summaryPatient.lastName} ${summaryPatient.firstName}`} />
                 <div>
                   <div className="flex items-center gap-3">
                     <h3 className="text-2xl font-black text-slate-900">{summaryPatient.lastName} {summaryPatient.firstName}</h3>
@@ -443,19 +699,19 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
         <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-300">
           <form 
             onSubmit={handleCancelSubmit}
-            className="bg-white rounded-[40px] border border-slate-200 w-full max-w-sm p-10 shadow-2xl relative"
+            className="bg-white rounded-[40px] border border-slate-200 w-full max-w-md p-10 shadow-2xl relative"
           >
             <button 
               type="button"
               onClick={() => setCancelPatient(null)} 
-              className="absolute top-8 right-8 p-3 bg-slate-100 text-slate-500 rounded-2xl hover:bg-rose-50 hover:text-rose-600 transition-all"
+              className="absolute top-8 right-8 p-3 bg-slate-100 text-slate-500 rounded-2xl hover:bg-rose-50 hover:text-rose-600 transition-all cursor-pointer"
             >
               <X size={18} />
             </button>
 
-            <h3 className="text-2xl font-black text-slate-900 mb-2">Annuler la file</h3>
+            <h3 className="text-2xl font-black text-slate-900 mb-2">Retirer de la file</h3>
             <p className="text-slate-500 text-sm mb-6 font-medium italic">
-              Vous allez retirer {cancelPatient.lastName} {cancelPatient.firstName} de la file d'attente.
+              Vous allez retirer {cancelPatient.lastName} {cancelPatient.firstName} de la file d'attente médicale.
             </p>
 
             {cancelError && (
@@ -464,16 +720,43 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
               </div>
             )}
 
+            {/* Quick Reasons Grid */}
             <div className="mb-6">
-              <label className="text-[10px] font-black uppercase text-slate-500 tracking-wider block mb-2">Motif d'annulation obligatoire</label>
+              <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-2">Motifs de retrait rapides</label>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                {[
+                  "Patient parti spontanément",
+                  "Erreur d'aiguillage",
+                  "Déjà consulté",
+                  "Transfert de service"
+                ].map((reason) => (
+                  <button
+                    key={reason}
+                    type="button"
+                    onClick={() => {
+                      setCancelReason(reason);
+                      setCancelError('');
+                    }}
+                    className={`p-3 rounded-xl text-left border text-xs font-bold transition-all ${
+                      cancelReason === reason 
+                        ? 'bg-rose-50 text-rose-600 border-rose-300 shadow-sm' 
+                        : 'bg-slate-50 text-slate-600 border-slate-100 hover:border-slate-200 hover:bg-slate-100/50'
+                    }`}
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+
+              <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-2">Ou précisez le motif personnalisé</label>
               <textarea
                 value={cancelReason}
                 onChange={(e) => {
                   setCancelReason(e.target.value);
                   if (e.target.value.trim()) setCancelError('');
                 }}
-                placeholder="Ex. Erreur d'aiguillage, Patient parti spontanément, Urgent ..."
-                className="w-full text-sm p-4 border border-slate-200 rounded-2xl outline-none focus:border-rose-500 h-28 resize-none text-slate-800 font-bold"
+                placeholder="Ex. Dossier incomplet, consultation reportée..."
+                className="w-full text-sm p-4 border border-slate-200 rounded-2xl outline-none focus:border-rose-500 h-24 resize-none text-slate-800 font-bold"
               />
             </div>
 
@@ -481,13 +764,13 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
               <button
                 type="button"
                 onClick={() => setCancelPatient(null)}
-                className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-colors"
+                className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-colors cursor-pointer"
               >
                 Retour
               </button>
               <button
                 type="submit"
-                className="flex-1 py-4 bg-rose-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/20"
+                className="flex-1 py-4 bg-rose-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-rose-700 transition-colors shadow-lg shadow-rose-600/20 cursor-pointer"
               >
                 Confirmer
               </button>

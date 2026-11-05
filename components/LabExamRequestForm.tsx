@@ -1,7 +1,9 @@
-import React, { useState, useMemo } from 'react';
-import { X, Search, Filter, AlertCircle, FileText, CheckCircle2, Clock, Activity, Send, Beaker, Star, BrainCircuit } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { X, Search, Filter, AlertCircle, FileText, CheckCircle2, Clock, Activity, Send, Beaker, Star, Loader2 } from 'lucide-react';
 import { MedicalAct, LabExamRequest } from '../types';
-import AIAssistantTab from './AIAssistantTab';
+import { useSettings } from '../hooks/useSettings';
+import { db } from '../src/firebase';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 
 interface LabExamRequestFormProps {
   patientId: string;
@@ -47,45 +49,52 @@ const LabExamRequestForm: React.FC<LabExamRequestFormProps> = ({
   onClose,
   onSave
 }) => {
+  const { establishment } = useSettings();
+  const currency = establishment?.currency || 'FCFA';
+
   const [motif, setMotif] = useState('');
   const [diagnostic, setDiagnostic] = useState('');
   const [note, setNote] = useState('');
   const [isUrgent, setIsUrgent] = useState(false);
   const [comments, setComments] = useState('');
-  
+  const [localSubmitting, setLocalSubmitting] = useState(false);
+  const [acts, setActs] = useState<MedicalAct[]>([]);
+  const [isLoadingActs, setIsLoadingActs] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+
+  useEffect(() => {
+    const q = collection(db, 'medical_acts');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MedicalAct));
+      const labActs = list.filter(act => 
+        !act.servicePrincipal || 
+        act.servicePrincipal === 'laboratoire' || 
+        act.type === 'examen' || 
+        act.category === 'Laboratoire' ||
+        EXAM_CATEGORIES.includes(act.category || '')
+      );
+      setActs(labActs.length > 0 ? labActs : list);
+      setIsLoadingActs(false);
+    });
+    return () => unsubscribe();
+  }, []);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedExams, setSelectedExams] = useState<Set<string>>(new Set());
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set(EXAM_CATEGORIES));
-  const [showAI, setShowAI] = useState(false);
 
-  // Fetch acts from localStorage
-  const acts: MedicalAct[] = useMemo(() => {
-    const saved = localStorage.getItem('hospital_acts');
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      // Filter for lab exams
-      return parsed.filter((a: MedicalAct) => 
-        (a.type === 'examen' || a.category?.toLowerCase().includes('labo') || a.category?.toLowerCase().includes('analyse') || a.servicePrincipal === 'laboratoire')
-      );
-    }
-    // Fallback mock data if empty
-    return [
-      { id: 'l1', name: 'NFS (Numération Formule Sanguine)', price: 5000, category: 'Hématologie', type: 'examen', servicePrincipal: 'laboratoire' },
-      { id: 'l2', name: 'Goutte épaisse', price: 2000, category: 'Parasitologie', type: 'examen', servicePrincipal: 'laboratoire' },
-      { id: 'l3', name: 'Glycémie à jeun', price: 1500, category: 'Biochimie', type: 'examen', servicePrincipal: 'laboratoire' },
-      { id: 'l4', name: 'Créatinine', price: 3000, category: 'Biochimie', type: 'examen', servicePrincipal: 'laboratoire' },
-      { id: 'l5', name: 'Groupe sanguin + Rhésus', price: 4000, category: 'Hématologie', type: 'examen', servicePrincipal: 'laboratoire' },
-      { id: 'l6', name: 'ECBU', price: 6000, category: 'Urines', type: 'examen', servicePrincipal: 'laboratoire' },
-      { id: 'l7', name: 'TDR Paludisme', price: 1500, category: 'Parasitologie', type: 'examen', servicePrincipal: 'laboratoire' },
-      { id: 'l8', name: 'Ag HBs', price: 5000, category: 'Sérologie', type: 'examen', servicePrincipal: 'laboratoire' },
-    ];
-  }, []);
+  const normalizeText = (text: string) => {
+    if (!text) return '';
+    return text
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+  };
 
   const filteredActs = useMemo(() => {
+    const normalizedQuery = normalizeText(searchQuery);
     return acts.filter(act => {
-      const matchesSearch = act.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                            act.codeInterne?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch = normalizeText(act.name).includes(normalizedQuery) || 
+                            normalizeText(act.codeInterne || '').includes(normalizedQuery);
       const matchesCategory = selectedCategory ? act.category === selectedCategory : true;
       return matchesSearch && matchesCategory;
     });
@@ -125,12 +134,24 @@ const LabExamRequestForm: React.FC<LabExamRequestFormProps> = ({
 
   const applyPack = (pack: typeof EXAM_PACKS[0]) => {
     const newSelected = new Set(selectedExams);
+    const newExpanded = new Set(expandedCategories);
     acts.forEach(act => {
-      if (pack.keywords.some(kw => act.name.toLowerCase().includes(kw.toLowerCase()))) {
+      const normalizedActName = normalizeText(act.name);
+      const isMatch = pack.keywords.some(kw => {
+        const normalizedKw = normalizeText(kw);
+        return normalizedActName.includes(normalizedKw) || normalizedKw.includes(normalizedActName);
+      });
+      if (isMatch) {
         newSelected.add(act.id);
+        if (act.category) {
+          newExpanded.add(act.category);
+        } else {
+          newExpanded.add('Autres');
+        }
       }
     });
     setSelectedExams(newSelected);
+    setExpandedCategories(newExpanded);
   };
 
   const totalAmount = useMemo(() => {
@@ -140,41 +161,49 @@ const LabExamRequestForm: React.FC<LabExamRequestFormProps> = ({
     }, 0);
   }, [selectedExams, acts]);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedExams.size === 0) {
       alert("Veuillez sélectionner au moins un examen.");
       return;
     }
+    if (localSubmitting) return;
+    setLocalSubmitting(true);
     
-    const selectedExamDetails = Array.from(selectedExams).map(id => {
-      const act = acts.find(a => a.id === id)!;
-      return {
-        actId: act.id,
-        name: act.name,
-        price: act.price,
-        category: act.category
-      };
-    });
+    try {
+      const selectedExamDetails = Array.from(selectedExams).map(id => {
+        const act = acts.find(a => a.id === id)!;
+        return {
+          actId: act.id,
+          name: act.name,
+          price: act.price,
+          category: act.category
+        };
+      });
 
-    onSave({
-      patientId,
-      patientName,
-      patientAge: parseInt(patientAge) || 0,
-      patientGender: patientSex,
-      prescriberId,
-      prescriberName,
-      department: requestingService,
-      priority: isUrgent ? 'urgent' : 'normal',
-      clinicalContext: {
-        motif,
-        diagnostic,
-        note
-      },
-      exams: selectedExamDetails,
-      totalAmount,
-      comments
-    });
+      await onSave({
+        patientId,
+        patientName,
+        patientAge: parseInt(patientAge) || 0,
+        patientGender: patientSex,
+        prescriberId,
+        prescriberName,
+        department: requestingService,
+        priority: isUrgent ? 'urgent' : 'normal',
+        clinicalContext: {
+          motif,
+          diagnostic,
+          note
+        },
+        exams: selectedExamDetails,
+        totalAmount,
+        comments
+      });
+    } catch (error) {
+      console.error('Error submitting lab request:', error);
+    } finally {
+      setLocalSubmitting(false);
+    }
   };
 
   return (
@@ -195,32 +224,11 @@ const LabExamRequestForm: React.FC<LabExamRequestFormProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setShowAI(!showAI)}
-              className={`px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors ${showAI ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600'}`}
-            >
-              <BrainCircuit size={18} />
-              Assistant IA
-            </button>
             <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 rounded-xl transition-colors">
               <X size={24} />
             </button>
           </div>
         </div>
-
-        {showAI && (
-          <div className="p-6 bg-slate-50 border-b border-slate-200 shrink-0 overflow-y-auto max-h-[40vh]">
-            <AIAssistantTab 
-              context="LAB_EXAM"
-              patientId={patientId}
-              data={{
-                exams: Array.from(selectedExams).map(id => acts.find(a => a.id === id)),
-                clinicalContext: { indication: motif, suspectedDiagnosis: diagnostic }
-              }}
-              mode="ADVANCED"
-            />
-          </div>
-        )}
 
         <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
           {/* Left Column: Context & Patient */}
@@ -396,7 +404,7 @@ const LabExamRequestForm: React.FC<LabExamRequestFormProps> = ({
                                 {act.codeInterne && <p className="text-xs text-slate-500">{act.codeInterne}</p>}
                               </div>
                             </div>
-                            <span className="text-sm font-black text-slate-600">{act.price.toLocaleString()} FCFA</span>
+                            <span className="text-sm font-black text-slate-600">{(act.price || 0).toLocaleString()} {currency}</span>
                           </label>
                         ))}
                       </div>
@@ -418,35 +426,53 @@ const LabExamRequestForm: React.FC<LabExamRequestFormProps> = ({
         {/* Footer */}
         <div className="p-6 border-t border-slate-100 bg-white shrink-0 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div className="bg-slate-100 px-4 py-2 rounded-xl">
+            <div className="bg-slate-100 px-4 py-2 rounded-xl flex items-center gap-3">
               <span className="text-sm text-slate-500 font-medium">Sélectionnés : </span>
               <span className="text-lg font-black text-slate-900">{selectedExams.size}</span>
+              {selectedExams.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedExams(new Set())}
+                  className="px-2 py-1 text-[10px] font-black uppercase tracking-widest bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg transition-colors border border-rose-100"
+                >
+                  Effacer
+                </button>
+              )}
             </div>
             <div className="bg-blue-50 px-4 py-2 rounded-xl border border-blue-100">
               <span className="text-sm text-blue-600 font-medium">Total estimé : </span>
-              <span className="text-lg font-black text-blue-700">{totalAmount.toLocaleString()} FCFA</span>
+              <span className="text-lg font-black text-blue-700">{(totalAmount || 0).toLocaleString()} {currency}</span>
             </div>
           </div>
           <div className="flex gap-3">
             <button 
               type="button"
               onClick={onClose}
-              className="px-6 py-3 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors"
+              disabled={localSubmitting}
+              className="px-6 py-3 rounded-xl font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Annuler
             </button>
             <button 
               onClick={handleSubmit}
-              disabled={selectedExams.size === 0}
+              disabled={selectedExams.size === 0 || localSubmitting}
               className={`px-6 py-3 rounded-xl font-bold text-white transition-colors flex items-center gap-2 shadow-lg ${
-                selectedExams.size === 0 
+                selectedExams.size === 0 || localSubmitting
                   ? 'bg-slate-300 cursor-not-allowed shadow-none' 
                   : isUrgent 
                     ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-600/20' 
                     : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/20'
               }`}
             >
-              <Send size={18} /> {isUrgent ? 'Prescrire (URGENT)' : 'Prescrire les examens'}
+              {localSubmitting ? (
+                <>
+                  <Loader2 size={18} className="animate-spin" /> Envoi en cours...
+                </>
+              ) : (
+                <>
+                  <Send size={18} /> {isUrgent ? 'Prescrire (URGENT)' : 'Prescrire les examens'}
+                </>
+              )}
             </button>
           </div>
         </div>

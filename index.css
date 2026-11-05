@@ -1,0 +1,213 @@
+:root {
+  --theme-50: #f0f9ff;
+  --theme-100: #e0f2fe;
+  --theme-200: #bae6fd;
+  --theme-300: #7dd3fc;
+  --theme-400: #38bdf8;
+  --theme-500: #0ea5e9;
+  --theme-600: #0284c7;
+  --theme-700: #0369a1;
+  --theme-800: #075985;
+  --theme-900: #0c4a6e;
+  --theme-950: #082f49;
+}
+
+body {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+@media (min-width: 1536px) {
+  body {
+    font-size: 15px;
+  }
+}
+
+h1, h2, h3, h4, h5, h6, .font-heading {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* True Black Dark Mode System */
+html.dark {
+  color-scheme: dark;
+}
+
+html.dark body {
+  background-color: #000000 !important;
+  color: #e4e4e7 !important; /* zinc-200 */
+}
+
+/* Form Ergonomic Focus Rings & Inputs */
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+  border-color: #3b82f6 !important;
+}
+
+html.dark input:focus, 
+html.dark select:focus, 
+html.dark textarea:focus {
+  outline: none;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.35) !important;
+  border-color: #3b82f6 !important;
+}
+
+/* Shiny Border & True Black Surfaces */
+html.dark .medical-card,
+html.dark .card-true-black {
+  background-color: #111111;
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+
+html.dark .medical-card:hover,
+html.dark .card-true-black:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.12);
+}
+
+/* Medical Data Tables: Sticky Headers & Zebra Striping */
+.table-medical {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.table-medical th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: #f8fafc;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+  color: #64748b;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+html.dark .table-medical th {
+  background-color: #0d0d0d;
+  color: #a1a1aa;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.table-medical tbody tr {
+  transition: background-color 0.15s ease-in-out;
+}
+
+.table-medical tbody tr:nth-child(even) {
+  background-color: #f8fafc;
+}
+
+html.dark .table-medical tbody tr:nth-child(even) {
+  background-color: #080808;
+}
+
+.table-medical tbody tr:hover {
+  background-color: #f1f5f9;
+}
+
+html.dark .table-medical tbody tr:hover {
+  background-color: #141414;
+}
+
+/* Soft Cards */
+.medical-card {
+  background-color: #ffffff;
+  border-radius: 1.5rem;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.25);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.45);
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Animations */
+@keyframes shine {
+  0% { transform: translateX(-150%) skewX(-15deg); }
+  100% { transform: translateX(150%) skewX(-15deg); }
+}
+
+.animate-shine {
+  animation: shine 3s infinite;
+}
+
+/* Print Media Queries for Thermal Receipt / Orientation Sheet */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide all non-printable UI elements */
+  header, nav, aside, footer, button, .no-print, [role="navigation"] {
+    display: none !important;
+  }
+
+  /* Target ticket modal specifically */
+  .fixed.inset-0 {
+    position: static !important;
+    background: none !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    display: block !important;
+  }
+
+  .ticket-print-wrapper {
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    width: 100% !important;
+    max-width: 80mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  .ticket-scroll-area {
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  .ticket-actions-bar {
+    display: none !important;
+  }
+
+  @page {
+    size: 80mm auto;
+    margin: 3mm;
+  }
+}

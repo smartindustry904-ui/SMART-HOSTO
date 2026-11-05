@@ -1,10 +1,11 @@
 
 import React from 'react';
 import { Users, ClipboardList, Activity, History, Calendar, LogOut, Settings, ChevronRight } from 'lucide-react';
+import { Avatar } from '../../components/common/Avatar';
 
 interface DoctorSidebarProps {
-  activeMenu: 'WAITING_ROOM' | 'CONSULTATION' | 'FOLLOW_UP' | 'HISTORY' | 'APPOINTMENTS';
-  setActiveMenu: (menu: 'WAITING_ROOM' | 'CONSULTATION' | 'FOLLOW_UP' | 'HISTORY' | 'APPOINTMENTS') => void;
+  activeMenu: 'WAITING_ROOM' | 'CONSULTATION' | 'HISTORY' | 'APPOINTMENTS';
+  setActiveMenu: (menu: 'WAITING_ROOM' | 'CONSULTATION' | 'HISTORY' | 'APPOINTMENTS') => void;
   waitingCount: number;
   doctorName: string;
 }
@@ -13,7 +14,6 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({ activeMenu, setActiveMenu
   const menuItems = [
     { id: 'WAITING_ROOM', label: 'Salle d\'attente', icon: Users, color: 'emerald', badge: waitingCount },
     { id: 'CONSULTATION', label: 'Consultation', icon: ClipboardList, color: 'blue' },
-    { id: 'FOLLOW_UP', label: 'Suivi Patients', icon: Activity, color: 'amber' },
     { id: 'HISTORY', label: 'Historique', icon: History, color: 'purple' },
     { id: 'APPOINTMENTS', label: 'Rendez-vous', icon: Calendar, color: 'orange' },
   ];
@@ -71,9 +71,7 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({ activeMenu, setActiveMenu
       <div className="mt-auto pt-8 border-t border-slate-100">
         <div className="bg-slate-50 rounded-[32px] p-6 mb-6 border border-slate-100">
           <div className="flex items-center gap-4 mb-4">
-            <div className="w-12 h-12 bg-white rounded-2xl border-2 border-slate-200 flex items-center justify-center text-slate-400 font-black text-lg overflow-hidden">
-              <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${doctorName}`} alt="Doctor" referrerPolicy="no-referrer" />
-            </div>
+            <Avatar user={{ name: doctorName }} size={48} roundedClassName="rounded-2xl" alt={doctorName} />
             <div>
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Connecté en tant que</p>
               <p className="text-sm font-black text-slate-900 truncate w-32">{doctorName}</p>

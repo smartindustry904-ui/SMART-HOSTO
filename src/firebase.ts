@@ -1,12 +1,40 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, getDocFromServer } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase SDK
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth();
+export const storage = getStorage(app);
+
+/**
+ * Uploads personnel profile photo to Firebase Storage with resilient fallback
+ */
+export async function uploadProfilePhotoToStorage(userId: string, file: File): Promise<string> {
+  try {
+    const fileExt = file.name.split('.').pop() || 'jpg';
+    const storageRef = ref(storage, `personnel_avatars/${userId || 'user'}_${Date.now()}.${fileExt}`);
+    const snapshot = await uploadBytes(storageRef, file);
+    return await getDownloadURL(snapshot.ref);
+  } catch (storageErr) {
+    console.warn("Direct Firebase Storage upload unavailable, using optimized data URL encoding:", storageErr);
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+        } else {
+          reject(new Error("Failed to process file"));
+        }
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  }
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -34,6 +62,28 @@ export interface FirestoreErrorInfo {
       photoUrl: string | null;
     }[];
   }
+}
+
+export function sanitizeData(data: any): any {
+  if (data === null) return null;
+  if (data === undefined) return undefined;
+
+  if (Array.isArray(data)) {
+    return data.map(item => sanitizeData(item)).filter(item => item !== undefined);
+  }
+
+  if (typeof data === 'object' && !(data instanceof Date)) {
+    const sanitized: any = {};
+    Object.keys(data).forEach(key => {
+      const value = sanitizeData(data[key]);
+      if (value !== undefined) {
+        sanitized[key] = value;
+      }
+    });
+    return sanitized;
+  }
+
+  return data;
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {

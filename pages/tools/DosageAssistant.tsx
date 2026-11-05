@@ -52,7 +52,7 @@ const DosageAssistant: React.FC<DosageAssistantProps> = ({ patient, medications,
     let unitsPerIntake = 0;
     
     // Simple parsing for demo purposes
-    const dosageMatch = selectedMed.dosage.match(/(\d+)\s*(mg|g|mcg)/i);
+    const dosageMatch = (selectedMed.dosage || selectedMed.dosageValeur || '').match(/(\d+)\s*(mg|g|mcg)/i);
     if (dosageMatch) {
       const medDose = parseFloat(dosageMatch[1]);
       const medUnit = dosageMatch[2].toLowerCase();

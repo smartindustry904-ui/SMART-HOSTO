@@ -84,22 +84,6 @@ export const DEFAULT_TOOLS: Tool[] = [
     mode: 'SIMPLE' // Using mode for OMS standard vs OMS + protocole local
   },
   {
-    id: 'tool_6',
-    name: 'Assistant IA – Agent obstétrical intelligent',
-    code: 'ASSISTANT_IA',
-    description: 'Agent intelligent central analysant les données cliniques (CPN, partogramme, traitements) pour fournir des résumés, des alertes, des projections et des suggestions cliniques.',
-    moduleParent: 'Transversal',
-    status: 'ACTIVE',
-    criticality: 'HIGH',
-    visibility: 'VISIBLE',
-    authorizedRoles: [Role.ADMIN, Role.MATERNITY, Role.DOCTOR],
-    dependencies: ['Maternité', 'Hospitalisation', 'Dossier Patient'],
-    impacts: ['Maternité', 'Hospitalisation'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    mode: 'SIMPLE'
-  },
-  {
     id: 'tool_7',
     name: 'Bulletin d’examens numériques',
     code: 'BULLETIN_EXAMENS',
@@ -111,21 +95,6 @@ export const DEFAULT_TOOLS: Tool[] = [
     authorizedRoles: [Role.ADMIN, Role.DOCTOR, Role.MATERNITY, Role.NURSE],
     dependencies: ['Actes & prestations', 'Dossier Patient', 'Caisse'],
     impacts: ['Laboratoire', 'Caisse'],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  },
-  {
-    id: 'tool_8',
-    name: 'Consultation médicale intelligente',
-    code: 'CONSULTATION_INTELLIGENTE',
-    description: 'Outil modulaire guidant le clinicien dans la saisie sémiologique, structurant l\'examen clinique, assistant au raisonnement diagnostique et générant automatiquement une observation médicale complète.',
-    moduleParent: 'Consultation',
-    status: 'ACTIVE',
-    criticality: 'CRITICAL',
-    visibility: 'VISIBLE',
-    authorizedRoles: [Role.ADMIN, Role.DOCTOR, Role.MATERNITY],
-    dependencies: ['Dossier Patient', 'Laboratoire', 'Pharmacie', 'Hospitalisation'],
-    impacts: ['Dossier Patient', 'Laboratoire', 'Pharmacie', 'Hospitalisation', 'Caisse'],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   }
@@ -164,10 +133,6 @@ const ToolsManagement: React.FC<ToolsManagementProps> = ({ showMessage }) => {
         const newTool = DEFAULT_TOOLS.find(t => t.code === 'CPN_OMS');
         if (newTool) parsedTools = [...parsedTools, newTool];
       }
-      if (!parsedTools.find((t: Tool) => t.code === 'ASSISTANT_IA')) {
-        const newTool = DEFAULT_TOOLS.find(t => t.code === 'ASSISTANT_IA');
-        if (newTool) parsedTools = [...parsedTools, newTool];
-      }
       if (!parsedTools.find((t: Tool) => t.code === 'BULLETIN_EXAMENS')) {
         const newTool = DEFAULT_TOOLS.find(t => t.code === 'BULLETIN_EXAMENS');
         if (newTool) parsedTools = [...parsedTools, newTool];
@@ -182,10 +147,6 @@ const ToolsManagement: React.FC<ToolsManagementProps> = ({ showMessage }) => {
       }
       if (!parsedTools.find((t: Tool) => t.code === 'PLAN_SOINS')) {
         const newTool = DEFAULT_TOOLS.find(t => t.code === 'PLAN_SOINS');
-        if (newTool) parsedTools = [...parsedTools, newTool];
-      }
-      if (!parsedTools.find((t: Tool) => t.code === 'CONSULTATION_INTELLIGENTE')) {
-        const newTool = DEFAULT_TOOLS.find(t => t.code === 'CONSULTATION_INTELLIGENTE');
         if (newTool) parsedTools = [...parsedTools, newTool];
       }
       return parsedTools;
@@ -358,32 +319,6 @@ const ToolsManagement: React.FC<ToolsManagementProps> = ({ showMessage }) => {
                     </button>
                   </div>
                 )}
-                {selectedTool.code === 'ASSISTANT_IA' && (
-                  <div className="ml-auto flex items-center bg-slate-100 p-1 rounded-xl">
-                    <button
-                      onClick={() => {
-                        const newMode = 'SIMPLE';
-                        setTools(tools.map(t => t.id === selectedTool.id ? { ...t, mode: newMode, updatedAt: new Date().toISOString() } : t));
-                        setSelectedTool({ ...selectedTool, mode: newMode });
-                        showMessage('success', 'Mode simple activé');
-                      }}
-                      className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${selectedTool.mode === 'SIMPLE' || !selectedTool.mode ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      Mode Simple
-                    </button>
-                    <button
-                      onClick={() => {
-                        const newMode = 'ADVANCED';
-                        setTools(tools.map(t => t.id === selectedTool.id ? { ...t, mode: newMode, updatedAt: new Date().toISOString() } : t));
-                        setSelectedTool({ ...selectedTool, mode: newMode });
-                        showMessage('success', 'Mode avancé activé');
-                      }}
-                      className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${selectedTool.mode === 'ADVANCED' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-                    >
-                      Mode Avancé
-                    </button>
-                  </div>
-                )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -477,8 +412,8 @@ const ToolsManagement: React.FC<ToolsManagementProps> = ({ showMessage }) => {
                   )}
                   
                   <div className="text-xs text-slate-400 space-y-1">
-                    <p>Créé le : {new Date(selectedTool.createdAt).toLocaleString('fr-FR')}</p>
-                    <p>Dernière mise à jour : {new Date(selectedTool.updatedAt).toLocaleString('fr-FR')}</p>
+                    <p>Créé le : {selectedTool.createdAt ? new Date(selectedTool.createdAt).toLocaleString('fr-FR') : 'N/A'}</p>
+                    <p>Dernière mise à jour : {selectedTool.updatedAt ? new Date(selectedTool.updatedAt).toLocaleString('fr-FR') : 'N/A'}</p>
                   </div>
                 </div>
               </div>

@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
-import { Search, FileText, Printer, Download, CheckCircle, Clock } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Search, FileText, Printer, Download, CheckCircle, Clock, Loader2 } from 'lucide-react';
 import { LabExamRequest, ResultatLaboratoire, RapportLaboratoirePDF } from '../../types';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { useSettings } from '../../hooks/useSettings';
+import { LabFilterToolbar, LabFilters } from '../../components/lab/LabFilterToolbar';
+import { isStatusTermine } from '../../src/utils/labStatus';
 
 interface RapportsTabProps {
   requests: LabExamRequest[];
@@ -13,15 +16,83 @@ interface RapportsTabProps {
 }
 
 const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports, updateRapports, user }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+  const { establishment } = useSettings();
   const [selectedResult, setSelectedResult] = useState<ResultatLaboratoire | null>(null);
 
-  const validatedResults = resultats.filter(r => r.statut === 'validé');
-  
-  const filteredResults = validatedResults.filter(r => {
-    const req = requests.find(req => req.id === r.demandeId);
-    return req?.patientName.toLowerCase().includes(searchTerm.toLowerCase()) || r.demandeId.includes(searchTerm);
+  // Filters State - Strictly Stage 3 (TERMINE) without conflicting status dropdowns
+  const [filters, setFilters] = useState<LabFilters>({
+    search: '',
+    status: 'TERMINE',
+    dateRange: 'ALL',
+    startDate: '',
+    endDate: ''
   });
+
+  const handleResetFilters = () => {
+    setFilters({
+      search: '',
+      status: 'TERMINE',
+      dateRange: 'ALL',
+      startDate: '',
+      endDate: ''
+    });
+  };
+
+  // Strict Stage 3 status isolation: ONLY analyses where status/statut is completed/published (statut === 'TERMINE' / 'validé')
+  // Strictly ordered by most recent date first (DESC)
+  const sortedValidatedResults = useMemo(() => {
+    return resultats
+      .filter(r => isStatusTermine(r.statut, (r as any).status))
+      .sort((a, b) => {
+        const tA = new Date(a.dateValidation || a.dateSaisie || (a as any).createdAt || 0).getTime();
+        const tB = new Date(b.dateValidation || b.dateSaisie || (b as any).createdAt || 0).getTime();
+        return tB - tA;
+      });
+  }, [resultats]);
+  
+  // Search bar (Patient Name, DME ID, Prescribing Doctor, Request ID) & Date filters
+  const filteredResults = useMemo(() => {
+    const now = new Date();
+    return sortedValidatedResults.filter(r => {
+      const req = requests.find(req => req.id === r.demandeId);
+
+      // Text search
+      if (filters.search) {
+        const q = filters.search.toLowerCase().trim();
+        const matchesPatient = (req?.patientName || '').toLowerCase().includes(q);
+        const matchesDemandeId = (r.demandeId || '').toLowerCase().includes(q);
+        const matchesPatientId = (r.patientId || '').toLowerCase().includes(q);
+        const matchesDoctor = (req?.prescriberName || '').toLowerCase().includes(q);
+        if (!matchesPatient && !matchesDemandeId && !matchesPatientId && !matchesDoctor) {
+          return false;
+        }
+      }
+
+      // Date filter
+      const resDate = new Date(r.dateValidation || r.dateSaisie || (r as any).createdAt || req?.date || '');
+      if (!isNaN(resDate.getTime())) {
+        if (filters.dateRange === 'TODAY') {
+          if (resDate.toDateString() !== now.toDateString()) return false;
+        } else if (filters.dateRange === 'WEEK') {
+          const diffDays = Math.ceil(Math.abs(now.getTime() - resDate.getTime()) / (1000 * 60 * 60 * 24));
+          if (diffDays > 7) return false;
+        } else if (filters.dateRange === 'CUSTOM') {
+          if (filters.startDate) {
+            const start = new Date(filters.startDate);
+            start.setHours(0, 0, 0, 0);
+            if (resDate < start) return false;
+          }
+          if (filters.endDate) {
+            const end = new Date(filters.endDate);
+            end.setHours(23, 59, 59, 999);
+            if (resDate > end) return false;
+          }
+        }
+      }
+
+      return true;
+    });
+  }, [sortedValidatedResults, requests, filters]);
 
   const getRequest = (demandeId: string) => requests.find(r => r.id === demandeId);
 
@@ -34,18 +105,18 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
     const doc = new jsPDF();
     
     // Header
-    doc.setFontSize(20);
+    doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
-    doc.text('SMARTHOSTO', 14, 20);
+    doc.text(establishment?.name || 'SMARTHOSTO', 14, 20);
     
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
     doc.text('Laboratoire d\'Analyses Médicales', 14, 26);
     
     doc.setFontSize(9);
-    doc.text('123 Avenue de la Santé', 140, 20);
-    doc.text('Contact: +237 600 000 000', 140, 25);
-    doc.text('Email: labo@smarthosto.com', 140, 30);
+    doc.text(establishment?.address || '123 Avenue de la Santé', 140, 20);
+    doc.text(`Contact: ${establishment?.phone || '+237 600 000 000'}`, 140, 25);
+    doc.text(`Email: ${establishment?.email || 'labo@smarthosto.com'}`, 140, 30);
     
     doc.line(14, 35, 196, 35);
     
@@ -172,30 +243,36 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
-      {/* Liste des résultats validés */}
-      <div className="lg:col-span-1 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
-        <div className="p-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input 
-              type="text" 
-              placeholder="Rechercher un patient..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
-            />
+    <div className="flex-1 min-h-0 h-full flex flex-col gap-3 overflow-hidden">
+      {/* Ultra-Micro Compact Filter Toolbar strictly for Stage 3 (No status dropdown) */}
+      <LabFilterToolbar 
+        filters={filters}
+        onFiltersChange={setFilters}
+        totalCount={sortedValidatedResults.length}
+        filteredCount={filteredResults.length}
+        onReset={handleResetFilters}
+        showStatusFilter={false}
+        stageBadge={{ label: "Stage 3 — Résultats Publiés (Validé / Terminé)", color: "bg-emerald-50 text-emerald-800 border border-emerald-200" }}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0 h-full overflow-hidden">
+        {/* Liste des résultats validés */}
+        <div className="lg:col-span-1 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
+          <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/70 flex items-center justify-between shrink-0">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+              <CheckCircle size={13} className="text-emerald-600" /> Analyses Publiées ({filteredResults.length})
+            </span>
+            <span className="text-[9px] font-bold text-slate-400">Plus récentes en premier</span>
           </div>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
-          {filteredResults.length > 0 ? filteredResults.map(res => {
+          
+          <div className="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+          {filteredResults.length > 0 ? filteredResults.map((res, idx) => {
             const req = getRequest(res.demandeId);
             if (!req) return null;
             
             return (
               <div 
-                key={res.id} 
+                key={`${res.id || 'rep'}-${idx}`} 
                 onClick={() => setSelectedResult(res)}
                 className={`p-4 rounded-2xl cursor-pointer transition-all border ${selectedResult?.id === res.id ? 'bg-slate-800 border-slate-700 text-white shadow-sm' : 'bg-white border-slate-100 hover:border-slate-300 hover:bg-slate-50'}`}
               >
@@ -229,23 +306,30 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
       <div className="lg:col-span-2 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
         {selectedResult ? (
           <>
-            <div className="p-6 border-b border-slate-100 shrink-0 flex justify-between items-center bg-slate-50">
-              <div>
-                <h2 className="text-xl font-black text-slate-900">Aperçu du Rapport</h2>
-                <p className="text-sm text-slate-500 font-medium">Résultat N° {selectedResult.id}</p>
+            {/* Ultra-Micro Header Ribbon */}
+            <div className="h-11 px-4 bg-slate-900 text-white flex items-center justify-between gap-3 shrink-0 rounded-t-2xl text-xs font-mono select-none overflow-x-auto whitespace-nowrap custom-scrollbar">
+              <div className="flex items-center gap-2 text-slate-200 text-[11px] sm:text-xs">
+                <span className="font-bold text-amber-400">[{selectedResult.patientId}]</span>
+                <span className="text-slate-600">|</span>
+                <span className="font-bold text-white font-sans">{getRequest(selectedResult.demandeId)?.patientName || 'Patient'}</span>
+                <span className="text-slate-600">|</span>
+                <span className="text-slate-300 font-sans">Prescripteur: <strong className="text-white font-medium">{getRequest(selectedResult.demandeId)?.prescriberName || 'Médecin'}</strong></span>
+                <span className="text-slate-600">|</span>
+                <span className="text-emerald-400 font-sans font-bold">Réf: {selectedResult.id}</span>
               </div>
-              <div className="flex gap-2">
+
+              <div className="flex items-center gap-2 shrink-0">
                 <button 
                   onClick={handlePrint}
-                  className="px-4 py-2 bg-white border border-slate-200 text-slate-700 font-bold rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
+                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer transition-colors"
                 >
-                  <Printer size={16} /> Imprimer
+                  <Printer size={13} /> Imprimer
                 </button>
                 <button 
                   onClick={handleGenerateReport}
-                  className="px-4 py-2 bg-slate-800 text-white font-bold rounded-xl hover:bg-slate-700 transition-colors flex items-center gap-2 shadow-sm"
+                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
                 >
-                  <Download size={16} /> Générer PDF & Archiver
+                  <Download size={13} /> PDF
                 </button>
               </div>
             </div>
@@ -256,13 +340,13 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
                 {/* Header */}
                 <div className="border-b-2 border-slate-800 pb-6 mb-8 flex justify-between items-start">
                   <div>
-                    <h1 className="text-3xl font-black text-slate-900 tracking-tighter">SMARTHOSTO</h1>
+                    <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">{establishment?.name || 'SMARTHOSTO'}</h1>
                     <p className="text-slate-500 font-medium">Laboratoire d'Analyses Médicales</p>
                   </div>
                   <div className="text-right text-sm text-slate-600">
-                    <p>123 Avenue de la Santé</p>
-                    <p>Contact: +237 600 000 000</p>
-                    <p>Email: labo@smarthosto.com</p>
+                    <p>{establishment?.address || '123 Avenue de la Santé'}</p>
+                    <p>Contact: {establishment?.phone || '+237 600 000 000'}</p>
+                    <p>Email: {establishment?.email || 'labo@smarthosto.com'}</p>
                   </div>
                 </div>
 
@@ -356,6 +440,7 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
             <p className="text-sm max-w-md">Choisissez un résultat pour prévisualiser, imprimer ou archiver le rapport.</p>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

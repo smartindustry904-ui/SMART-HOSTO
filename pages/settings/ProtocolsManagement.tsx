@@ -36,6 +36,8 @@ import {
 } from 'lucide-react';
 import { Protocol, ProtocolCategory, ProtocolElement, ProtocolVersion, ProtocolLog, User } from '../../types';
 import { DEFAULT_PROTOCOLS } from '../../constants/defaultProtocols';
+import { db } from '../../src/firebase';
+import { collection, onSnapshot } from 'firebase/firestore';
 
 interface ProtocolsManagementProps {
   user: User | null;
@@ -113,13 +115,38 @@ export const ProtocolsManagement: React.FC<ProtocolsManagementProps> = ({ user, 
   const [consumablesReferential, setConsumablesReferential] = useState<any[]>([]);
 
   useEffect(() => {
-    const acts = localStorage.getItem('hospital_acts');
-    const meds = localStorage.getItem('hospital_meds');
-    const consumables = localStorage.getItem('hospital_consumables');
+    const unsubActs = onSnapshot(collection(db, 'medical_acts'), (snap) => {
+      if (!snap.empty) {
+        setActsReferential(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } else {
+        const saved = localStorage.getItem('hospital_acts');
+        if (saved) setActsReferential(JSON.parse(saved));
+      }
+    });
 
-    if (acts) setActsReferential(JSON.parse(acts));
-    if (meds) setMedsReferential(JSON.parse(meds));
-    if (consumables) setConsumablesReferential(JSON.parse(consumables));
+    const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
+      if (!snap.empty) {
+        setMedsReferential(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } else {
+        const saved = localStorage.getItem('hospital_meds');
+        if (saved) setMedsReferential(JSON.parse(saved));
+      }
+    });
+
+    const unsubConsumables = onSnapshot(collection(db, 'hospital_consumables'), (snap) => {
+      if (!snap.empty) {
+        setConsumablesReferential(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+      } else {
+        const saved = localStorage.getItem('hospital_consumables');
+        if (saved) setConsumablesReferential(JSON.parse(saved));
+      }
+    });
+
+    return () => {
+      unsubActs();
+      unsubMeds();
+      unsubConsumables();
+    };
   }, []);
 
   // Element builders state inside compilation
@@ -964,7 +991,7 @@ export const ProtocolsManagement: React.FC<ProtocolsManagementProps> = ({ user, 
                   {viewingProtocol.lastUsedAt && (
                     <div className="border-t border-white/10 pt-3">
                       <span className="text-slate-400 block font-bold">Dernière sollicitation en soin</span>
-                      <strong className="text-white block font-mono mt-0.5 font-bold">{new Date(viewingProtocol.lastUsedAt).toLocaleString()}</strong>
+                      <strong className="text-white block font-mono mt-0.5 font-bold">{viewingProtocol.lastUsedAt ? new Date(viewingProtocol.lastUsedAt).toLocaleString() : 'Jamais'}</strong>
                     </div>
                   )}
                 </div>
@@ -988,7 +1015,11 @@ export const ProtocolsManagement: React.FC<ProtocolsManagementProps> = ({ user, 
                             <span className="capitalize text-indigo-600">{log.action === 'creation'?'Création':log.action === 'modification'?'Modif.':log.action === 'activation'?'Activ.':'Archiv.'}</span>
                             <span className="text-slate-450 font-mono text-[9px]">{log.date} {log.time}</span>
                           </div>
-                          {log.details && <p className="leading-tight text-slate-500 font-medium">{log.details}</p>}
+                          {log.details && (
+                            <p className="leading-tight text-slate-500 font-medium">
+                              {typeof log.details === 'object' ? JSON.stringify(log.details) : String(log.details)}
+                            </p>
+                          )}
                           <span className="text-[8px] text-slate-400 font-bold block mt-0.5">Agent: {log.user}</span>
                         </div>
                       ))

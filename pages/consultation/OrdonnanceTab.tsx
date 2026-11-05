@@ -31,57 +31,36 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
     try {
       const q = query(collection(db, 'pending_prescriptions'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        const list: any[] = [];
+        const prescrMap = new Map<string, Ordonnance>();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
           // Filter by patient ID safely (case-insensitive string match or numeric match)
           if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
-            // Map Firestore model to the Ordonnance type
-            list.push({
-              id: data.id || docSnap.id,
-              firebaseId: docSnap.id,
-              patientId: data.patientId,
-              prescripteurId: data.doctorEmail || 'DOC-001',
-              prescripteurName: data.doctor || 'Dr. Sarr',
-              date: data.createdAt || new Date().toISOString(),
-              status: data.status === 'pending' ? 'TRANSMITTED' : 'VALIDATED',
-              traitements: (data.items || []).map((it: any, index: number) => ({
-                id: `p-${index}`,
+            const key = data.id || docSnap.id;
+            if (!prescrMap.has(key)) {
+              // Map Firestore model to the Ordonnance type
+              prescrMap.set(key, {
+                id: key,
                 patientId: data.patientId,
-                medicationName: it.name,
-                dosageScheme: it.posology || '1 tab x3/jour',
-                duration: it.duration || 5,
-                totalBoxes: it.quantity || 1,
-                price: it.price || 1500
-              }))
-            });
+                prescripteurId: data.doctorEmail || 'DOC-001',
+                prescripteurName: data.doctor || 'Dr. Sarr',
+                date: data.createdAt || new Date().toISOString(),
+                status: data.status === 'pending' ? 'TRANSMITTED' : 'VALIDATED',
+                traitements: (data.items || []).map((it: any, index: number) => ({
+                  id: `p-${docSnap.id}-${index}`,
+                  patientId: data.patientId,
+                  medicationName: it.name,
+                  dosageScheme: it.posology || '1 tab x3/jour',
+                  duration: it.duration || 5,
+                  totalBoxes: it.quantity || 1,
+                  price: it.price || 1500
+                }))
+              });
+            }
           }
         });
 
-        // If nothing matches for patient yet, add a structured previous consultation prescription as fallback to avoid bare screens
-        if (list.length === 0) {
-          list.push({
-            id: 'ORD-HIST-001',
-            patientId: patient.id,
-            prescripteurId: 'doc1',
-            prescripteurName: 'Dr. Sarr',
-            date: new Date(Date.now() - 48 * 3600 * 1000).toISOString(),
-            status: 'VALIDATED',
-            traitements: [
-              {
-                id: 'p-hist-1',
-                patientId: patient.id,
-                medicationName: 'Paracétamol 500mg',
-                dosageScheme: '1 comprimé 3x/jour',
-                duration: 5,
-                totalBoxes: 1,
-                price: 500
-              }
-            ]
-          });
-        }
-
-        setPrescriptions(list);
+        setPrescriptions(Array.from(prescrMap.values()));
         setLoading(false);
       }, (error) => {
         console.warn("Real-time prescription download warn: ", error);
@@ -95,20 +74,26 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
     }
   }, [patient.id]);
 
-  // 2. Fetch medication catalog or write/seed if empty
+  // 2. Fetch medication catalog from pharmacy_inventory (Settings)
   useEffect(() => {
     try {
-      const q = query(collection(db, 'medication_catalog'));
+      const q = query(collection(db, 'pharmacy_inventory'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        if (snapshot.empty) {
-          // Send or seed default catalog to Firestore so other modules have access
-          staticMedications.forEach(async (med) => {
-            await setDoc(doc(db, 'medication_catalog', med.id), med);
+        if (!snapshot.empty) {
+          const list = snapshot.docs.map(ds => {
+            const d = ds.data();
+            return {
+              id: ds.id,
+              name: d.name || d.nomCommercial || d.nom,
+              dosage: d.dosage || (d.dosageValeur ? `${d.dosageValeur} ${d.dosageUnite || ''}`.trim() : ''),
+              price: parseFloat(d.price) || parseFloat(d.prixVente) || 0,
+              stock: parseInt(d.stock) || parseInt(d.quantite) || parseInt(d.unitesParConditionnement) || 0,
+              forms: d.forms || (d.formeGalenique ? [d.formeGalenique] : ['Comprimé'])
+            } as Medication;
           });
-          setMedications(staticMedications);
-        } else {
-          const list = snapshot.docs.map(ds => ds.data() as Medication);
           setMedications(list);
+        } else {
+          setMedications(staticMedications);
         }
       });
       return () => unsubscribe();

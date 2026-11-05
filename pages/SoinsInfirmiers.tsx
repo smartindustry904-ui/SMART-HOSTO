@@ -1,0 +1,1727 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Heart, Activity, Thermometer, Scale, Stethoscope, 
+  AlertCircle, CheckCircle, Clock, Search, ArrowRight, 
+  User, CheckCircle2, AlertTriangle, ChevronRight, Zap, RefreshCw, X,
+  LayoutDashboard, ShieldAlert, FileText, Check, BedDouble, Syringe, Plus, Droplets, Filter
+} from 'lucide-react';
+import { db, sanitizeData } from '../src/firebase';
+import { collection, doc, setDoc, updateDoc, getDoc, getDocs, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { Patient, User as UserType, NurseSubMenu, PaymentRequest } from '../types';
+import Inpatient from './Inpatient';
+import { MicroHeader } from '../components/common/MicroHeader';
+
+interface SoinsInfirmiersProps {
+  user?: UserType;
+  globalWaitingQueue?: any[];
+  setGlobalWaitingQueue?: React.Dispatch<React.SetStateAction<any[]>>;
+  paymentRequests?: PaymentRequest[];
+  setPaymentRequests?: React.Dispatch<React.SetStateAction<PaymentRequest[]>>;
+  activeTab: NurseSubMenu;
+  setActiveTab: (tab: NurseSubMenu) => void;
+  onBackToDashboard: () => void;
+  theme?: 'light' | 'dark';
+}
+
+export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
+  user,
+  globalWaitingQueue = [],
+  setGlobalWaitingQueue,
+  paymentRequests = [],
+  setPaymentRequests,
+  activeTab = 'dashboard',
+  setActiveTab,
+  onBackToDashboard,
+  theme = 'light'
+}) => {
+  const [searchFilter, setSearchFilter] = useState('');
+  const [activePatient, setActivePatient] = useState<any | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [triageHistory, setTriageHistory] = useState<any[]>([]);
+  const [historySearch, setHistorySearch] = useState('');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
+  // Vitals form state for active patient
+  const [vitals, setVitals] = useState({
+    bpSys: 120,
+    bpDia: 80,
+    heartRate: 75,
+    pulse: 75,
+    respRate: 18,
+    spo2: 98,
+    temp: 37.0,
+    height: 170,
+    weight: 70,
+    waistCirc: 85,
+    bloodGlucose: 1.0,
+    painScore: 0,
+    glasgowScore: 15,
+    clinicalNotes: ''
+  });
+
+  // Nursing care queue (Receive-Only Execution Queue) state
+  const [nursingActs, setNursingActs] = useState<any[]>([]);
+  const [selectedActForExecution, setSelectedActForExecution] = useState<any | null>(null);
+  const [executionNotes, setExecutionNotes] = useState('');
+  const [isExecutingAct, setIsExecutingAct] = useState(false);
+  const [soinSearchQuery, setSoinSearchQuery] = useState('');
+  const [soinStatusFilter, setSoinStatusFilter] = useState<'ALL' | 'PENDING' | 'DONE'>('PENDING');
+  const [soinOriginFilter, setSoinOriginFilter] = useState<'ALL' | 'URGENCES' | 'CONSULTATION'>('ALL');
+
+  // Listen to triage history from Firestore
+  useEffect(() => {
+    try {
+      const q = query(
+        collection(db, 'triage_records'),
+        orderBy('createdAt', 'desc'),
+        limit(100)
+      );
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setTriageHistory(records);
+      }, (err) => {
+        console.warn("Error listening to triage_records:", err);
+      });
+      return () => unsubscribe();
+    } catch (e) {
+      console.error("Error setting up triage_records listener:", e);
+    }
+  }, []);
+
+  // Listen to nursing care acts from Firestore
+  useEffect(() => {
+    try {
+      const q = query(
+        collection(db, 'nursing_acts'),
+        orderBy('createdAt', 'desc'),
+        limit(50)
+      );
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const acts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setNursingActs(acts);
+      }, (err) => {
+        console.warn("Error listening to nursing_acts:", err);
+      });
+      return () => unsubscribe();
+    } catch (e) {
+      console.error("Error setting up nursing_acts listener:", e);
+    }
+  }, []);
+
+  // Filter only patients waiting for triage
+  const waitingTriageList = useMemo(() => {
+    return (globalWaitingQueue || []).filter(q => q.status === 'waiting_triage');
+  }, [globalWaitingQueue]);
+
+  // Patients triaged today
+  const triagedTodayList = useMemo(() => {
+    const today = new Date().toISOString().split('T')[0];
+    return triageHistory.filter(t => t.createdAt?.startsWith(today));
+  }, [triageHistory]);
+
+  // Critical alerts count today
+  const criticalCount = useMemo(() => {
+    return triagedTodayList.filter(t => t.priority === 'critique').length;
+  }, [triagedTodayList]);
+
+  const urgentCount = useMemo(() => {
+    return triagedTodayList.filter(t => t.priority === 'urgent').length;
+  }, [triagedTodayList]);
+
+  // Nursing care acts counters
+  const pendingActsCount = useMemo(() => {
+    return nursingActs.filter(a => a.status === 'EN ATTENTE' || !a.status).length;
+  }, [nursingActs]);
+
+  const urgPendingCount = useMemo(() => {
+    return nursingActs.filter(a => (a.source === 'URGENCES' || a.priority === 'HIGH') && a.status !== 'FAIT').length;
+  }, [nursingActs]);
+
+  const consultPendingCount = useMemo(() => {
+    return nursingActs.filter(a => a.source !== 'URGENCES' && a.priority !== 'HIGH' && a.status !== 'FAIT').length;
+  }, [nursingActs]);
+
+  const doneActsCount = useMemo(() => {
+    return nursingActs.filter(a => a.status === 'FAIT').length;
+  }, [nursingActs]);
+
+  const filteredQueue = useMemo(() => {
+    if (!searchFilter.trim()) return waitingTriageList;
+    const term = searchFilter.toLowerCase();
+    return waitingTriageList.filter(p => 
+      (p.lastName && p.lastName.toLowerCase().includes(term)) ||
+      (p.firstName && p.firstName.toLowerCase().includes(term)) ||
+      (p.patientId && p.patientId.toLowerCase().includes(term)) ||
+      (p.dmeId && p.dmeId.toLowerCase().includes(term)) ||
+      (p.motifLabel && p.motifLabel.toLowerCase().includes(term)) ||
+      (p.speciality && p.speciality.toLowerCase().includes(term))
+    );
+  }, [waitingTriageList, searchFilter]);
+
+  // Dynamic calculated BMI
+  const computedBMI = useMemo(() => {
+    if (vitals.height > 0 && vitals.weight > 0) {
+      const hM = vitals.height / 100;
+      return parseFloat((vitals.weight / (hM * hM)).toFixed(1));
+    }
+    return 0;
+  }, [vitals.height, vitals.weight]);
+
+  const getBmiCategory = (bmi: number) => {
+    if (bmi === 0) return { label: 'Non calculé', color: 'text-slate-400' };
+    if (bmi < 18.5) return { label: 'Insuffisance pondérale', color: 'text-amber-500' };
+    if (bmi < 25) return { label: 'Poids normal', color: 'text-emerald-500' };
+    if (bmi < 30) return { label: 'Surpoids', color: 'text-amber-600' };
+    return { label: 'Obésité', color: 'text-rose-600' };
+  };
+
+  // Algorithmic Triage Engine
+  const assessPriority = useMemo(() => {
+    const alerts: string[] = [];
+    let priority: 'normal' | 'urgent' | 'critique' = 'normal';
+
+    // 1. Critical Red Flags (Priority: CRITIQUE - Rouge)
+    if (vitals.spo2 && vitals.spo2 < 90) {
+      priority = 'critique';
+      alerts.push('SpO2 critique (< 90%)');
+    }
+    if (vitals.bpSys && vitals.bpSys < 85) {
+      priority = 'critique';
+      alerts.push('Hypotension sévère (PAS < 85 mmHg)');
+    }
+    if (vitals.bpSys && vitals.bpSys >= 200) {
+      priority = 'critique';
+      alerts.push('Crise hypertensive sévère (PAS >= 200 mmHg)');
+    }
+    if (vitals.heartRate && (vitals.heartRate < 40 || vitals.heartRate > 140)) {
+      priority = 'critique';
+      alerts.push('Trouble du rythme critique (FC < 40 ou > 140 bpm)');
+    }
+    if (vitals.respRate && (vitals.respRate < 8 || vitals.respRate > 32)) {
+      priority = 'critique';
+      alerts.push('Détresse respiratoire (FR < 8 ou > 32/min)');
+    }
+    if (vitals.temp && (vitals.temp > 40.0 || vitals.temp < 35.0)) {
+      priority = 'critique';
+      alerts.push('Température extrême (< 35°C ou > 40°C)');
+    }
+    if (vitals.glasgowScore && vitals.glasgowScore < 12) {
+      priority = 'critique';
+      alerts.push('Trouble sévère de la conscience (Glasgow < 12)');
+    }
+
+    // 2. Urgent Yellow Flags (Priority: URGENT - Orange if not already critique)
+    if (priority !== 'critique') {
+      if (vitals.spo2 && vitals.spo2 >= 90 && vitals.spo2 <= 94) {
+        priority = 'urgent';
+        alerts.push('Hypoxie modérée (SpO2 90-94%)');
+      }
+      if (vitals.bpSys && ((vitals.bpSys >= 160 && vitals.bpSys < 200) || (vitals.bpSys >= 85 && vitals.bpSys < 95))) {
+        priority = 'urgent';
+        alerts.push('Tension instable (PAS 160-199 ou 85-94)');
+      }
+      if (vitals.heartRate && ((vitals.heartRate >= 110 && vitals.heartRate <= 140) || (vitals.heartRate >= 45 && vitals.heartRate < 55))) {
+        priority = 'urgent';
+        alerts.push('Tachycardie / Bradycardie (FC 110-140 ou 45-54 bpm)');
+      }
+      if (vitals.temp && (vitals.temp >= 38.8 && vitals.temp <= 40.0)) {
+        priority = 'urgent';
+        alerts.push('Hyperthermie marquée (38.8°C - 40°C)');
+      }
+      if (vitals.painScore && vitals.painScore >= 7) {
+        priority = 'urgent';
+        alerts.push(`Douleur intense (EVA: ${vitals.painScore}/10)`);
+      }
+      if (vitals.bloodGlucose && (vitals.bloodGlucose < 0.6 || vitals.bloodGlucose > 3.0)) {
+        priority = 'urgent';
+        alerts.push(`Déséquilibre glycémique majeur (${vitals.bloodGlucose} g/L)`);
+      }
+    }
+
+    return { priority, alerts };
+  }, [vitals]);
+
+  const handleSelectPatientForTriage = (patient: any) => {
+    setActivePatient(patient);
+    if (patient.vitals) {
+      setVitals(prev => ({
+        ...prev,
+        ...patient.vitals,
+        bpSys: patient.vitals.bpSys || (patient.vitals.bp ? parseInt(patient.vitals.bp.split('/')[0]) : 120),
+        bpDia: patient.vitals.bpDia || (patient.vitals.bp ? parseInt(patient.vitals.bp.split('/')[1]) : 80),
+        temp: patient.vitals.temp || 37.0,
+        height: patient.vitals.height || 170,
+        weight: patient.vitals.weight || 70,
+        spo2: patient.vitals.spo2 || 98,
+        pulse: patient.vitals.pulse || 75,
+        heartRate: patient.vitals.heartRate || patient.vitals.pulse || 75
+      }));
+    } else {
+      setVitals({
+        bpSys: 120,
+        bpDia: 80,
+        heartRate: 75,
+        pulse: 75,
+        respRate: 18,
+        spo2: 98,
+        temp: 37.0,
+        height: 170,
+        weight: 70,
+        waistCirc: 85,
+        bloodGlucose: 1.0,
+        painScore: 0,
+        glasgowScore: 15,
+        clinicalNotes: ''
+      });
+    }
+  };
+
+  // The core transfer action: moves patient from waiting_triage to waiting in doctor's queue
+  const handleTransferToDoctor = async () => {
+    if (!activePatient) return;
+    setIsSubmitting(true);
+    try {
+      const today = new Date();
+      const nurseName = user?.name || user?.email || 'Infirmier(ère) de Triage';
+
+      const finalVitalsData = {
+        bpSys: vitals.bpSys,
+        bpDia: vitals.bpDia,
+        bp: `${vitals.bpSys}/${vitals.bpDia}`,
+        heartRate: vitals.heartRate,
+        pulse: vitals.pulse,
+        respRate: vitals.respRate,
+        spo2: vitals.spo2,
+        temp: vitals.temp,
+        height: vitals.height,
+        weight: vitals.weight,
+        waistCirc: vitals.waistCirc,
+        bmi: computedBMI,
+        bloodGlucose: vitals.bloodGlucose,
+        painScore: vitals.painScore,
+        glasgowScore: vitals.glasgowScore,
+        clinicalNotes: vitals.clinicalNotes
+      };
+
+      // 1. Update queue entry in service_queues: change status to 'waiting' for doctor
+      const directQueueDocId = activePatient.queueDocId || activePatient.docId;
+      let targetDocId = directQueueDocId;
+      const queuePayload = {
+        status: 'waiting',
+        priority: assessPriority.priority,
+        priorityAlerts: assessPriority.alerts,
+        vitals: finalVitalsData,
+        triagedAt: today.toISOString(),
+        triagedBy: nurseName
+      };
+
+      let updated = false;
+
+      // Try direct doc update if exists
+      if (directQueueDocId) {
+        try {
+          const directDocRef = doc(db, 'service_queues', directQueueDocId);
+          const directSnap = await getDoc(directDocRef);
+          if (directSnap.exists()) {
+            await updateDoc(directDocRef, queuePayload);
+            updated = true;
+          }
+        } catch (e) {
+          console.warn("Direct queue doc lookup failed, fallback to query:", e);
+        }
+      }
+
+      // If not updated directly, try query by patientId
+      if (!updated) {
+        const pId = activePatient.patientId || activePatient.dmeId || activePatient.id;
+        if (pId) {
+          const q = query(collection(db, 'service_queues'), where('patientId', '==', pId));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            targetDocId = snap.docs[0].id;
+            for (const d of snap.docs) {
+              await updateDoc(doc(db, 'service_queues', d.id), queuePayload);
+            }
+            updated = true;
+          } else {
+            const qDme = query(collection(db, 'service_queues'), where('dmeId', '==', pId));
+            const snapDme = await getDocs(qDme);
+            if (!snapDme.empty) {
+              targetDocId = snapDme.docs[0].id;
+              for (const d of snapDme.docs) {
+                await updateDoc(doc(db, 'service_queues', d.id), queuePayload);
+              }
+              updated = true;
+            }
+          }
+        }
+      }
+
+      // Fallback: If still not found, upsert
+      if (!updated) {
+        const fallbackDocId = targetDocId || (activePatient.id ? activePatient.id : doc(collection(db, 'service_queues')).id);
+        targetDocId = fallbackDocId;
+        await setDoc(doc(db, 'service_queues', fallbackDocId), sanitizeData({
+          ...activePatient,
+          patientId: activePatient.patientId || activePatient.dmeId || activePatient.id,
+          dmeId: activePatient.dmeId || activePatient.patientId || activePatient.id,
+          firstName: activePatient.firstName || '',
+          lastName: activePatient.lastName || '',
+          age: activePatient.age || 0,
+          gender: activePatient.gender || 'M',
+          motif: activePatient.motif || 'CONSULTATION',
+          service: activePatient.service || 'Médecine Générale',
+          ...queuePayload,
+          createdAt: activePatient.createdAt || today.toISOString()
+        }), { merge: true });
+      }
+
+      // 2. Write record in triage_records
+      const triageDocRef = doc(collection(db, 'triage_records'));
+      await setDoc(triageDocRef, sanitizeData({
+        id: triageDocRef.id,
+        patientId: activePatient.patientId || activePatient.dmeId || activePatient.id,
+        patientName: `${activePatient.lastName} ${activePatient.firstName}`,
+        queueId: targetDocId || '',
+        vitals: finalVitalsData,
+        priority: assessPriority.priority,
+        priorityAlerts: assessPriority.alerts,
+        nurseName: nurseName,
+        createdAt: today.toISOString()
+      }));
+
+      // 3. Write trace to audit_logs
+      await setDoc(doc(collection(db, 'audit_logs')), {
+        user: nurseName,
+        role: 'NURSE',
+        date: today.toLocaleDateString('fr-FR'),
+        time: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+        timestamp: today.toISOString(),
+        action: `Triage infirmier validé (${assessPriority.priority.toUpperCase()}) -> Transféré vers la file médecin`,
+        details: {
+          patientId: activePatient.patientId || activePatient.dmeId,
+          patientName: `${activePatient.lastName} ${activePatient.firstName}`,
+          priority: assessPriority.priority,
+          alerts: assessPriority.alerts
+        },
+        module: 'Soins Infirmiers'
+      });
+
+      // 4. Trigger system notification
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: `🩺 Triage validé pour ${activePatient.lastName} ${activePatient.firstName} [Priorité: ${assessPriority.priority.toUpperCase()}] -> Transféré en file de consultation médecin.`
+      }));
+
+      setActivePatient(null);
+    } catch (err: any) {
+      console.error("Error finalizing nurse triage:", err);
+      alert(`Erreur lors du transfert : ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Mark prescribed nursing care act as Done (FAIT) - Strictly Receive-Only Queue Execution
+  const handleMarkActAsDone = async (act: any) => {
+    if (!act?.id) return;
+    setIsExecutingAct(true);
+    try {
+      const today = new Date();
+      const nurseName = user?.name || user?.email || 'Infirmier(ère)';
+      const actRef = doc(db, 'nursing_acts', act.id);
+
+      const notesToSave = executionNotes.trim() || 'Soin réalisé conformément aux prescriptions médicales.';
+
+      await updateDoc(actRef, sanitizeData({
+        status: 'FAIT',
+        executedBy: nurseName,
+        executedByRole: 'Infirmier(ère)',
+        executionNotes: notesToSave,
+        executionDate: today.toLocaleDateString('fr-FR'),
+        executionTime: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+        executedAt: today.toISOString(),
+        updatedAt: today.toISOString()
+      }));
+
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: `✓ Soin « ${act.actType} » validé et marqué comme FAIT pour ${act.patientName}.`
+      }));
+
+      // Update local selection
+      setSelectedActForExecution((prev: any) => prev ? {
+        ...prev,
+        status: 'FAIT',
+        executedBy: nurseName,
+        executionNotes: notesToSave,
+        executionDate: today.toLocaleDateString('fr-FR'),
+        executionTime: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+        executedAt: today.toISOString()
+      } : null);
+
+      setExecutionNotes('');
+    } catch (err: any) {
+      console.error("Error marking nursing act as done:", err);
+      alert(`Erreur lors de la validation du soin : ${err.message}`);
+    } finally {
+      setIsExecutingAct(false);
+    }
+  };
+
+  return (
+    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#020617] text-white' : 'bg-[#F8FAFC] text-slate-900'}`}>
+      <MicroHeader
+        icon={Heart}
+        breadcrumbs={[
+          { label: 'Soins Infirmiers', onClick: () => setActiveTab('triage') },
+          { 
+            label: activeTab === 'soins' ? 'Actes & Soins Prescrits' :
+                   activeTab === 'historique' ? 'Historique' :
+                   activeTab === 'hospitalisation' ? 'Hospitalisation' : 'Triage & Constantes',
+            active: true
+          }
+        ]}
+        onHomeClick={onBackToDashboard}
+        onBackClick={activeTab !== 'triage' ? () => setActiveTab('triage') : undefined}
+        user={{ name: user?.name || 'Infirmier(ère)' }}
+        theme={theme}
+        actions={
+          <div className="flex items-center gap-1.5 overflow-x-auto">
+            <button
+              onClick={() => setActiveTab('triage')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'triage' || activeTab === 'dashboard'
+                  ? 'bg-teal-600 text-white shadow-xs'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Stethoscope size={13} />
+              <span>Tab 1 : Triage & Constantes ({waitingTriageList.length})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('soins')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'soins'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Syringe size={13} />
+              <span>Tab 2 : Soins & Actes ({pendingActsCount})</span>
+              {urgPendingCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-red-600 text-white animate-pulse">
+                  {urgPendingCount} URG
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('historique')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'historique'
+                  ? 'bg-slate-800 text-white shadow-xs'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <FileText size={13} />
+              <span>Historique</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('hospitalisation')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'hospitalisation'
+                  ? 'bg-purple-600 text-white shadow-xs'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <BedDouble size={13} />
+              <span>Lits</span>
+            </button>
+          </div>
+        }
+      />
+
+      <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-6">
+        {/* TWO DISTINCT WORKFLOWS SWITCHER TABS */}
+        <div className="bg-white dark:bg-slate-900 p-2.5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab('triage')}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                activeTab === 'triage' || activeTab === 'dashboard'
+                  ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Stethoscope size={16} />
+              <span>Tab 1 : Triage & Constantes</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                activeTab === 'triage' || activeTab === 'dashboard'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300'
+              }`}>
+                {waitingTriageList.length} en attente
+              </span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('soins')}
+              className={`flex-1 sm:flex-none flex items-center justify-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                activeTab === 'soins'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Syringe size={16} />
+              <span>Tab 2 : Soins & Actes Prescrits</span>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                activeTab === 'soins'
+                  ? 'bg-white/20 text-white'
+                  : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
+              }`}>
+                {pendingActsCount}
+              </span>
+              {urgPendingCount > 0 && (
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-red-600 text-white animate-pulse">
+                  {urgPendingCount} URG
+                </span>
+              )}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between sm:justify-end gap-2 text-xs text-slate-500">
+            <span className="hidden lg:inline text-[11px] text-slate-400 font-medium">
+              Accueil ➔ Triage • Consultation & Urgences ➔ Soins
+            </span>
+            <button
+              onClick={() => setActiveTab('historique')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'historique'
+                  ? 'bg-slate-800 text-white'
+                  : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              Historique
+            </button>
+            <button
+              onClick={() => setActiveTab('hospitalisation')}
+              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'hospitalisation'
+                  ? 'bg-purple-600 text-white'
+                  : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              Lits
+            </button>
+          </div>
+        </div>
+
+      {/* TAB 1: TRIAGE & CONSTANTES */}
+      {(activeTab === 'triage' || activeTab === 'dashboard') && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          {/* Key Metric Cards for Tab 1 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div 
+              className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200/80 dark:border-slate-800 shadow-xs"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">En attente de Triage</span>
+                <div className="w-9 h-9 rounded-xl bg-teal-50 dark:bg-teal-950/40 text-teal-600 flex items-center justify-center">
+                  <Clock size={18} />
+                </div>
+              </div>
+              <p className="text-2xl font-black text-slate-900 dark:text-white">{waitingTriageList.length}</p>
+              <p className="text-[11px] text-teal-600 font-bold mt-1">Accueil ➔ Prise de constantes</p>
+            </div>
+
+            <div 
+              onClick={() => setActiveTab('historique')}
+              className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-blue-300 transition-all cursor-pointer group"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Triés Aujourd'hui</span>
+                <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <CheckCircle2 size={18} />
+                </div>
+              </div>
+              <p className="text-2xl font-black text-slate-900 dark:text-white">{triagedTodayList.length}</p>
+              <p className="text-[11px] text-slate-400 font-medium mt-1">Transférés vers consultation</p>
+            </div>
+
+            <div 
+              className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200/80 dark:border-slate-800 shadow-xs"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cas Critiques (Rouge)</span>
+                <div className="w-9 h-9 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 flex items-center justify-center">
+                  <ShieldAlert size={18} />
+                </div>
+              </div>
+              <p className="text-2xl font-black text-rose-600">{criticalCount}</p>
+              <p className="text-[11px] text-rose-500 font-medium mt-1">Urgences vitales détectées</p>
+            </div>
+
+            <div 
+              onClick={() => setActiveTab('soins')}
+              className="bg-white dark:bg-slate-900 p-5 rounded-[24px] border border-slate-200/80 dark:border-slate-800 shadow-xs hover:border-indigo-300 transition-all cursor-pointer group"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Soins Prescrits (Tab 2)</span>
+                <div className="w-9 h-9 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                  <Syringe size={18} />
+                </div>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <p className="text-2xl font-black text-slate-900 dark:text-white">{pendingActsCount}</p>
+                {urgPendingCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-red-600 text-white animate-pulse">
+                    {urgPendingCount} URG
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-indigo-600 font-bold mt-1 flex items-center gap-1">
+                <span>File d'exécution des soins</span>
+                <ArrowRight size={12} />
+              </p>
+            </div>
+          </div>
+          {/* Header Banner */}
+          <div className="bg-slate-900 text-white p-6 md:p-8 rounded-[36px] shadow-xl relative overflow-hidden">
+            <div className="absolute -right-16 -top-16 w-60 h-60 rounded-full bg-teal-500/10 blur-3xl"></div>
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
+              <div className="flex items-center gap-4">
+                <div className="p-4 bg-teal-500/20 text-teal-400 rounded-3xl border border-teal-500/30">
+                  <Stethoscope size={32} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] font-black uppercase tracking-[0.25em] text-teal-400">Salle de Triage Active</span>
+                    <span className="bg-teal-500/20 text-teal-300 border border-teal-500/40 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider animate-pulse">
+                      {waitingTriageList.length} en attente
+                    </span>
+                  </div>
+                  <h2 className="text-2xl md:text-3xl font-extrabold mt-1 tracking-tight">Prise de Constantes & Évaluation</h2>
+                  <p className="text-xs text-slate-400 font-medium mt-0.5">Saisissez les paramètres physiologiques et transférez le patient au médecin de consultation.</p>
+                </div>
+              </div>
+
+              {activePatient && (
+                <button
+                  onClick={() => setActivePatient(null)}
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold transition-all flex items-center gap-2"
+                >
+                  <X size={14} />
+                  <span>Changer de patient</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Patient Selection & Vitals Workspace */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+            
+            {/* Left Column: Waiting Queue */}
+            <div className="bg-white p-6 rounded-[32px] border border-slate-200 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider flex items-center gap-2">
+                  <Clock size={16} className="text-teal-600" />
+                  <span>File d'Attente ({waitingTriageList.length})</span>
+                </h3>
+              </div>
+
+              {/* Search bar */}
+              <div className="relative">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input
+                  type="text"
+                  value={searchFilter}
+                  onChange={(e) => setSearchFilter(e.target.value)}
+                  placeholder="Rechercher patient, motif..."
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-teal-500"
+                />
+              </div>
+
+              <div className="space-y-2.5 max-h-[550px] overflow-y-auto custom-scrollbar pr-1">
+                {filteredQueue.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400 text-xs font-medium">
+                    Aucun patient trouvé dans la file.
+                  </div>
+                ) : (
+                  filteredQueue.map((patient, idx) => {
+                    const isSelected = activePatient && (activePatient.id === patient.id || activePatient.patientId === patient.patientId);
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => handleSelectPatientForTriage(patient)}
+                        className={`p-4 rounded-2xl border-2 transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-teal-50 border-teal-600 shadow-md scale-[1.01]'
+                            : 'bg-slate-50 hover:bg-slate-100 border-slate-200/70'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="font-black text-slate-900 text-xs truncate max-w-[170px]">
+                            {patient.lastName} {patient.firstName}
+                          </p>
+                          <span className="text-[9px] font-bold text-slate-400">
+                            {patient.time || 'Aujourd\'hui'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-medium truncate">
+                          {patient.motifLabel || patient.motif || 'Consultation'}
+                        </p>
+                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-200/60 text-[10px]">
+                          <span className="text-teal-700 font-bold">{patient.speciality || patient.queueName || 'Médecine Générale'}</span>
+                          <span className="font-mono text-slate-400">#{patient.patientId || patient.dmeId || patient.id}</span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* Center/Right Columns: Vitals Form & Priority Evaluation */}
+            <div className="lg:col-span-2 space-y-6">
+              {activePatient ? (
+                <div className="bg-white p-6 md:p-8 rounded-[36px] border border-slate-200 shadow-xs space-y-8 animate-in zoom-in-95 duration-200">
+                  
+                  {/* Selected Patient Banner */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-teal-50/80 border border-teal-200">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-teal-700">Patient en cours d'évaluation</span>
+                      <h3 className="text-xl font-black text-slate-900">{activePatient.lastName} {activePatient.firstName}</h3>
+                      <p className="text-xs text-slate-600 font-medium">
+                        {activePatient.age ? `${activePatient.age} ans • ` : ''}{activePatient.gender === 'F' ? 'Femme' : 'Homme'} • Motif: <strong>{activePatient.motifLabel || activePatient.motif}</strong>
+                      </p>
+                    </div>
+
+                    {/* Calculated Priority Tag */}
+                    <div className="text-right flex flex-col items-end">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Niveau de Priorité</span>
+                      <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border transition-all ${
+                        assessPriority.priority === 'critique' ? 'bg-rose-500 text-white border-transparent animate-pulse' :
+                        assessPriority.priority === 'urgent' ? 'bg-amber-500 text-white border-transparent' :
+                        'bg-emerald-100 text-emerald-800 border-emerald-300'
+                      }`}>
+                        {assessPriority.priority === 'critique' ? '🔴 Critique (Rouge)' :
+                         assessPriority.priority === 'urgent' ? '🟡 Urgent (Orange)' :
+                         '🟢 Normal (Vert)'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Priority Alerts Warning if any */}
+                  {assessPriority.alerts.length > 0 && (
+                    <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs space-y-1">
+                      <p className="font-black uppercase tracking-wider flex items-center gap-1.5 text-rose-700">
+                        <AlertTriangle size={16} />
+                        <span>Signes d'alerte détectés par l'algorithme :</span>
+                      </p>
+                      <ul className="list-disc list-inside space-y-0.5 text-[11px] font-bold">
+                        {assessPriority.alerts.map((alt, i) => (
+                          <li key={i}>{alt}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Vitals Form Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-5">
+                    {/* Tension Artérielle */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                        <Activity size={14} className="text-teal-600" />
+                        <span>Tension Artérielle (mmHg)</span>
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          value={vitals.bpSys}
+                          onChange={(e) => setVitals({ ...vitals, bpSys: parseInt(e.target.value) || 0 })}
+                          placeholder="PAS"
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                        />
+                        <span className="text-slate-400 font-black">/</span>
+                        <input
+                          type="number"
+                          value={vitals.bpDia}
+                          onChange={(e) => setVitals({ ...vitals, bpDia: parseInt(e.target.value) || 0 })}
+                          placeholder="PAD"
+                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-400 font-medium mt-1">Ex: 120 / 80 mmHg</p>
+                    </div>
+
+                    {/* Pouls / Fréquence Cardiaque */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                        <Heart size={14} className="text-rose-500" />
+                        <span>Fréquence Cardiaque (bpm)</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={vitals.heartRate}
+                        onChange={(e) => setVitals({ ...vitals, heartRate: parseInt(e.target.value) || 0, pulse: parseInt(e.target.value) || 0 })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                      />
+                      <p className="text-[10px] text-slate-400 font-medium mt-1">Normal: 60 - 100 bpm</p>
+                    </div>
+
+                    {/* Température */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                        <Thermometer size={14} className="text-amber-500" />
+                        <span>Température (°C)</span>
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={vitals.temp}
+                        onChange={(e) => setVitals({ ...vitals, temp: parseFloat(e.target.value) || 0 })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                      />
+                      <p className="text-[10px] text-slate-400 font-medium mt-1">Normal: 36.5 - 37.5 °C</p>
+                    </div>
+
+                    {/* Saturation SpO2 */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                        <Droplets size={14} className="text-blue-500" />
+                        <span>Saturation SpO2 (%)</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={vitals.spo2}
+                        onChange={(e) => setVitals({ ...vitals, spo2: parseInt(e.target.value) || 0 })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                      />
+                      <p className="text-[10px] text-slate-400 font-medium mt-1">Normal: &gt;= 95%</p>
+                    </div>
+
+                    {/* Fréquence Respiratoire */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                        Fréquence Resp. (/min)
+                      </label>
+                      <input
+                        type="number"
+                        value={vitals.respRate}
+                        onChange={(e) => setVitals({ ...vitals, respRate: parseInt(e.target.value) || 0 })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                      />
+                      <p className="text-[10px] text-slate-400 font-medium mt-1">Normal: 12 - 20 /min</p>
+                    </div>
+
+                    {/* Glycémie */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                        Glycémie (g/L)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={vitals.bloodGlucose}
+                        onChange={(e) => setVitals({ ...vitals, bloodGlucose: parseFloat(e.target.value) || 0 })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                      />
+                      <p className="text-[10px] text-slate-400 font-medium mt-1">À jeun: 0.70 - 1.10 g/L</p>
+                    </div>
+
+                    {/* Taille */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                        Taille (cm)
+                      </label>
+                      <input
+                        type="number"
+                        value={vitals.height}
+                        onChange={(e) => setVitals({ ...vitals, height: parseInt(e.target.value) || 0 })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                      />
+                    </div>
+
+                    {/* Poids */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                        Poids (kg)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        value={vitals.weight}
+                        onChange={(e) => setVitals({ ...vitals, weight: parseFloat(e.target.value) || 0 })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                      />
+                    </div>
+
+                    {/* Calcul IMC Dynamique */}
+                    <div className="p-4 rounded-2xl bg-teal-50 border border-teal-200 flex flex-col justify-between">
+                      <span className="text-[10px] font-black text-teal-800 uppercase tracking-widest">IMC Dynamique</span>
+                      <div>
+                        <p className="text-2xl font-black text-teal-900">{computedBMI} <span className="text-xs font-normal">kg/m²</span></p>
+                        <p className={`text-[10px] font-bold ${getBmiCategory(computedBMI).color}`}>
+                          {getBmiCategory(computedBMI).label}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Douleur (EVA 0-10) */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                        Douleur (EVA 0 - 10) : <strong className="text-slate-900">{vitals.painScore}/10</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        value={vitals.painScore}
+                        onChange={(e) => setVitals({ ...vitals, painScore: parseInt(e.target.value) || 0 })}
+                        className="w-full accent-teal-600"
+                      />
+                      <div className="flex justify-between text-[8px] text-slate-400 font-bold mt-1">
+                        <span>0: Nulle</span>
+                        <span>5: Modérée</span>
+                        <span>10: Intense</span>
+                      </div>
+                    </div>
+
+                    {/* Glasgow Score (3-15) */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                        Score Glasgow : <strong className="text-slate-900">{vitals.glasgowScore}/15</strong>
+                      </label>
+                      <input
+                        type="range"
+                        min="3"
+                        max="15"
+                        value={vitals.glasgowScore}
+                        onChange={(e) => setVitals({ ...vitals, glasgowScore: parseInt(e.target.value) || 15 })}
+                        className="w-full accent-teal-600"
+                      />
+                      <div className="flex justify-between text-[8px] text-slate-400 font-bold mt-1">
+                        <span>3: Coma profond</span>
+                        <span>15: Conscient</span>
+                      </div>
+                    </div>
+
+                    {/* Tour de taille */}
+                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
+                        Tour de Taille (cm)
+                      </label>
+                      <input
+                        type="number"
+                        value={vitals.waistCirc}
+                        onChange={(e) => setVitals({ ...vitals, waistCirc: parseInt(e.target.value) || 0 })}
+                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Clinical Notes */}
+                  <div>
+                    <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-2">
+                      Observations & Antécédents relevés au Triage
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={vitals.clinicalNotes}
+                      onChange={(e) => setVitals({ ...vitals, clinicalNotes: e.target.value })}
+                      placeholder="Signes fonctionnels, allergies signalées, remarques pour le médecin..."
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 focus:bg-white focus:ring-2 focus:ring-teal-500"
+                    />
+                  </div>
+
+                  {/* THE TRANSFER BUTTON */}
+                  <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="text-xs text-slate-500">
+                      <p>✅ En cliquant sur <strong>« Transférer au Médecin »</strong>, le dossier est instantanément envoyé dans la file de consultation du médecin.</p>
+                    </div>
+
+                    <button
+                      disabled={isSubmitting}
+                      onClick={handleTransferToDoctor}
+                      className="w-full sm:w-auto px-8 py-4 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg hover:shadow-teal-600/30 flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
+                    >
+                      <CheckCircle size={18} />
+                      <span>{isSubmitting ? 'Transfert en cours...' : 'Transférer au Médecin'}</span>
+                      <ChevronRight size={18} />
+                    </button>
+                  </div>
+
+                </div>
+              ) : (
+                <div className="bg-white p-12 rounded-[36px] border border-slate-200 text-center py-24 space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-teal-50 text-teal-600 flex items-center justify-center mx-auto">
+                    <Stethoscope size={32} />
+                  </div>
+                  <h3 className="text-lg font-black text-slate-800">Aucun patient sélectionné</h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    Sélectionnez un patient dans la file d'attente à gauche pour saisir ses constantes et effectuer l'évaluation de triage.
+                  </p>
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2 : SOINS & ACTES PRESCRITS - FILE D'EXÉCUTION EN RÉCEPTION STRICTE */}
+      {activeTab === 'soins' && (
+        <div className="space-y-6 animate-in fade-in duration-300">
+          {/* Header Banner & KPIs */}
+          <div className="bg-white dark:bg-slate-900 p-6 md:p-8 rounded-[32px] border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div className="flex items-center gap-4">
+              <div className="p-4 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-3xl border border-indigo-200 dark:border-indigo-800">
+                <Syringe size={28} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-600 dark:text-indigo-400">
+                    Espace Soins & Actes Médicaux
+                  </span>
+                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                    File Réception Seule
+                  </span>
+                </div>
+                <h2 className="text-xl md:text-2xl font-black text-slate-900 dark:text-white mt-1">
+                  Tab 2 : Soins & Actes Prescrits
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                  File d'attente d'exécution des actes infirmiers ordonnés par les médecins en Consultation et aux Urgences.
+                </p>
+              </div>
+            </div>
+
+            {/* Harmonized KPI Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 self-stretch lg:self-auto">
+              <div 
+                onClick={() => { setSoinStatusFilter('PENDING'); setSoinOriginFilter('ALL'); }}
+                className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer ${
+                  soinStatusFilter === 'PENDING' && soinOriginFilter === 'ALL'
+                    ? 'bg-amber-500/10 border-amber-400 ring-2 ring-amber-400/20'
+                    : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <span className="block text-2xl font-black text-amber-600 dark:text-amber-400">{pendingActsCount}</span>
+                <span className="block text-[9px] font-black uppercase tracking-wider text-slate-500">En Attente</span>
+              </div>
+
+              <div 
+                onClick={() => { setSoinStatusFilter('PENDING'); setSoinOriginFilter('URGENCES'); }}
+                className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer ${
+                  soinOriginFilter === 'URGENCES'
+                    ? 'bg-red-500/15 border-red-500 ring-2 ring-red-500/20'
+                    : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-900/40 hover:bg-red-100/50'
+                }`}
+              >
+                <span className="block text-2xl font-black text-red-600 dark:text-red-400 flex items-center justify-center gap-1">
+                  {urgPendingCount}
+                  {urgPendingCount > 0 && <span className="w-2 h-2 rounded-full bg-red-600 animate-ping inline-block" />}
+                </span>
+                <span className="block text-[9px] font-black uppercase tracking-wider text-red-700 dark:text-red-300">
+                  🚨 URGENCES
+                </span>
+              </div>
+
+              <div 
+                onClick={() => { setSoinStatusFilter('PENDING'); setSoinOriginFilter('CONSULTATION'); }}
+                className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer ${
+                  soinOriginFilter === 'CONSULTATION'
+                    ? 'bg-blue-500/15 border-blue-500 ring-2 ring-blue-500/20'
+                    : 'bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/40 hover:bg-blue-100/50'
+                }`}
+              >
+                <span className="block text-2xl font-black text-blue-600 dark:text-blue-400">{consultPendingCount}</span>
+                <span className="block text-[9px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">
+                  🩺 Consultation
+                </span>
+              </div>
+
+              <div 
+                onClick={() => { setSoinStatusFilter('DONE'); setSoinOriginFilter('ALL'); }}
+                className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer ${
+                  soinStatusFilter === 'DONE'
+                    ? 'bg-emerald-500/15 border-emerald-500 ring-2 ring-emerald-500/20'
+                    : 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/40 hover:bg-emerald-100/50'
+                }`}
+              >
+                <span className="block text-2xl font-black text-emerald-600 dark:text-emerald-400">{doneActsCount}</span>
+                <span className="block text-[9px] font-black uppercase tracking-wider text-emerald-700 dark:text-emerald-300">Exécutés</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Filtering and Search Toolbar */}
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+            {/* Filter Tabs */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Status tabs */}
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                {[
+                  { id: 'PENDING', label: `À Réaliser (${pendingActsCount})` },
+                  { id: 'DONE', label: `Exécutés (${doneActsCount})` },
+                  { id: 'ALL', label: `Tous (${nursingActs.length})` }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSoinStatusFilter(tab.id as any)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      soinStatusFilter === tab.id
+                        ? 'bg-white dark:bg-slate-700 text-indigo-600 dark:text-indigo-300 shadow-xs'
+                        : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Provenance Filter */}
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                <button
+                  onClick={() => setSoinOriginFilter('ALL')}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                    soinOriginFilter === 'ALL'
+                      ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  Toutes Provenances
+                </button>
+                <button
+                  onClick={() => setSoinOriginFilter('URGENCES')}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all flex items-center gap-1 cursor-pointer ${
+                    soinOriginFilter === 'URGENCES'
+                      ? 'bg-red-600 text-white shadow-xs'
+                      : 'text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30'
+                  }`}
+                >
+                  <Zap size={11} className="fill-current" />
+                  <span>Urgences ({urgPendingCount})</span>
+                </button>
+                <button
+                  onClick={() => setSoinOriginFilter('CONSULTATION')}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all flex items-center gap-1 cursor-pointer ${
+                    soinOriginFilter === 'CONSULTATION'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/30'
+                  }`}
+                >
+                  <Stethoscope size={11} />
+                  <span>Consultation ({consultPendingCount})</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Search Input */}
+            <div className="relative flex-1 md:max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+              <input
+                type="text"
+                value={soinSearchQuery}
+                onChange={(e) => setSoinSearchQuery(e.target.value)}
+                placeholder="Rechercher patient, acte, médecin..."
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
+          </div>
+
+          {/* TABLE OF PRESCRIBED CARE ACTS */}
+          <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
+            {(() => {
+              const filteredList = nursingActs.filter((act) => {
+                // Status filter
+                if (soinStatusFilter === 'PENDING' && act.status === 'FAIT') return false;
+                if (soinStatusFilter === 'DONE' && act.status !== 'FAIT') return false;
+
+                // Provenance filter
+                const isUrgence = act.source === 'URGENCES' || act.priority === 'HIGH';
+                if (soinOriginFilter === 'URGENCES' && !isUrgence) return false;
+                if (soinOriginFilter === 'CONSULTATION' && isUrgence) return false;
+
+                // Search query
+                if (!soinSearchQuery.trim()) return true;
+                const q = soinSearchQuery.toLowerCase();
+                return (
+                  (act.patientName && act.patientName.toLowerCase().includes(q)) ||
+                  (act.patientId && String(act.patientId).toLowerCase().includes(q)) ||
+                  (act.actType && act.actType.toLowerCase().includes(q)) ||
+                  (act.prescribedBy && act.prescribedBy.toLowerCase().includes(q)) ||
+                  (act.instructions && act.instructions.toLowerCase().includes(q)) ||
+                  (act.source && act.source.toLowerCase().includes(q))
+                );
+              }).sort((a, b) => {
+                // 1. Prioritize pending over done
+                const isPendingA = a.status !== 'FAIT';
+                const isPendingB = b.status !== 'FAIT';
+                if (isPendingA && !isPendingB) return -1;
+                if (!isPendingA && isPendingB) return 1;
+
+                // 2. Automatically sort URGENCES requests to the top of the pending list!
+                const isUrgA = a.source === 'URGENCES' || a.priority === 'HIGH';
+                const isUrgB = b.source === 'URGENCES' || b.priority === 'HIGH';
+                if (isUrgA && !isUrgB) return -1;
+                if (!isUrgA && isUrgB) return 1;
+
+                // 3. Chronological sorting (DESC) - newest first
+                const timeA = new Date(a.createdAt || a.prescribedAt || 0).getTime();
+                const timeB = new Date(b.createdAt || b.prescribedAt || 0).getTime();
+                return timeB - timeA;
+              });
+
+              if (filteredList.length === 0) {
+                return (
+                  <div className="py-20 text-center space-y-3">
+                    <div className="w-16 h-16 rounded-3xl bg-slate-100 dark:bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                      <Syringe size={32} />
+                    </div>
+                    <h3 className="text-base font-black text-slate-800 dark:text-slate-200">
+                      Aucun soin dans cette vue
+                    </h3>
+                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                      Les prescriptions ordonnées par les médecins en Consultation et aux Urgences s'affichent automatiquement ici.
+                    </p>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                        <th className="py-4 px-5">Provenance</th>
+                        <th className="py-4 px-4">Priorité / Délai</th>
+                        <th className="py-4 px-4">Patient</th>
+                        <th className="py-4 px-4">Soin & Consignes Médicales</th>
+                        <th className="py-4 px-4">Prescripteur</th>
+                        <th className="py-4 px-4">Date & Heure</th>
+                        <th className="py-4 px-4">Statut</th>
+                        <th className="py-4 px-5 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                      {filteredList.map((act) => {
+                        const isUrg = act.source === 'URGENCES' || act.priority === 'HIGH';
+                        const isDone = act.status === 'FAIT';
+                        const isCritique = act.priority === 'CRITIQUE' || act.priority === 'critique';
+                        const isUrgent = act.priority === 'URGENT' || act.priority === 'urgent' || act.priority === 'HIGH';
+
+                        return (
+                          <tr
+                            key={act.id}
+                            className={`hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors ${
+                              isUrg && !isDone ? 'bg-red-500/5' : ''
+                            }`}
+                          >
+                            {/* Provenance Column */}
+                            <td className="py-4 px-5 whitespace-nowrap">
+                              {isUrg ? (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-red-600 text-white shadow-sm ring-2 ring-red-500/20">
+                                  <Zap size={11} className="fill-current animate-pulse" />
+                                  <span>URGENCES</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-600 text-white shadow-sm">
+                                  <Stethoscope size={11} />
+                                  <span>CONSULTATION</span>
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Priorité & Délai Column */}
+                            <td className="py-4 px-4 whitespace-nowrap">
+                              <div className="flex flex-col gap-1">
+                                <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-black uppercase border w-fit ${
+                                  isUrg || isCritique
+                                    ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/40 dark:text-rose-300'
+                                    : isUrgent
+                                    ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300'
+                                    : 'bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-950/40 dark:text-teal-300'
+                                }`}>
+                                  {isUrg ? 'HAUTE (URGENCES)' : (act.priority || 'NORMAL')}
+                                </span>
+                                {act.timing && (
+                                  <span className="text-[10px] text-slate-500 font-bold">
+                                    {act.timing}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Patient Column */}
+                            <td className="py-4 px-4">
+                              <p className="font-black text-slate-900 dark:text-white text-sm">
+                                {act.patientName}
+                              </p>
+                              <p className="text-[11px] text-slate-400 font-medium">
+                                #{act.patientId || act.id?.slice(0, 6)}
+                                {act.age ? ` • ${act.age} ans` : ''}
+                                {act.gender ? ` • ${act.gender}` : ''}
+                              </p>
+                            </td>
+
+                            {/* Acte / Soin Prescrit Column */}
+                            <td className="py-4 px-4 max-w-xs">
+                              <p className="font-black text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
+                                <Syringe size={13} className="text-indigo-600 shrink-0" />
+                                <span>{act.actType}</span>
+                              </p>
+                              {act.instructions ? (
+                                <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium truncate mt-0.5" title={act.instructions}>
+                                  {act.instructions}
+                                </p>
+                              ) : (
+                                <span className="text-[10px] text-slate-400 italic">Protocole standard</span>
+                              )}
+                            </td>
+
+                            {/* Prescripteur Column */}
+                            <td className="py-4 px-4 whitespace-nowrap">
+                              <p className="font-bold text-slate-800 dark:text-slate-200 text-xs">
+                                {act.prescribedBy || (isUrg ? 'Dr. Urgentiste' : 'Dr. Traitant')}
+                              </p>
+                              <span className="text-[10px] text-slate-400">
+                                {act.prescribedByRole || (isUrg ? 'Médecin Urgentiste' : 'Médecin')}
+                              </span>
+                            </td>
+
+                            {/* Date & Heure Column */}
+                            <td className="py-4 px-4 whitespace-nowrap">
+                              <p className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                                {act.date || '--'}
+                              </p>
+                              <p className="text-[10px] text-slate-400">
+                                {act.time || '--'}
+                              </p>
+                            </td>
+
+                            {/* Statut Column */}
+                            <td className="py-4 px-4 whitespace-nowrap">
+                              {isDone ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                  <CheckCircle2 size={11} />
+                                  <span>FAIT</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-300">
+                                  <Clock size={11} />
+                                  <span>EN ATTENTE</span>
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Action Column */}
+                            <td className="py-4 px-5 text-right whitespace-nowrap">
+                              {isDone ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedActForExecution(act)}
+                                  className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-300 rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <FileText size={13} />
+                                  <span>Voir Rapport</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedActForExecution(act);
+                                    setExecutionNotes(act.instructions ? `Soin réalisé selon consignes médicales.` : '');
+                                  }}
+                                  className={`px-4 py-2 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all inline-flex items-center gap-1.5 shadow-sm cursor-pointer ${
+                                    isUrg
+                                      ? 'bg-red-600 hover:bg-red-700 ring-2 ring-red-500/20 animate-pulse'
+                                      : 'bg-indigo-600 hover:bg-indigo-700'
+                                  }`}
+                                >
+                                  <Syringe size={13} />
+                                  <span>Exécuter le Soin</span>
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* EXECUTION MODAL / DRAWER */}
+          {selectedActForExecution && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+              <div className="bg-white dark:bg-slate-900 rounded-[32px] border border-slate-200 dark:border-slate-800 max-w-2xl w-full p-6 md:p-8 space-y-6 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+                {/* Modal Top Bar */}
+                <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* Provenance Badge */}
+                      {selectedActForExecution.source === 'URGENCES' || selectedActForExecution.priority === 'HIGH' ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-red-600 text-white shadow-xs">
+                          <Zap size={10} className="fill-current" />
+                          <span>URGENCES</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-600 text-white shadow-xs">
+                          <Stethoscope size={10} />
+                          <span>CONSULTATION</span>
+                        </span>
+                      )}
+
+                      <span className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border ${
+                        selectedActForExecution.status === 'FAIT'
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                          : 'bg-amber-100 text-amber-800 border-amber-300'
+                      }`}>
+                        {selectedActForExecution.status === 'FAIT' ? '✓ Soin Réalisé' : '● À Exécuter'}
+                      </span>
+                    </div>
+
+                    <h3 className="text-xl font-black text-slate-900 dark:text-white mt-2">
+                      {selectedActForExecution.actType}
+                    </h3>
+                    <p className="text-xs text-slate-500 font-bold mt-0.5">
+                      Patient : <strong className="text-slate-800 dark:text-slate-200">{selectedActForExecution.patientName}</strong>
+                      <span className="font-mono text-slate-400 ml-2">#{selectedActForExecution.patientId}</span>
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setSelectedActForExecution(null)}
+                    className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Prescription details box */}
+                <div className="p-4 bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-black text-indigo-900 dark:text-indigo-300 flex items-center gap-1.5">
+                      <Stethoscope size={15} />
+                      Prescription Médicale
+                    </span>
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400">
+                      {selectedActForExecution.date} à {selectedActForExecution.time}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Prescrit par</span>
+                      <strong className="text-slate-800 dark:text-slate-200">
+                        {selectedActForExecution.prescribedBy || 'Médecin'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Priorité & Échéance</span>
+                      <strong className="text-slate-800 dark:text-slate-200 uppercase">
+                        {selectedActForExecution.priority || 'NORMAL'} • {selectedActForExecution.timing || 'STAT'}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {selectedActForExecution.instructions && (
+                    <div className="pt-2 border-t border-indigo-100 dark:border-indigo-900/60">
+                      <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-400 block mb-1">
+                        Consignes & Posologie du Médecin :
+                      </span>
+                      <p className="text-xs text-slate-800 dark:text-slate-200 font-medium whitespace-pre-wrap bg-white dark:bg-slate-900 p-3 rounded-xl border border-indigo-100 dark:border-indigo-900/80">
+                        {selectedActForExecution.instructions}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Action form or completion record */}
+                {selectedActForExecution.status !== 'FAIT' ? (
+                  <div className="space-y-4 pt-2">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
+                      Observations et Rapport d'Exécution Infirmier
+                    </h4>
+
+                    <div>
+                      <textarea
+                        rows={4}
+                        value={executionNotes}
+                        onChange={(e) => setExecutionNotes(e.target.value)}
+                        placeholder="Précisez le matériel utilisé, le site d'injection / pansement, la tolérance du patient, les constantes de contrôle..."
+                        className="w-full p-3.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-medium text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedActForExecution(null)}
+                        className="px-5 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all cursor-pointer"
+                      >
+                        Annuler
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isExecutingAct}
+                        onClick={() => handleMarkActAsDone(selectedActForExecution)}
+                        className="flex-1 py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
+                      >
+                        {isExecutingAct ? (
+                          <>
+                            <RefreshCw size={14} className="animate-spin" />
+                            <span>Validation du soin en cours...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Check size={16} />
+                            <span>Valider la Réalisation du Soin (Marquer FAIT)</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-2xl space-y-3">
+                    <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300 font-black text-xs uppercase tracking-wider">
+                      <CheckCircle2 size={18} className="text-emerald-600 dark:text-emerald-400" />
+                      <span>Rapport d'Exécution Médicale & Traçabilité</span>
+                    </div>
+
+                    <div className="text-xs text-slate-700 dark:text-slate-300 space-y-1">
+                      <p>
+                        <strong>Soignant exécutant :</strong> {selectedActForExecution.executedBy || 'Infirmier(ère)'}
+                      </p>
+                      <p>
+                        <strong>Horodatage d'exécution :</strong> {selectedActForExecution.executionDate} à {selectedActForExecution.executionTime}
+                      </p>
+                    </div>
+
+                    {selectedActForExecution.executionNotes && (
+                      <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-emerald-100 dark:border-emerald-900/60 text-xs text-slate-800 dark:text-slate-200">
+                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-1">
+                          Observations cliniques infirmières :
+                        </span>
+                        <p className="font-medium whitespace-pre-wrap">{selectedActForExecution.executionNotes}</p>
+                      </div>
+                    )}
+
+                    <div className="pt-2 text-right">
+                      <button
+                        onClick={() => setSelectedActForExecution(null)}
+                        className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        Fermer
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* HISTORIQUE TRIAGES TAB */}
+      {activeTab === 'historique' && (
+        <div className="bg-white p-6 md:p-8 rounded-[32px] border border-slate-200 shadow-xs space-y-6 animate-in fade-in duration-300">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-xl font-black text-slate-900">Historique & Registre des Triages</h3>
+              <p className="text-xs text-slate-400 font-medium">Recherchez parmi l'ensemble des constantes et évaluations effectuées</p>
+            </div>
+
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+              />
+              <div className="relative flex-1 sm:w-60">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                <input
+                  type="text"
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  placeholder="Rechercher patient..."
+                  className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                  <th className="pb-3">Heure & Date</th>
+                  <th className="pb-3">Patient</th>
+                  <th className="pb-3">TA (mmHg)</th>
+                  <th className="pb-3">FC (bpm)</th>
+                  <th className="pb-3">T° (°C)</th>
+                  <th className="pb-3">SpO2 (%)</th>
+                  <th className="pb-3">IMC</th>
+                  <th className="pb-3">Priorité</th>
+                  <th className="pb-3">Infirmier(ère)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {triageHistory
+                  .filter(t => {
+                    const matchesDate = !selectedDate || t.createdAt?.startsWith(selectedDate);
+                    const matchesSearch = !historySearch.trim() || (t.patientName && t.patientName.toLowerCase().includes(historySearch.toLowerCase()));
+                    return matchesDate && matchesSearch;
+                  })
+                  .map((t, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-3 font-mono text-[11px] text-slate-500">
+                        {t.createdAt ? new Date(t.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--'}
+                      </td>
+                      <td className="py-3 font-black text-slate-900">{t.patientName}</td>
+                      <td className="py-3 font-bold text-slate-700">{t.vitals?.bp || (t.vitals?.bpSys ? `${t.vitals.bpSys}/${t.vitals.bpDia}` : '--')}</td>
+                      <td className="py-3 font-bold text-slate-700">{t.vitals?.heartRate || t.vitals?.pulse || '--'}</td>
+                      <td className="py-3 font-bold text-slate-700">{t.vitals?.temp || '--'}°</td>
+                      <td className="py-3 font-bold text-slate-700">{t.vitals?.spo2 || '--'}%</td>
+                      <td className="py-3 font-bold text-slate-700">{t.vitals?.bmi || '--'}</td>
+                      <td className="py-3">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${
+                          t.priority === 'critique' ? 'bg-rose-100 text-rose-700' :
+                          t.priority === 'urgent' ? 'bg-amber-100 text-amber-700' :
+                          'bg-emerald-100 text-emerald-700'
+                        }`}>
+                          {t.priority || 'normal'}
+                        </span>
+                      </td>
+                      <td className="py-3 text-slate-500 font-medium">{t.nurseName || '--'}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* HOSPITALISATION TAB */}
+      {activeTab === 'hospitalisation' && (
+        <Inpatient
+          user={user}
+          paymentRequests={paymentRequests}
+          setPaymentRequests={setPaymentRequests}
+          activeTab="dashboard"
+          setActiveTab={() => {}}
+          onBackToDashboard={onBackToDashboard}
+          theme={theme}
+        />
+      )}
+      </main>
+
+    </div>
+  );
+};
+
+export default SoinsInfirmiers;

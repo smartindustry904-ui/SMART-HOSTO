@@ -3,10 +3,11 @@ import { Patient, Medication, Prescription, User, Ordonnance } from '../../types
 import { 
   FileText, Pill, ShieldAlert, Send, Printer, 
   Plus, Trash2, CheckCircle2, AlertTriangle, 
-  Info, ArrowRight, Save, User as UserIcon, X
+  Info, ArrowRight, Save, User as UserIcon, X, Loader2
 } from 'lucide-react';
 import DosageAssistant from './DosageAssistant';
 import { jsPDF } from 'jspdf';
+import { useSettings } from '../../hooks/useSettings';
 
 interface DigitalPrescriptionProps {
   patient: Patient;
@@ -19,7 +20,10 @@ interface DigitalPrescriptionProps {
 const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({ 
   patient, prescripteur, medications, onValidate, onCancel 
 }) => {
+  if (!patient) return null;
+  const { establishment } = useSettings();
   const [activeTab, setActiveTab] = useState<'PRESCRIPTION' | 'POSOLOGIE' | 'SECURITE' | 'TRANSMISSION' | 'IMPRESSION'>('PRESCRIPTION');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   // Ordonnance State
   const [diagnostic, setDiagnostic] = useState('');
@@ -51,15 +55,16 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
       
       doc.setTextColor(255, 255, 255);
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(16);
-      doc.text("SMART HOSTO CLINIQUE", 15, 17);
+      doc.setFontSize(14);
+      doc.text(establishment?.name || "SMARTHOSTO SIH", 15, 17);
 
       // 2. Headings & Contact details
       doc.setTextColor(230, 242, 255);
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(9);
-      doc.text("Module Consultation d'Orientation", 140, 12);
-      doc.text("Tél: +221 33 800 00 00 • Dakar", 140, 18);
+      doc.setFontSize(8);
+      doc.text("Ordonnance Médicale Officielle", 130, 11);
+      doc.text(`Tél: ${establishment?.phone || '+237 222 33 44 55'}`, 130, 16);
+      doc.text(establishment?.address || "Avenue de l'Indépendance", 130, 21);
 
       // Divider line
       doc.setDrawColor(17, 24, 39);
@@ -85,7 +90,7 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
       doc.setFont('helvetica', 'bold');
       doc.text("PATIENT :", 20, 62);
       doc.setFont('helvetica', 'normal');
-      doc.text(`${patient.lastName || ''} ${patient.firstName || ''}`, 55, 62);
+      doc.text(`${patient?.lastName || ''} ${patient?.firstName || ''}`, 55, 62);
 
       doc.setFont('helvetica', 'bold');
       doc.text("DETAILS :", 20, 68);
@@ -152,12 +157,13 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
       if (printWindow) {
         printWindow.document.write(`
           <html>
-            <head><title>Ordonnance - ${patient.firstName} ${patient.lastName}</title></head>
+            <head><title>Ordonnance - ${patient?.firstName || ''} ${patient?.lastName || ''}</title></head>
             <body>
               <div style="font-family: sans-serif; padding: 40px;">
-                <h2>🏥 SMART HOSTO CLINIQUE</h2>
+                <h2>🏥 ${establishment?.name || 'SMARTHOSTO SIH'}</h2>
+                <p style="font-size: 13px; color: #64748b; margin-top: -8px;">${establishment?.address || ''} • Tél: ${establishment?.phone || ''}</p>
                 <h3>Ordonnance Médicale</h3>
-                <p><b>Patient:</b> ${patient.firstName} ${patient.lastName}</p>
+                <p><b>Patient:</b> ${patient?.firstName || ''} ${patient?.lastName || ''}</p>
                 <p><b>Médecin:</b> ${prescripteur.name}</p>
                 <hr/>
                 <div>${medListHtml}</div>
@@ -257,23 +263,36 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
   }, [prescriptions, patient, medications]);
 
   // 4. TRANSMISSION & VALIDATION
-  const handleFinalValidate = () => {
-    const ordonnance: Ordonnance = {
-      id: `ORD-${Date.now()}`,
-      patientId: patient.id,
-      prescripteurId: prescripteur.id,
-      prescripteurName: prescripteur.name,
-      prescripteurRole: prescripteur.profession || prescripteur.role,
-      date: new Date().toISOString(),
-      status: transmitToPharmacy ? 'TRANSMITTED' : 'VALIDATED',
-      diagnostic,
-      indication,
-      notes,
-      traitements: prescriptions as Prescription[],
-      pharmacyStatus: transmitToPharmacy ? 'PENDING' : undefined
-    };
-    
-    onValidate(ordonnance);
+  const handleFinalValidate = async () => {
+    setIsSubmitting(true);
+    try {
+      const ordonnance: Ordonnance = {
+        id: `ORD-${Date.now()}`,
+        patientId: patient.id,
+        prescripteurId: prescripteur.id,
+        prescripteurName: prescripteur.name,
+        prescripteurRole: prescripteur.profession || prescripteur.role,
+        date: new Date().toISOString(),
+        status: transmitToPharmacy ? 'TRANSMITTED' : 'VALIDATED',
+        diagnostic,
+        indication,
+        notes,
+        traitements: prescriptions as Prescription[],
+        pharmacyStatus: transmitToPharmacy ? 'PENDING' : undefined
+      };
+      
+      window.dispatchEvent(new CustomEvent('app-notification', { 
+        detail: { message: `Ordonnance validée et transmise${transmitToPharmacy ? ' à la pharmacie' : ''} avec succès !`, type: 'success' }
+      }));
+      
+      onValidate(ordonnance);
+    } catch (err) {
+      window.dispatchEvent(new CustomEvent('app-notification', { 
+        detail: { message: "Erreur lors de la validation de l'ordonnance.", type: 'error' }
+      }));
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const isFormValid = prescriptions.length > 0 && 
@@ -334,7 +353,7 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
               <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <p className="text-xs text-slate-500 font-bold uppercase">Patient</p>
-                  <p className="font-black text-slate-900">{patient.firstName} {patient.lastName}</p>
+                  <p className="font-black text-slate-900">{patient?.firstName || ''} {patient?.lastName || ''}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 font-bold uppercase">Âge / Sexe</p>
@@ -669,9 +688,9 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
         {/* TAB 5: IMPRESSION */}
         {activeTab === 'IMPRESSION' && (
           <div className="max-w-4xl mx-auto animate-in fade-in duration-300 space-y-6">
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+            <div className="bg-white p-4 md:p-8 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
               {/* PDF Preview */}
-              <div className="border-2 border-slate-100 p-8 rounded-xl bg-white shadow-inner min-h-[500px] font-sans">
+              <div className="border-2 border-slate-100 p-6 md:p-8 rounded-xl bg-white shadow-inner min-h-[500px] font-sans w-full max-w-[800px] mx-auto overflow-hidden scale-90 md:scale-100 origin-top">
                 <div className="flex justify-between items-start border-b-2 border-slate-800 pb-6 mb-6">
                   <div>
                     <h1 className="text-2xl font-black text-slate-900 uppercase tracking-widest">ORDONNANCE</h1>
@@ -686,7 +705,7 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
                 
                 <div className="mb-8">
                   <p className="text-sm text-slate-500 uppercase font-bold mb-1">Patient</p>
-                  <p className="font-black text-lg text-slate-900">{patient.firstName} {patient.lastName}</p>
+                  <p className="font-black text-lg text-slate-900">{patient?.firstName || ''} {patient?.lastName || ''}</p>
                   <p className="text-sm text-slate-600">{patient.age} ans, {patient.vitals?.weight ? `${patient.vitals.weight} kg` : ''}</p>
                 </div>
                 
@@ -722,10 +741,11 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
               
               <button 
                 onClick={handleFinalValidate}
-                disabled={!isFormValid}
-                className="px-8 py-4 bg-emerald-600 disabled:bg-slate-300 text-white rounded-xl font-black hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-lg shadow-emerald-600/20"
+                disabled={!isFormValid || isSubmitting}
+                className="px-8 py-4 bg-emerald-600 disabled:bg-slate-300 text-white rounded-xl font-black hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer disabled:cursor-not-allowed"
               >
-                <Save size={20} /> Valider l'Ordonnance
+                {isSubmitting ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                {isSubmitting ? 'Validation...' : "Valider l'Ordonnance"}
               </button>
             </div>
           </div>

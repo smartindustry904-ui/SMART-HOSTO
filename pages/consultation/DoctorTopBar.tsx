@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { Bell, Search, AlertTriangle, Thermometer, Activity, Heart, User, Clock } from 'lucide-react';
+import { AvatarPlaceholder } from '../../components/common/AvatarPlaceholder';
 
 interface DoctorTopBarProps {
   activePatient: any | null;
@@ -14,9 +15,12 @@ const DoctorTopBar: React.FC<DoctorTopBarProps> = ({ activePatient, doctorName }
         {activePatient ? (
           <div className="flex items-center gap-6 animate-in slide-in-from-left-6 duration-700">
             <div className="relative">
-              <div className="w-16 h-16 bg-blue-50 rounded-[28px] border-2 border-blue-200 flex items-center justify-center text-blue-600 font-black text-2xl overflow-hidden shadow-xl shadow-blue-600/10">
-                <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activePatient.lastName}`} alt="Patient" referrerPolicy="no-referrer" />
-              </div>
+              <AvatarPlaceholder 
+                size={64} 
+                iconSize={32} 
+                className="rounded-[28px] border-2 border-slate-200 dark:border-zinc-800 shadow-xl shadow-blue-600/10" 
+                alt={`${activePatient.lastName} ${activePatient.firstName}`} 
+              />
               <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-emerald-500 border-4 border-white rounded-full animate-pulse"></div>
             </div>
             
@@ -80,22 +84,12 @@ const DoctorTopBar: React.FC<DoctorTopBarProps> = ({ activePatient, doctorName }
         )}
       </div>
 
-      <div className="flex items-center gap-6">
+      <div className="flex items-center gap-4">
         <div className="relative group">
-          <button className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-900 transition-all border border-slate-100">
-            <Bell size={20} />
-            <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-rose-500 border-2 border-white rounded-full"></span>
+          <button className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-900 transition-all border border-slate-100 cursor-pointer shadow-sm">
+            <Bell size={18} />
+            <span className="absolute top-3 right-3 w-2 h-2 bg-rose-500 border-2 border-white rounded-full"></span>
           </button>
-        </div>
-        <div className="h-10 w-px bg-slate-100"></div>
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Session Docteur</p>
-            <p className="text-sm font-black text-slate-900">{doctorName}</p>
-          </div>
-          <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-lg shadow-xl shadow-slate-900/20">
-            {doctorName.charAt(0)}
-          </div>
         </div>
       </div>
     </div>

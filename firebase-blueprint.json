@@ -328,6 +328,157 @@
         "doctor": { "type": "string" }
       },
       "required": ["id", "date", "time", "patient", "status"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "A financial expense record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "reference": { "type": "string" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "supplier": { "type": "string" },
+        "date": { "type": "string" },
+        "receiptUrl": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "CANCELLED", "ARCHIVED"] }
+      },
+      "required": ["id", "reference", "category", "amount", "date", "status"]
+    },
+    "Supplier": {
+      "title": "Supplier",
+      "description": "A supplier profile.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "contact": { "type": "string" },
+        "address": { "type": "string" },
+        "category": { "type": "string" },
+        "historyCount": { "type": "number" },
+        "totalBought": { "type": "number" },
+        "outstandingDebt": { "type": "number" },
+        "nextDeadline": { "type": "string" }
+      },
+      "required": ["id", "name", "category"]
+    },
+    "TreasuryAccount": {
+      "title": "Treasury Account",
+      "description": "A cash or bank account balance.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["CAISSE", "BANQUE", "MOBILE_MONEY"] },
+        "balance": { "type": "number" },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] }
+      },
+      "required": ["id", "name", "type", "balance", "status"]
+    },
+    "StaffSalary": {
+      "title": "Staff Salary",
+      "description": "Salary details for a staff member.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "specialty": { "type": "string" },
+        "baseSalary": { "type": "number" },
+        "primes": { "type": "number" },
+        "gardes": { "type": "number" },
+        "deductions": { "type": "number" },
+        "actsCount": { "type": "number" }
+      },
+      "required": ["id", "name", "baseSalary"]
+    },
+    "QuotePartRule": {
+      "title": "Quote Part Rule",
+      "description": "Revenue splitting rule between practitioner and facility.",
+      "type": "object",
+      "properties": {
+        "service": { "type": "string" },
+        "providerPercent": { "type": "number" },
+        "facilityPercent": { "type": "number" }
+      },
+      "required": ["service", "providerPercent", "facilityPercent"]
+    },
+    "StockMovement": {
+      "title": "Stock Movement",
+      "description": "Audit trace of inventory restock, adjustments, and movements.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "medicationId": { "type": "string" },
+        "medicationName": { "type": "string" },
+        "type": { "type": "string" },
+        "quantity": { "type": "number" },
+        "previousStock": { "type": "number" },
+        "newStock": { "type": "number" },
+        "batchNumber": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "adminName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "medicationId", "medicationName", "quantity", "createdAt"]
+    },
+    "HospitalService": {
+      "title": "Hospital Service",
+      "description": "Hospital medical or support department configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique ID of the service (e.g. SRV-CARDIOLOGIE)." },
+        "name": { "type": "string", "description": "Display name of the service." },
+        "description": { "type": "string", "description": "Description of clinical or support scope." },
+        "type": { 
+          "type": "string", 
+          "enum": ["clinique", "technique", "administratif", "soutien", "specialise"],
+          "description": "Classification type of the service."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "inactive"],
+          "description": "Activation state of the service."
+        },
+        "is_active": { "type": "boolean", "description": "Boolean flag for active availability in reception." },
+        "order": { "type": "number", "description": "Display sort position." },
+        "users": { "type": "array", "description": "Assigned staff IDs." },
+        "activeTools": { "type": "array", "description": "Enabled tools or clinical modules." },
+        "linkedModules": { "type": "array", "description": "Associated application modules." },
+        "specificSettings": { "type": "object", "description": "Specialized settings such as fees and active specialties." },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last update." }
+      },
+      "required": ["id", "name", "type", "status"]
+    },
+    "Licence": {
+      "title": "Licence & Quota Plan",
+      "description": "Subscription license specifying staff user quotas and contractual tier.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique license ID." },
+        "nom_licence": { "type": "string", "description": "Name of the license (e.g. Basic, Pro, Enterprise)." },
+        "max_users": { "type": "number", "description": "Maximum number of staff user accounts permitted." },
+        "description": { "type": "string", "description": "Plan description and features." },
+        "monthlyPriceFCFA": { "type": "number", "description": "Monthly pricing in FCFA." },
+        "createdAt": { "type": "string", "description": "Creation timestamp." },
+        "updatedAt": { "type": "string", "description": "Last update timestamp." }
+      },
+      "required": ["id", "nom_licence", "max_users"]
+    },
+    "Hospital": {
+      "title": "Hospital Structure",
+      "description": "Healthcare facility tenant subscribed with an assigned licence_id.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique hospital ID." },
+        "name": { "type": "string", "description": "Hospital name." },
+        "licence_id": { "type": "string", "description": "Foreign key referencing assigned Licence." },
+        "max_users": { "type": "number", "description": "Cached or custom max staff user count." },
+        "status": { "type": "string", "description": "Status of the hospital subscription." }
+      },
+      "required": ["id", "name", "licence_id"]
     }
   },
   "firestore": {
@@ -410,6 +561,66 @@
     "/appointments/{id}": {
       "schema": "Appointment",
       "description": "Scheduled appointments of all patients."
+    },
+    "/expenses/{id}": {
+      "schema": "Expense",
+      "description": "Collection of clinical and administrative expenses."
+    },
+    "/suppliers/{id}": {
+      "schema": "Supplier",
+      "description": "Collection of facility suppliers and vendors."
+    },
+    "/treasury_accounts/{id}": {
+      "schema": "TreasuryAccount",
+      "description": "Collection of cash drawers and bank accounts."
+    },
+    "/staff_salaries/{id}": {
+      "schema": "StaffSalary",
+      "description": "Collection of staff payroll details."
+    },
+    "/quote_parts_rules/{service}": {
+      "schema": "QuotePartRule",
+      "description": "Collection of revenue splitting configurations."
+    },
+    "/cashier_transactions/{id}": {
+      "schema": "CashierTransaction",
+      "description": "Collection of validated cashier payments."
+    },
+    "/cashier_sessions/{id}": {
+      "schema": "CashierSession",
+      "description": "Collection of cashier shift opening and closing sessions."
+    },
+    "/stock_movements/{id}": {
+      "schema": "StockMovement",
+      "description": "Audit trace collection for stock movements and replenishments."
+    },
+    "/hospital_services/{id}": {
+      "schema": "HospitalService",
+      "description": "Hospital services and departments configuration synchronized with Reception."
+    },
+    "/saas_clinics/{id}": {
+      "schema": "HospitalService",
+      "description": "Multi-tenant hospital clinic establishments registered on SmartHosto."
+    },
+    "/saas_plans/{id}": {
+      "schema": "HospitalService",
+      "description": "Commercial licensing plans catalog of SmartHosto."
+    },
+    "/saas_invoices/{id}": {
+      "schema": "HospitalService",
+      "description": "Subscription billing invoices and payments of the SmartHosto SaaS platform."
+    },
+    "/saas_logs/{id}": {
+      "schema": "HospitalService",
+      "description": "Super Administrator security audit trail."
+    },
+    "/licences/{id}": {
+      "schema": "Licence",
+      "description": "Collection of subscription licenses and staff user quotas."
+    },
+    "/hospitals/{id}": {
+      "schema": "Hospital",
+      "description": "Collection of hospital establishments with assigned licence_id."
     }
   }
 }

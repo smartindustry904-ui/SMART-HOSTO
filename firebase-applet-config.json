@@ -1,10 +1,10 @@
 {
-  "projectId": "smart-agro-87cae",
-  "appId": "1:562910631794:web:1f6d9a309c5aa5b1c8afeb",
-  "apiKey": "AIzaSyA_joiP0aDm5l6zvA26nA7MYX8xMrcTYVo",
-  "authDomain": "smart-agro-87cae.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-1a239eee-8623-4452-938c-69c6859c83ba",
-  "storageBucket": "smart-agro-87cae.firebasestorage.app",
-  "messagingSenderId": "562910631794",
-  "measurementId": ""
+  "apiKey": "AIzaSyDtMYV8JKxPhkxYXstPM1ybcZmq3DvuHP0",
+  "authDomain": "smart-hosto-3fba2.firebaseapp.com",
+  "projectId": "smart-hosto-3fba2",
+  "storageBucket": "smart-hosto-3fba2.firebasestorage.app",
+  "messagingSenderId": "1098750621889",
+  "appId": "1:1098750621889:web:9bd412ec8ea7bd69107c40",
+  "measurementId": "G-SVD191WFTY",
+  "firestoreDatabaseId": "(default)"
 }

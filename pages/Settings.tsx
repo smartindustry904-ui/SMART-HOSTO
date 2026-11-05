@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   Users, 
   Hospital, 
@@ -24,44 +24,57 @@ import {
   Search,
   Filter,
   Wrench,
-  Package
+  Package,
+  Camera,
+  History,
+  PlusCircle,
+  RotateCcw,
+  Beaker,
+  FlaskConical,
+  ShieldCheck,
+  ShieldAlert,
+  Zap,
+  AlertTriangle,
+  TrendingUp
 } from 'lucide-react';
-import { Role, User, EstablishmentConfig, MedicalAct, Medication, CustomRole, UserStatus } from '../types';
+import { Role, User, EstablishmentConfig, MedicalAct, Medication, CustomRole, UserStatus, Supplier, SupplierInvoice, Licence } from '../types';
+import { THEMES, ThemeColor } from '../constants/themes';
 import RolesPermissions from './settings/RolesPermissions';
-import ToolsManagement from './settings/ToolsManagement';
 import ServicesDepartments from './settings/ServicesDepartments';
 import ProtocolsManagement from './settings/ProtocolsManagement';
 import AddMedicationForm from './settings/AddMedicationForm';
+import RestockModal from './settings/RestockModal';
+import StockMovementsModal from './settings/StockMovementsModal';
 import AddMedicalActForm from './settings/AddMedicalActForm';
 import AddConsumableForm from './settings/AddConsumableForm';
-import { DEFAULT_ROLES } from '../constants/rbac';
-import { THEMES, ThemeColor } from '../constants/themes';
+import { Breadcrumbs } from '../components/common/Breadcrumbs';
+import { MicroHeader } from '../components/common/MicroHeader';
+import { MedicalStatusBadge } from '../components/common/MedicalStatusBadge';
+import { Avatar } from '../components/common/Avatar';
+import { ImageUpload } from '../components/common/ImageUpload';
+import { StaffPerformanceModal } from '../components/profile/StaffPerformanceModal';
+import { db, sanitizeData, handleFirestoreError, OperationType } from '../src/firebase';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, where, addDoc, updateDoc, getDocs, limit, getDoc } from 'firebase/firestore';
 
 interface SettingsProps {
-  activeTab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'tools' | 'services' | 'protocols';
-  setActiveTab: (tab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'tools' | 'services' | 'protocols') => void;
+  activeTab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols';
+  setActiveTab: (tab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols') => void;
   user: User | null;
+  onBackToDashboard?: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) => {
+const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBackToDashboard }) => {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [showAddMedication, setShowAddMedication] = useState(false);
   const [showAddMedicalAct, setShowAddMedicalAct] = useState(false);
+  const [editingMedicalAct, setEditingMedicalAct] = useState<MedicalAct | null>(null);
   const [showAddConsumable, setShowAddConsumable] = useState(false);
 
   // --- State for Roles ---
-  const [roles, setRoles] = useState<CustomRole[]>(() => {
-    const saved = localStorage.getItem('hospital_roles');
-    return saved ? JSON.parse(saved) : DEFAULT_ROLES;
-  });
+  const [roles, setRoles] = useState<CustomRole[]>([]);
 
   // --- State for Users ---
-  const [users, setUsers] = useState<User[]>(() => {
-    const saved = localStorage.getItem('hospital_users');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', username: 'admin', email: 'admin@smarthosto.com', name: 'Administrateur', role: Role.ADMIN, roles: ['role_admin'], status: 'ACTIVE', profession: 'Admin Système', token: 'fake', lastLogin: new Date().toISOString() }
-    ];
-  });
+  const [users, setUsers] = useState<User[]>([]);
   const [newUser, setNewUser] = useState<Partial<User>>({ role: Role.DOCTOR, roles: [], status: 'ACTIVE' });
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [showUserForm, setShowUserForm] = useState(false);
@@ -70,120 +83,662 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
   const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL');
   const [userStatusFilter, setUserStatusFilter] = useState<string>('ALL');
 
+  // --- State for SaaS Multi-Tenant Licence & Quota Tracking ---
+  const [licencesCatalog, setLicencesCatalog] = useState<Licence[]>([]);
+  const [activeHospitalRecord, setActiveHospitalRecord] = useState<any>(null);
+
   // --- State for Establishment ---
-  const [establishment, setEstablishment] = useState<EstablishmentConfig>(() => {
-    const saved = localStorage.getItem('hospital_config');
-    const defaults = {
-      name: 'Hôpital Central de Yaoundé',
-      address: 'Avenue de l\'Indépendance, Yaoundé, Cameroun',
-      phone: '+237 222 33 44 55',
-      language: 'FR' as const,
-      currency: 'XAF' as const,
-      theme: 'blue',
-      email: 'contact@smarthosto.com',
-      city: 'Yaoundé',
-      country: 'Cameroun',
-      slogan: 'Votre santé, notre priorité absolue',
-      logo: 'SH'
-    };
-    if (saved) {
-      try {
-        return { ...defaults, ...JSON.parse(saved) };
-      } catch (e) {
-        return defaults;
-      }
-    }
-    return defaults;
+  const [establishment, setEstablishment] = useState<EstablishmentConfig>({
+    name: 'Hôpital Central de Yaoundé',
+    address: 'Avenue de l\'Indépendance, Yaoundé, Cameroun',
+    phone: '+237 222 33 44 55',
+    language: 'FR' as const,
+    currency: 'XAF' as const,
+    theme: 'blue',
+    email: 'contact@smarthosto.com',
+    city: 'Yaoundé',
+    country: 'Cameroun',
+    slogan: 'Votre santé, notre priorité absolue',
+    logo: 'SH',
+    taxId: 'NIF: M0123456789J / RCCM: RC/YAO/2024/B/123',
+    website: 'www.smarthosto.com',
+    bankInfo: 'RIB: 10001 00001 12345678901 23 - Afriland First Bank',
+    invoiceFooter: 'Merci de votre confiance. En cas de réclamation, veuillez contacter le service facturation.'
   });
 
   // --- State for Referentials ---
   const [activeReferentialTab, setActiveReferentialTab] = useState<'acts' | 'medications' | 'consumables'>('acts');
-  const [acts, setActs] = useState<MedicalAct[]>(() => {
-    const saved = localStorage.getItem('hospital_acts');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', name: 'Consultation Générale', price: 5000, category: 'Consultation' },
-      { id: '2', name: 'Échographie', price: 15000, category: 'Imagerie' }
-    ];
-  });
-  const [meds, setMeds] = useState<Medication[]>(() => {
-    const saved = localStorage.getItem('hospital_meds');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', name: 'Paracétamol', dosage: '500mg', price: 500, stock: 100 },
-      { id: '2', name: 'Amoxicilline', dosage: '1g', price: 2500, stock: 50 }
-    ];
-  });
-  const [consumables, setConsumables] = useState<any[]>(() => {
-    const saved = localStorage.getItem('hospital_consumables');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', nom: 'Gants stériles', categorie: 'médical', servicePrincipal: 'bloc_operatoire', stockInitial: 1000, uniteGestion: 'boîte', facturableAuPatient: false },
-      { id: '2', nom: 'Seringues 5ml', categorie: 'médical', servicePrincipal: 'hospitalisation', stockInitial: 500, uniteGestion: 'boîte', facturableAuPatient: false },
-      { id: '3', nom: 'Carnet médical', categorie: 'administratif', servicePrincipal: 'accueil', stockInitial: 200, uniteGestion: 'unité', facturableAuPatient: true, prixVente: 1000 }
-    ];
-  });
+  const [acts, setActs] = useState<MedicalAct[]>([]);
+  const [meds, setMeds] = useState<Medication[]>([]);
+  const [consumables, setConsumables] = useState<any[]>([]);
+
+  // --- State for Acts Filters ---
+  const [actSearchQuery, setActSearchQuery] = useState('');
+  const [actCategoryFilter, setActCategoryFilter] = useState('tous');
 
   // --- State for Consumables Filters ---
   const [consumableSearch, setConsumableSearch] = useState('');
   const [consumableCategoryFilter, setConsumableCategoryFilter] = useState('tous');
+
+  // --- State for Medication & Consumables Restock & Audit ---
+  const [selectedMedForRestock, setSelectedMedForRestock] = useState<Medication | null>(null);
+  const [selectedConsumableForRestock, setSelectedConsumableForRestock] = useState<any | null>(null);
+  const [showUniversalRestock, setShowUniversalRestock] = useState<boolean>(false);
+  const [showStockMovements, setShowStockMovements] = useState(false);
+  const [medSearchQuery, setMedSearchQuery] = useState('');
+  const [medFamilyFilter, setMedFamilyFilter] = useState('tous');
   
   // --- State for Cashier Settings ---
-  const [cashierSettings, setCashierSettings] = useState(() => {
-    const saved = localStorage.getItem('hospital_cashier_config');
-    return saved ? JSON.parse(saved) : {
-      partialPayment: true,
-      maxDebt: 50000,
-      allowCredit: true,
-      autoApplyCredit: true
-    };
+  const [cashierSettings, setCashierSettings] = useState({
+    partialPayment: true,
+    maxDebt: 50000,
+    allowCredit: true,
+    autoApplyCredit: true
   });
 
-  // Persistence
+  // Firestore Listeners
   useEffect(() => {
-    localStorage.setItem('hospital_users', JSON.stringify(users));
-    localStorage.setItem('hospital_roles', JSON.stringify(roles));
-    localStorage.setItem('hospital_config', JSON.stringify(establishment));
-    localStorage.setItem('hospital_acts', JSON.stringify(acts));
-    localStorage.setItem('hospital_meds', JSON.stringify(meds));
-    localStorage.setItem('hospital_cashier_config', JSON.stringify(cashierSettings));
-  }, [users, roles, establishment, acts, meds, cashierSettings]);
+    const unsubUsers = onSnapshot(collection(db, 'hospital_users'), (snap) => {
+      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
+    });
+
+    const unsubRoles = onSnapshot(collection(db, 'hospital_roles'), (snap) => {
+      setRoles(snap.docs.map(d => ({ id: d.id, ...d.data() } as CustomRole)));
+    });
+
+    const unsubConfig = onSnapshot(collection(db, 'hospital_config'), (snap) => {
+      if (!snap.empty) {
+        setEstablishment(snap.docs[0].data() as EstablishmentConfig);
+      }
+    });
+
+    const unsubActs = onSnapshot(collection(db, 'medical_acts'), (snap) => {
+      setActs(snap.docs.map(d => ({ id: d.id, ...d.data() } as MedicalAct)));
+    });
+
+    const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
+      setMeds(snap.docs.map(d => ({ id: d.id, ...d.data() } as Medication)));
+    });
+
+    const unsubConsumables = onSnapshot(collection(db, 'hospital_consumables'), (snap) => {
+      setConsumables(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    const unsubCashier = onSnapshot(collection(db, 'parametres_caisse'), (snap) => {
+      if (!snap.empty) {
+        const data = snap.docs[0].data();
+        setCashierSettings({
+          partialPayment: data.paiementPartielAutorise,
+          maxDebt: data.seuilDetteMax,
+          allowCredit: data.avoirPatientAutorise,
+          autoApplyCredit: data.applicationAutoAvoir
+        });
+      }
+    });
+
+    const unsubLicences = onSnapshot(collection(db, 'licences'), (snap) => {
+      setLicencesCatalog(snap.docs.map(d => ({ id: d.id, ...d.data() } as Licence)));
+    });
+
+    const unsubHospitals = onSnapshot(collection(db, 'hospitals'), (snap) => {
+      if (!snap.empty) {
+        const currentClinicId = (user as any)?.clinicId || (user as any)?.hospital_id || '';
+        const found = snap.docs.find(d => d.id === currentClinicId || (d.data() as any).name === establishment.name);
+        if (found) {
+          setActiveHospitalRecord({ id: found.id, ...found.data() });
+        }
+      }
+    });
+
+    const unsubClinics = onSnapshot(collection(db, 'saas_clinics'), (snap) => {
+      if (!snap.empty) {
+        const currentClinicId = (user as any)?.clinicId || (user as any)?.hospital_id || '';
+        const found = snap.docs.find(d => d.id === currentClinicId || (d.data() as any).name === establishment.name);
+        if (found) {
+          setActiveHospitalRecord(prev => prev || { id: found.id, ...found.data() });
+        }
+      }
+    });
+
+    return () => {
+      unsubUsers();
+      unsubRoles();
+      unsubConfig();
+      unsubActs();
+      unsubMeds();
+      unsubConsumables();
+      unsubCashier();
+      unsubLicences();
+      unsubHospitals();
+      unsubClinics();
+    };
+  }, [user, establishment.name]);
+
+  // Handle deep-linking navigation from System Alerts (e.g. Low Stock restock)
+  useEffect(() => {
+    if (activeTab === 'referentials') {
+      const targetRefTab = localStorage.getItem('hospital_active_referential_tab');
+      if (targetRefTab === 'medicaments' || targetRefTab === 'medications') {
+        setActiveReferentialTab('medications');
+        localStorage.removeItem('hospital_active_referential_tab');
+      }
+      const refSearch = localStorage.getItem('hospital_referential_search');
+      if (refSearch) {
+        setMedSearchQuery(refSearch);
+        localStorage.removeItem('hospital_referential_search');
+      }
+    }
+  }, [activeTab]);
 
   const showMessage = (type: 'success' | 'error', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 3000);
   };
 
-  // --- Handlers ---
-  const handleAddUser = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newUser.username || !newUser.name || !newUser.email) return;
+  // --- Restock Submit Handler for Medications & Consumables ---
+  const handleRestockSubmit = async (data: {
+    itemType?: 'MEDICATION' | 'CONSUMABLE';
+    itemId?: string;
+    itemName?: string;
+    quantity: number;
+    batchNumber: string;
+    expiryDate: string;
+    purchaseCost?: number;
+    supplier?: string;
+    supplierId?: string;
+    notes?: string;
+  }) => {
+    const isConsumable = data.itemType === 'CONSUMABLE' || (!selectedMedForRestock && selectedConsumableForRestock);
+    const targetItemId = data.itemId || (isConsumable ? selectedConsumableForRestock?.id : selectedMedForRestock?.id);
 
-    if (isEditingUser && newUser.id) {
-      setUsers(users.map(u => u.id === newUser.id ? { ...u, ...newUser } as User : u));
-      showMessage('success', 'Utilisateur modifié avec succès');
-    } else {
-      const userToAdd: User = {
-        id: Math.random().toString(36).substr(2, 9),
-        username: newUser.username,
-        email: newUser.email,
-        password: newUser.password, // TODO: Hash in production
-        forcePasswordChange: newUser.forcePasswordChange,
-        name: newUser.name,
-        role: newUser.role as Role,
-        roles: newUser.roles || [],
-        status: newUser.status || 'ACTIVE',
-        token: 'fake',
-        profession: newUser.profession
-      };
-      setUsers([...users, userToAdd]);
-      showMessage('success', 'Utilisateur ajouté avec succès');
+    if (!targetItemId) {
+      showMessage('error', "Aucun article sélectionné pour le réapprovisionnement");
+      return;
     }
-    
-    setNewUser({ role: Role.DOCTOR, roles: [], status: 'ACTIVE' });
-    setIsEditingUser(false);
-    setShowUserForm(false);
+
+    try {
+      if (isConsumable) {
+        // === 1. RESTOCK CONSUMABLE ===
+        const consumableRef = doc(db, 'hospital_consumables', targetItemId);
+        const consumableSnap = await getDoc(consumableRef);
+        
+        let consumableData = consumableSnap.exists() ? consumableSnap.data() : selectedConsumableForRestock;
+        const consumableName = consumableData?.nom || consumableData?.name || data.itemName || 'Consommable';
+        const currentStock = Number(consumableData?.stock !== undefined ? consumableData?.stock : (consumableData?.stockInitial || 0));
+        const newStock = currentStock + data.quantity;
+
+        // Increment live stock count in hospital_consumables
+        await updateDoc(consumableRef, {
+          stock: newStock,
+          ...(data.purchaseCost !== undefined ? { dernierPrixAchat: data.purchaseCost } : {}),
+          lastRestockedAt: new Date().toISOString(),
+          lastRestockedBy: user?.name || 'Administrateur',
+          lastSupplier: data.supplier || '',
+          lastBatchNumber: data.batchNumber || '',
+          updatedAt: new Date().toISOString()
+        });
+
+        // Audit Trail in stock_movements
+        const movementId = `STK-MOV-${Date.now()}`;
+        const movementEntry = {
+          id: movementId,
+          medicationId: targetItemId,
+          medicationName: consumableName,
+          type: 'REFILL',
+          itemType: 'CONSUMABLE',
+          quantity: data.quantity,
+          previousStock: currentStock,
+          newStock: newStock,
+          batchNumber: data.batchNumber || '',
+          expiryDate: data.expiryDate || '',
+          purchaseCost: data.purchaseCost || 0,
+          supplier: data.supplier || '',
+          notes: data.notes || '',
+          adminName: user?.name || 'Administrateur',
+          adminId: user?.id || '',
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'stock_movements', movementId), sanitizeData(movementEntry));
+
+        // Automated Accounting Synchronization: Generate Supplier Invoice (Comptabilité > Dépenses & Paiements)
+        const supplierName = (data.supplier || '').trim() || 'Fournisseur Consommables';
+        const unitCost = Number(data.purchaseCost) || 0;
+        const totalInvoiceAmount = unitCost * data.quantity;
+        const invoiceId = `FAC-FOUR-${Date.now()}`;
+        const supplierId = data.supplierId || `SUPP-${supplierName.toLowerCase().replace(/[^a-z0-9]/g, '-') || Date.now()}`;
+
+        if (totalInvoiceAmount > 0 || supplierName) {
+          try {
+            // 1. Supplier Invoice for Achats / Fournisseurs Tab
+            const newInvoice: SupplierInvoice = {
+              id: invoiceId,
+              invoiceNumber: `FAC-ACHAT-${Date.now().toString().slice(-6)}`,
+              supplierId: supplierId,
+              supplierName: supplierName,
+              moduleSource: 'CONSOMMABLES' as any,
+              type: 'LIVRAISON_STOCK',
+              items: [{
+                name: consumableName,
+                quantity: data.quantity,
+                unitCost: unitCost,
+                totalCost: totalInvoiceAmount,
+                batchNumber: data.batchNumber || '',
+                expiryDate: data.expiryDate || ''
+              }],
+              totalAmount: totalInvoiceAmount,
+              amountPaid: 0,
+              status: 'PENDING',
+              date: new Date().toISOString(),
+              notes: data.notes || `Livraison consommables: ${consumableName} (${data.quantity} ${consumableData?.uniteGestion || 'unités'})`,
+              createdAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'supplier_invoices', invoiceId), sanitizeData(newInvoice));
+
+            // 2. Direct Expense Record for Dépenses & Paiements Tab
+            const expenseId = `EXP-RESTOCK-${Date.now()}`;
+            const newExpense = {
+              id: expenseId,
+              reference: `EXP-FOUR-${Date.now().toString().slice(-6)}`,
+              date: new Date().toISOString(),
+              category: 'FOURNISSEURS',
+              categoryLabel: 'Fournisseurs (Réapprovisionnement Consommables)',
+              beneficiary: supplierName,
+              beneficiaryId: supplierId,
+              beneficiaryRole: 'Fournisseur',
+              amount: totalInvoiceAmount,
+              status: 'PENDING',
+              description: `Achat stock consommable: ${consumableName} (${data.quantity} ${consumableData?.uniteGestion || 'unités'})`,
+              createdBy: user?.name || 'Administrateur',
+              createdAt: new Date().toISOString(),
+              metadata: {
+                invoiceId: invoiceId,
+                supplierId: supplierId,
+                itemType: 'CONSUMABLE',
+                itemId: targetItemId
+              }
+            };
+            await setDoc(doc(db, 'expenses', expenseId), sanitizeData(newExpense));
+
+            // 3. Update or create Supplier Record
+            const suppRef = doc(db, 'suppliers', supplierId);
+            const suppSnap = await getDoc(suppRef);
+            if (suppSnap.exists()) {
+              const existingSupp = suppSnap.data() as Supplier;
+              const currentDebt = Number(existingSupp.outstandingDebt || existingSupp.balance || 0);
+              const currentBought = Number(existingSupp.totalBought || 0);
+              const currentHistory = Number(existingSupp.historyCount || 0);
+
+              await updateDoc(suppRef, {
+                outstandingDebt: currentDebt + totalInvoiceAmount,
+                balance: currentDebt + totalInvoiceAmount,
+                totalBought: currentBought + totalInvoiceAmount,
+                historyCount: currentHistory + 1,
+                updatedAt: new Date().toISOString()
+              });
+            } else {
+              const newSupplier: Supplier = {
+                id: supplierId,
+                name: supplierName,
+                contact: 'Service Approvisionnement Consommables',
+                phone: '',
+                email: '',
+                address: 'Dépôt Matériel Médical',
+                category: 'Consommables & Matériel',
+                outstandingDebt: totalInvoiceAmount,
+                balance: totalInvoiceAmount,
+                totalBought: totalInvoiceAmount,
+                historyCount: 1,
+                createdAt: new Date().toISOString()
+              };
+              await setDoc(suppRef, sanitizeData(newSupplier));
+            }
+          } catch (invErr) {
+            console.error("Error syncing accounting for consumable restock:", invErr);
+          }
+        }
+
+        showMessage('success', `Stock de "${consumableName}" réapprovisionné (+${data.quantity}). Nouveau stock: ${newStock}. Facture synchronisée en Comptabilité.`);
+        setSelectedConsumableForRestock(null);
+        setShowUniversalRestock(false);
+
+      } else {
+        // === 2. RESTOCK MEDICATION ===
+        const medRef = doc(db, 'pharmacy_inventory', targetItemId);
+        const medSnap = await getDoc(medRef);
+        if (!medSnap.exists()) {
+          showMessage('error', 'Médicament non trouvé dans le catalogue');
+          return;
+        }
+
+        const currentMed = medSnap.data() as Medication;
+        const currentStock = Number(currentMed.stock) || 0;
+        const newStock = currentStock + data.quantity;
+
+        // 1. Accumulation logic: update pharmacy_inventory with new accumulated stock!
+        await updateDoc(medRef, {
+          stock: newStock,
+          batchNumber: data.batchNumber,
+          expiryDate: data.expiryDate,
+          ...(data.purchaseCost !== undefined ? { prixAchat: data.purchaseCost } : {}),
+          lastRestockedAt: new Date().toISOString(),
+          lastRestockedBy: user?.name || 'Administrateur',
+          updatedAt: new Date().toISOString()
+        });
+
+        // 2. Audit Trail: Automatically generate an entry in stock_movements
+        const movementId = `STK-MOV-${Date.now()}`;
+        const movementEntry = {
+          id: movementId,
+          medicationId: targetItemId,
+          medicationName: currentMed.name,
+          type: 'REFILL',
+          itemType: 'MEDICATION',
+          quantity: data.quantity,
+          previousStock: currentStock,
+          newStock: newStock,
+          batchNumber: data.batchNumber,
+          expiryDate: data.expiryDate,
+          purchaseCost: data.purchaseCost || 0,
+          supplier: data.supplier || '',
+          notes: data.notes || '',
+          adminName: user?.name || 'Administrateur',
+          adminId: user?.id || '',
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'stock_movements', movementId), sanitizeData(movementEntry));
+
+        // 3. Automated Accounting Integration: Generate Supplier Invoice (Achats & Fournisseurs)
+        const supplierName = (data.supplier || '').trim();
+        const unitCost = Number(data.purchaseCost) || 0;
+        const totalInvoiceAmount = unitCost * data.quantity;
+
+        if (supplierName || totalInvoiceAmount > 0) {
+          try {
+            const invoiceId = `FAC-FOUR-${Date.now()}`;
+            const supplierId = data.supplierId || `SUPP-${supplierName.toLowerCase().replace(/[^a-z0-9]/g, '-') || Date.now()}`;
+            
+            const newInvoice: SupplierInvoice = {
+              id: invoiceId,
+              invoiceNumber: `FAC-ACHAT-${Date.now().toString().slice(-6)}`,
+              supplierId: supplierId,
+              supplierName: supplierName || 'Fournisseur Médicaments',
+              moduleSource: 'PHARMACIE',
+              type: 'LIVRAISON_STOCK',
+              items: [{
+                name: currentMed.name,
+                quantity: data.quantity,
+                unitCost: unitCost,
+                totalCost: totalInvoiceAmount,
+                batchNumber: data.batchNumber,
+                expiryDate: data.expiryDate
+              }],
+              totalAmount: totalInvoiceAmount,
+              amountPaid: 0,
+              status: 'PENDING',
+              date: new Date().toISOString(),
+              notes: data.notes || `Livraison de réapprovisionnement: ${currentMed.name} (${data.quantity} unités, Lot: ${data.batchNumber})`,
+              createdAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'supplier_invoices', invoiceId), sanitizeData(newInvoice));
+
+            // Sync to expenses collection for universal accounting visibility
+            const expenseId = `EXP-RESTOCK-${Date.now()}`;
+            const newExpense = {
+              id: expenseId,
+              reference: `EXP-FOUR-${Date.now().toString().slice(-6)}`,
+              date: new Date().toISOString(),
+              category: 'FOURNISSEURS',
+              categoryLabel: 'Fournisseurs (Réapprovisionnement Médicaments)',
+              beneficiary: supplierName || 'Fournisseur Médicaments',
+              beneficiaryId: supplierId,
+              beneficiaryRole: 'Fournisseur',
+              amount: totalInvoiceAmount,
+              status: 'PENDING',
+              description: `Achat stock pharmacie: ${currentMed.name} (${data.quantity} unités)`,
+              createdBy: user?.name || 'Administrateur',
+              createdAt: new Date().toISOString(),
+              metadata: {
+                invoiceId: invoiceId,
+                supplierId: supplierId,
+                itemType: 'MEDICATION',
+                itemId: targetItemId
+              }
+            };
+            await setDoc(doc(db, 'expenses', expenseId), sanitizeData(newExpense));
+
+            // Check if supplier exists in 'suppliers'
+            const suppRef = doc(db, 'suppliers', supplierId);
+            const suppSnap = await getDoc(suppRef);
+            if (suppSnap.exists()) {
+              const existingSupp = suppSnap.data() as Supplier;
+              const currentDebt = Number(existingSupp.outstandingDebt || existingSupp.balance || 0);
+              const currentBought = Number(existingSupp.totalBought || 0);
+              const currentHistory = Number(existingSupp.historyCount || 0);
+
+              await updateDoc(suppRef, {
+                outstandingDebt: currentDebt + totalInvoiceAmount,
+                balance: currentDebt + totalInvoiceAmount,
+                totalBought: currentBought + totalInvoiceAmount,
+                historyCount: currentHistory + 1,
+                updatedAt: new Date().toISOString()
+              });
+            } else {
+              const newSupplier: Supplier = {
+                id: supplierId,
+                name: supplierName || 'Fournisseur Pharmacie',
+                contact: 'Service Approvisionnement',
+                phone: '',
+                email: '',
+                address: 'Dépôt Médical Central',
+                category: 'Médicaments & Pharmacie',
+                outstandingDebt: totalInvoiceAmount,
+                balance: totalInvoiceAmount,
+                totalBought: totalInvoiceAmount,
+                historyCount: 1,
+                createdAt: new Date().toISOString()
+              };
+              await setDoc(suppRef, sanitizeData(newSupplier));
+            }
+          } catch (invErr) {
+            console.error("Error creating automated supplier invoice:", invErr);
+          }
+        }
+
+        showMessage('success', `Stock de "${currentMed.name}" réapprovisionné (+${data.quantity}). Nouveau stock: ${newStock}. Facture synchronisée en Comptabilité.`);
+        setSelectedMedForRestock(null);
+        setShowUniversalRestock(false);
+      }
+    } catch (error) {
+      console.error("Error restocking item:", error);
+      showMessage('error', "Erreur lors du réapprovisionnement du stock");
+      handleFirestoreError(error, OperationType.WRITE, 'stock_movements');
+    }
   };
 
-  const handleEditUser = (user: User) => {
-    setNewUser({ ...user, password: '' });
+  const handleDeleteConsumable = async (consumableId: string, consumableName: string) => {
+    if (window.confirm(`Voulez-vous vraiment supprimer "${consumableName}" des consommables ?`)) {
+      try {
+        await deleteDoc(doc(db, 'hospital_consumables', consumableId));
+        showMessage('success', `Consommable "${consumableName}" supprimé`);
+      } catch (error) {
+        console.error("Error deleting consumable:", error);
+        showMessage('error', "Erreur lors de la suppression");
+      }
+    }
+  };
+
+  const handleDeleteMedication = async (medId: string, medName: string) => {
+    if (window.confirm(`Voulez-vous vraiment supprimer "${medName}" du catalogue ?`)) {
+      try {
+        await deleteDoc(doc(db, 'pharmacy_inventory', medId));
+        showMessage('success', `Médicament "${medName}" supprimé`);
+      } catch (err) {
+        console.error("Error deleting med:", err);
+        showMessage('error', "Erreur lors de la suppression");
+      }
+    }
+  };
+
+  // Helper: Check if logged-in user is the hospital center's principal admin
+  const isPrincipalAdmin = useMemo(() => {
+    if (!user) return false;
+    return (
+      user.role === Role.ADMIN ||
+      user.roles?.includes('role_admin') ||
+      (user.username || '').toLowerCase() === 'admin' ||
+      (user as any).isMainAdmin === true
+    );
+  }, [user]);
+
+  // Helper: Filter out Super Admin accounts from hospital center's user list
+  const isSuperAdminUser = (u: User) => {
+    const uname = (u.username || '').toLowerCase();
+    return (
+      u.role === Role.SUPER_ADMIN ||
+      (u.role as string) === 'SUPER_ADMIN' ||
+      u.roles?.includes('role_super_admin') ||
+      uname === 'superadmin' ||
+      uname === 'sa1' ||
+      (u as any).accountType === 'SUPER_ADMIN' ||
+      (u as any).isSuperAdmin === true
+    );
+  };
+
+  // Helper: Automatic Password Generator
+  const generateAutoPassword = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789#@!';
+    let pass = 'SH-';
+    for (let i = 0; i < 8; i++) {
+      pass += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return pass;
+  };
+
+  // --- Handlers ---
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isPrincipalAdmin) {
+      showMessage('error', "Seul l'administrateur principal de cet établissement est autorisé à créer de nouveaux utilisateurs.");
+      return;
+    }
+
+    if (!isEditingUser && isQuotaReached) {
+      showMessage('error', "Vous avez atteint la limite d'utilisateurs pour votre licence actuelle. Veuillez contacter l'administrateur système pour passer à une licence supérieure.");
+      return;
+    }
+
+    const cleanUsername = (newUser.username || '').trim();
+    if (!cleanUsername) {
+      showMessage('error', "L'identifiant de connexion (Username) est obligatoire.");
+      return;
+    }
+
+    const autoPass = newUser.password || generateAutoPassword();
+    const finalName = (newUser.name || '').trim() || cleanUsername;
+    const finalEmail = (newUser.email || '').trim() || `${cleanUsername.toLowerCase()}@smarthosto.com`;
+
+    try {
+      if (isEditingUser && newUser.id) {
+        const photoUrl = newUser.profile_image_url || newUser.profileImage;
+        await setDoc(doc(db, 'hospital_users', newUser.id), sanitizeData({
+          ...newUser,
+          username: cleanUsername,
+          name: finalName,
+          email: finalEmail,
+          profile_image_url: photoUrl || null,
+          profileImage: photoUrl || null,
+          updatedAt: new Date().toISOString()
+        }), { merge: true });
+        showMessage('success', 'Utilisateur modifié avec succès');
+      } else {
+        const photoUrl = newUser.profile_image_url || newUser.profileImage;
+        const currentClinicId = (user as any)?.clinicId || (user as any)?.hospital_id || (user as any)?.structureId || establishment.tenantId || establishment.hospital_id || '';
+        const currentStructureName = (user as any)?.structureName || establishment.name || '';
+        
+        // 1. Call Backend Quota Guard (The Hard Lock)
+        try {
+          const apiRes = await fetch('/api/hospital/staff', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              username: cleanUsername,
+              name: finalName,
+              email: finalEmail,
+              password: autoPass,
+              role: (newUser.role as Role) || Role.DOCTOR,
+              roles: newUser.roles || [],
+              status: newUser.status || 'ACTIVE',
+              profession: newUser.profession || '',
+              hospital_id: currentClinicId,
+              clinicId: currentClinicId,
+              structureName: currentStructureName,
+              forcePasswordChange: newUser.forcePasswordChange ?? true,
+              profileImage: photoUrl,
+              profile_image_url: photoUrl
+            })
+          });
+
+          if (!apiRes.ok) {
+            const errData = await apiRes.json().catch(() => ({}));
+            if (apiRes.status === 403 && errData.error === 'QUOTA_REACHED') {
+              showMessage('error', "Vous avez atteint la limite d'utilisateurs pour votre licence actuelle. Veuillez contacter l'administrateur système pour passer à une licence supérieure.");
+              return;
+            }
+            throw new Error(errData.message || "Erreur de quota ou de validation serveur");
+          }
+        } catch (fetchErr: any) {
+          if (fetchErr?.message?.includes('QUOTA_REACHED') || fetchErr?.message?.includes('limite')) {
+            showMessage('error', "Vous avez atteint la limite d'utilisateurs pour votre licence actuelle. Veuillez contacter l'administrateur système pour passer à une licence supérieure.");
+            return;
+          }
+          console.warn("Backend API call failed, verifying local quota before fallback:", fetchErr);
+          if (isQuotaReached) {
+            showMessage('error', "Vous avez atteint la limite d'utilisateurs pour votre licence actuelle. Veuillez contacter l'administrateur système pour passer à une licence supérieure.");
+            return;
+          }
+          const userId = Math.random().toString(36).substr(2, 9);
+          const userToAdd: User = {
+            id: userId,
+            username: cleanUsername,
+            email: finalEmail,
+            password: autoPass,
+            forcePasswordChange: newUser.forcePasswordChange ?? true,
+            name: finalName,
+            role: (newUser.role as Role) || Role.DOCTOR,
+            roles: newUser.roles || [],
+            status: newUser.status || 'ACTIVE',
+            token: 'fake',
+            profession: newUser.profession || '',
+            profileImage: photoUrl,
+            profile_image_url: photoUrl,
+            createdAt: new Date().toISOString()
+          };
+          await setDoc(doc(db, 'hospital_users', userId), sanitizeData({
+            ...userToAdd,
+            clinicId: currentClinicId,
+            hospital_id: currentClinicId,
+            structureName: currentStructureName,
+            createdById: user?.id || '',
+            createdByUsername: user?.username || '',
+            createdBySuperAdmin: false,
+            isMainAdmin: false
+          }));
+        }
+
+        showMessage('success', `Utilisateur "${cleanUsername}" créé avec succès ! Mot de passe généré : ${autoPass}`);
+      }
+      
+      setNewUser({ role: Role.DOCTOR, roles: [], status: 'ACTIVE' });
+      setIsEditingUser(false);
+      setShowUserForm(false);
+    } catch (error) {
+      console.error("Error saving user:", error);
+      showMessage('error', 'Erreur lors de l\'enregistrement de l\'utilisateur');
+    }
+  };
+
+  const handleEditUser = (userToEdit: User) => {
+    setNewUser({ ...userToEdit, password: '' });
     setIsEditingUser(true);
   };
 
@@ -191,93 +746,370 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
     showMessage('success', 'Un email de réinitialisation a été envoyé à l\'utilisateur');
   };
 
-  const handleToggleStatus = (id: string) => {
-    if (users.find(u => u.id === id)?.username === 'admin') {
+  const handleToggleStatus = async (id: string) => {
+    const userToToggle = users.find(u => u.id === id);
+    if (userToToggle?.username === 'admin' || (userToToggle as any)?.isMainAdmin) {
       showMessage('error', 'Impossible de désactiver l\'administrateur principal');
       return;
     }
-    setUsers(users.map(u => {
-      if (u.id === id) {
-        return { ...u, status: u.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' };
-      }
-      return u;
-    }));
-    showMessage('success', 'Statut mis à jour');
+    
+    try {
+      await updateDoc(doc(db, 'hospital_users', id), sanitizeData({
+        status: userToToggle?.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE',
+        updatedAt: new Date().toISOString()
+      }));
+      showMessage('success', 'Statut mis à jour');
+    } catch (error) {
+      console.error("Error toggling status:", error);
+    }
   };
 
-  const handleDeleteUser = (id: string) => {
-    if (users.find(u => u.id === id)?.username === 'admin') {
+  const handleDeleteUser = async (id: string) => {
+    const userToDelete = users.find(u => u.id === id);
+    if (userToDelete?.username === 'admin' || (userToDelete as any)?.isMainAdmin) {
       showMessage('error', 'Impossible de supprimer l\'administrateur principal');
       return;
     }
-    setUsers(users.filter(u => u.id !== id));
-    showMessage('success', 'Utilisateur supprimé');
+    
+    try {
+      await deleteDoc(doc(db, 'hospital_users', id));
+      showMessage('success', 'Utilisateur supprimé');
+    } catch (error) {
+      console.error("Error deleting user:", error);
+    }
   };
 
-  const filteredUsers = users.filter(user => {
+  const filteredUsers = users.filter(userToFilter => {
+    // 1. Exclude Super Admin accounts from hospital center user list
+    if (isSuperAdminUser(userToFilter)) return false;
+
+    // 2. Strict center isolation:
+    // Only allow:
+    // a) The main admin account of THIS hospital center (the logged in main admin or matching clinicId main admin)
+    // b) Users created locally inside THIS hospital center
+    const currentUName = (user?.username || '').toLowerCase().trim();
+    const currentClinicId = (user as any)?.clinicId || (user as any)?.structureId || '';
+
+    const targetUName = (userToFilter.username || '').toLowerCase().trim();
+    const targetClinicId = (userToFilter as any)?.clinicId || (userToFilter as any)?.structureId || '';
+    
+    const isTargetCreatedBySuperAdmin = 
+      (userToFilter as any)?.createdBySuperAdmin === true ||
+      (userToFilter as any)?.isMainAdmin === true ||
+      userToFilter.id.startsWith('usr_tenant_') ||
+      (userToFilter as any)?.accountType === 'STRUCTURE';
+
+    // Is target the main admin / logged-in admin of THIS center?
+    const isThisCenterMainAdmin = 
+      userToFilter.id === user?.id ||
+      (targetUName && targetUName === currentUName) ||
+      ((userToFilter as any)?.isMainAdmin === true && currentClinicId && targetClinicId === currentClinicId) ||
+      (targetUName === 'admin' && (!currentUName || currentUName === 'admin'));
+
+    // Rule A: If target was created by Super Admin (e.g. main admin of a structure), ONLY allow it if it is THIS center's main admin!
+    if (isTargetCreatedBySuperAdmin && !isThisCenterMainAdmin) {
+      return false;
+    }
+
+    // Rule B: If target has a clinicId specified that differs from current center's clinicId, EXCLUDE IT!
+    if (targetClinicId && currentClinicId && targetClinicId !== currentClinicId) {
+      return false;
+    }
+
+    // Rule C: If target was created by a user from another center, EXCLUDE IT!
+    if ((userToFilter as any)?.createdById && user?.id && (userToFilter as any)?.createdById !== user?.id && targetClinicId && currentClinicId && targetClinicId !== currentClinicId) {
+      return false;
+    }
+
+    const q = (userSearchQuery || '').toLowerCase().trim();
     const matchesSearch = 
-      user.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-      user.username.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-      (user.email && user.email.toLowerCase().includes(userSearchQuery.toLowerCase()));
+      !q ||
+      (userToFilter.name || '').toLowerCase().includes(q) ||
+      (userToFilter.username || '').toLowerCase().includes(q) ||
+      (userToFilter.email && (userToFilter.email || '').toLowerCase().includes(q));
     
     const matchesRole = userRoleFilter === 'ALL' || 
-      (user.roles && user.roles.includes(userRoleFilter)) || 
-      (!user.roles?.length && user.role === userRoleFilter);
+      (userToFilter.roles && userToFilter.roles.includes(userRoleFilter)) || 
+      (!userToFilter.roles?.length && userToFilter.role === userRoleFilter);
       
-    const matchesStatus = userStatusFilter === 'ALL' || user.status === userStatusFilter;
+    const matchesStatus = userStatusFilter === 'ALL' || userToFilter.status === userStatusFilter;
 
     return matchesSearch && matchesRole && matchesStatus;
   });
 
-  const handleSaveEstablishment = (e: React.FormEvent) => {
+  // --- SaaS Quota & Licence Calculation for Hospital Admin ---
+  const centerStaffCount = useMemo(() => {
+    return users.filter(userToFilter => {
+      if (isSuperAdminUser(userToFilter)) return false;
+      const currentUName = (user?.username || '').toLowerCase().trim();
+      const currentClinicId = (user as any)?.clinicId || (user as any)?.hospital_id || (user as any)?.structureId || '';
+      const targetUName = (userToFilter.username || '').toLowerCase().trim();
+      const targetClinicId = (userToFilter as any)?.clinicId || (userToFilter as any)?.hospital_id || (userToFilter as any)?.structureId || '';
+      
+      const isTargetCreatedBySuperAdmin = 
+        (userToFilter as any)?.createdBySuperAdmin === true ||
+        (userToFilter as any)?.isMainAdmin === true ||
+        userToFilter.id.startsWith('usr_tenant_') ||
+        (userToFilter as any)?.accountType === 'STRUCTURE';
+
+      const isThisCenterMainAdmin = 
+        userToFilter.id === user?.id ||
+        (targetUName && targetUName === currentUName) ||
+        ((userToFilter as any)?.isMainAdmin === true && currentClinicId && targetClinicId === currentClinicId) ||
+        (targetUName === 'admin' && (!currentUName || currentUName === 'admin'));
+
+      if (isTargetCreatedBySuperAdmin && !isThisCenterMainAdmin) return false;
+      if (targetClinicId && currentClinicId && targetClinicId !== currentClinicId) return false;
+      return true;
+    }).length;
+  }, [users, user]);
+
+  const currentLicence = useMemo<Licence | null>(() => {
+    const targetLicId = activeHospitalRecord?.licence_id || activeHospitalRecord?.licenceId || establishment.licence_id || establishment.licenceId;
+    if (targetLicId && licencesCatalog.length > 0) {
+      const found = licencesCatalog.find(l => 
+        l.id.toLowerCase() === String(targetLicId).toLowerCase() || 
+        l.id.toLowerCase().includes(String(targetLicId).toLowerCase())
+      );
+      if (found) return found;
+    }
+    const planName = (activeHospitalRecord?.nom_licence || activeHospitalRecord?.licenseType || 'Basic').toUpperCase();
+    const foundByName = licencesCatalog.find(l => l.nom_licence.toUpperCase() === planName);
+    if (foundByName) return foundByName;
+
+    return {
+      id: 'licence_basic',
+      nom_licence: activeHospitalRecord?.nom_licence || activeHospitalRecord?.licenseType || 'Basic',
+      max_users: activeHospitalRecord?.quotas?.maxUsers || (activeHospitalRecord?.licenseType === 'ENTERPRISE' ? 100 : activeHospitalRecord?.licenseType === 'PREMIUM' ? 50 : 5),
+      monthlyPriceFCFA: 350000
+    };
+  }, [licencesCatalog, activeHospitalRecord, establishment]);
+
+  const maxUsersAllowed = useMemo(() => {
+    return currentLicence?.max_users || activeHospitalRecord?.quotas?.maxUsers || 5;
+  }, [currentLicence, activeHospitalRecord]);
+
+  const isQuotaReached = useMemo(() => {
+    return centerStaffCount >= maxUsersAllowed;
+  }, [centerStaffCount, maxUsersAllowed]);
+
+  const quotaPercentage = useMemo(() => {
+    if (maxUsersAllowed <= 0) return 100;
+    return Math.min(100, Math.round((centerStaffCount / maxUsersAllowed) * 100));
+  }, [centerStaffCount, maxUsersAllowed]);
+
+  const handleSaveEstablishment = async (e: React.FormEvent) => {
     e.preventDefault();
-    showMessage('success', 'Configuration de l\'établissement enregistrée');
+    try {
+      const q = query(collection(db, 'hospital_config'), limit(1));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        await addDoc(collection(db, 'hospital_config'), sanitizeData(establishment));
+      } else {
+        await updateDoc(doc(db, 'hospital_config', snap.docs[0].id), sanitizeData(establishment));
+      }
+      localStorage.setItem('hospital_config', JSON.stringify(establishment));
+      window.dispatchEvent(new CustomEvent('settings-updated'));
+      showMessage('success', 'Configuration de l\'établissement enregistrée');
+    } catch (error) {
+      console.error("Error saving establishment config:", error);
+      showMessage('error', 'Erreur lors de l\'enregistrement');
+    }
+  };
+
+  const tabLabels: Record<string, string> = {
+    users: 'Utilisateurs',
+    roles: 'Rôles & Permissions',
+    establishment: 'Établissement',
+    referentials: 'Référentiels',
+    cashier_settings: 'Caisse',
+    services: 'Services',
+    protocols: 'Protocoles'
   };
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-10">
-        <div>
-          <h1 className="text-4xl font-black text-slate-900 tracking-tight flex items-center gap-4">
-            <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-rose-600/20">
-              <Database size={24} />
-            </div>
-            Console de Paramétrage
-          </h1>
-          <p className="text-slate-500 font-medium mt-2">Configuration centrale de votre SIH SmartHosto</p>
-        </div>
-
-        {message && (
-          <div className={`flex items-center gap-3 px-6 py-3 rounded-2xl font-bold text-sm animate-in fade-in slide-in-from-top-4 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
-            {message.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
-            {message.text}
+    <div className="h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans bg-slate-50 text-slate-900">
+      <MicroHeader
+        icon={Database}
+        title={tabLabels[activeTab] || 'Paramètres'}
+        subtitle="Console de Paramétrage • Configuration Centrale du SIH"
+        breadcrumbs={[
+          { label: 'Paramètres', onClick: () => setActiveTab('users') },
+          { label: tabLabels[activeTab] || activeTab, active: true }
+        ]}
+        onHomeClick={onBackToDashboard}
+        onBackClick={activeTab !== 'users' ? () => setActiveTab('users') : undefined}
+        user={{ name: user?.name || 'Administrateur', role: 'Super Admin' }}
+        quickStats={[
+          { label: 'Utilisateurs', value: users.length, onClick: () => setActiveTab('users'), active: activeTab === 'users' },
+          { label: 'Rôles', value: roles.length, onClick: () => setActiveTab('roles'), active: activeTab === 'roles' }
+        ]}
+        actions={
+          <div className="flex items-center gap-1.5 overflow-x-auto max-w-[500px]">
+            {[
+              { id: 'users', label: 'Utilisateurs' },
+              { id: 'roles', label: 'Rôles' },
+              { id: 'establishment', label: 'Établissement' },
+              { id: 'referentials', label: 'Référentiels' },
+              { id: 'cashier_settings', label: 'Caisse' },
+              { id: 'protocols', label: 'Protocoles' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`px-2.5 py-1 rounded-xl font-bold text-xs transition-all shrink-0 cursor-pointer ${
+                  activeTab === tab.id
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-        )}
-      </div>
+        }
+      />
 
-      <div className="grid grid-cols-1 gap-8">
+      {message && (
+        <div className={`mt-2 flex items-center gap-3 px-4 py-2 rounded-xl font-bold text-xs animate-in fade-in shrink-0 ${message.type === 'success' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>
+          {message.type === 'success' ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+          {message.text}
+        </div>
+      )}
+
+      <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar mt-3">
         {/* Content Area */}
-        <div className="bg-white rounded-[32px] border border-slate-100 shadow-sm p-8 min-h-[600px]">
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 min-h-[500px]">
           {activeTab === 'roles' && (
             <RolesPermissions roles={roles} setRoles={setRoles} users={users} setUsers={setUsers} showMessage={showMessage} />
           )}
 
-          {activeTab === 'tools' && (
-            <ToolsManagement showMessage={showMessage} />
-          )}
-
           {activeTab === 'users' && (
-            <div className="space-y-8">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Gestion des Utilisateurs</h2>
+            <div className="space-y-6">
+              {/* QUOTA TRACKER (SOFT LOCK & UP-SELL) */}
+              <div className="bg-gradient-to-r from-slate-900 via-slate-850 to-slate-900 border border-slate-700/60 rounded-3xl p-5 text-white shadow-xl relative overflow-hidden">
+                <div className={`absolute top-0 right-0 w-80 h-80 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20 ${
+                  isQuotaReached ? 'bg-rose-500/15' : quotaPercentage >= 80 ? 'bg-amber-500/15' : 'bg-blue-500/10'
+                }`} />
+
+                <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                        {currentLicence?.nom_licence ? `Licence ${currentLicence.nom_licence}` : 'Abonnement Standard'}
+                      </span>
+                      <span className="text-xs text-slate-400 font-bold">• Quota d'accès multi-tenant</span>
+                    </div>
+                    <h3 className="text-lg font-black text-white mt-1 flex items-center gap-2">
+                      <Users size={18} className="text-blue-400" />
+                      Consommation des Comptes Utilisateurs
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Personnel actif autorisé sur votre licence hospitalière
+                    </p>
+                  </div>
+
+                  {/* Numerical Counter */}
+                  <div className="flex items-baseline gap-2 bg-slate-950/70 border border-white/10 px-5 py-3 rounded-2xl shrink-0 self-start md:self-auto">
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Utilisateurs :</span>
+                    <span className={`text-2xl font-black font-mono ${
+                      isQuotaReached ? 'text-rose-400' : quotaPercentage >= 80 ? 'text-amber-400' : 'text-emerald-400'
+                    }`}>
+                      {centerStaffCount}
+                    </span>
+                    <span className="text-slate-500 font-bold text-lg">/</span>
+                    <span className="text-white font-bold text-lg font-mono">{maxUsersAllowed}</span>
+                    <span className={`ml-2 px-2.5 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider ${
+                      isQuotaReached 
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' 
+                        : 'bg-slate-800 text-slate-300'
+                    }`}>
+                      {isQuotaReached ? 'Quota Atteint' : `${Math.max(0, maxUsersAllowed - centerStaffCount)} disponible${Math.max(0, maxUsersAllowed - centerStaffCount) > 1 ? 's' : ''}`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="mt-4 space-y-1.5 relative z-10">
+                  <div className="flex justify-between items-center text-[11px] font-bold">
+                    <span className="text-slate-400">Progression du quota autorisé</span>
+                    <span className={isQuotaReached ? 'text-rose-400 font-black' : quotaPercentage >= 80 ? 'text-amber-400 font-black' : 'text-blue-400 font-black'}>
+                      {quotaPercentage}% ({centerStaffCount} / {maxUsersAllowed} utilisateurs)
+                    </span>
+                  </div>
+                  <div className="w-full h-3 bg-slate-950/90 rounded-full overflow-hidden border border-white/5 p-0.5">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        isQuotaReached 
+                          ? 'bg-gradient-to-r from-rose-600 to-rose-400 shadow-md shadow-rose-500/50' 
+                          : quotaPercentage >= 80 
+                          ? 'bg-gradient-to-r from-amber-500 to-orange-400' 
+                          : 'bg-gradient-to-r from-blue-600 to-emerald-400'
+                      }`}
+                      style={{ width: `${Math.min(100, Math.max(5, quotaPercentage))}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* CLEAN PROFESSIONAL BANNER WHEN QUOTA IS REACHED */}
+              {isQuotaReached && (
+                <div className="bg-gradient-to-r from-rose-50 via-rose-50/80 to-amber-50/50 border-2 border-rose-300 rounded-2xl p-4.5 flex items-start gap-4 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="w-10 h-10 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 mt-0.5 shadow-md shadow-rose-600/30">
+                    <AlertTriangle size={22} />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-sm font-black text-rose-950 uppercase tracking-tight">
+                        Plafond de licence atteint
+                      </h4>
+                      <span className="px-2 py-0.5 text-[9px] font-black uppercase tracking-wider bg-rose-200 text-rose-800 rounded-md">
+                        Blocage Actif
+                      </span>
+                    </div>
+                    <p className="text-xs text-rose-900 font-medium mt-1 leading-relaxed">
+                      Vous avez atteint la limite d'utilisateurs pour votre licence actuelle. Veuillez contacter l'administrateur système pour passer à une licence supérieure.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Title & Actions Bar */}
+              <div className="flex items-center justify-between flex-wrap gap-4 pt-2">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Gestion des Utilisateurs du Centre</h2>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">Personnel actif de votre structure hospitalière</p>
+                </div>
                 <div className="flex items-center gap-4">
-                  <button
-                    onClick={() => setShowUserForm(true)}
-                    className="bg-blue-600 text-white font-bold px-4 py-2 rounded-xl flex items-center gap-2 hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/20 text-sm"
-                  >
-                    <UserPlus size={16} />
-                    Ajouter un utilisateur
-                  </button>
+                  {isPrincipalAdmin ? (
+                    <button
+                      disabled={isQuotaReached}
+                      onClick={() => {
+                        if (isQuotaReached) return;
+                        setNewUser({
+                          role: Role.DOCTOR,
+                          roles: [],
+                          status: 'ACTIVE',
+                          password: generateAutoPassword()
+                        });
+                        setShowUserForm(true);
+                      }}
+                      title={isQuotaReached ? "Vous avez atteint la limite d'utilisateurs pour votre licence actuelle." : "Créer un nouvel utilisateur pour ce centre"}
+                      className={`px-4 py-2.5 rounded-xl flex items-center gap-2 text-sm font-bold transition-all shadow-md ${
+                        isQuotaReached
+                          ? 'bg-slate-200 text-slate-400 cursor-not-allowed border border-slate-300 shadow-none opacity-60'
+                          : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/20 cursor-pointer'
+                      }`}
+                    >
+                      <UserPlus size={16} />
+                      Nouvel Utilisateur
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2 px-3.5 py-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold">
+                      <ShieldAlert size={16} className="text-amber-600 shrink-0" />
+                      <span>Seul l'administrateur principal de cet établissement peut créer de nouveaux utilisateurs</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -286,9 +1118,14 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
               <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
                 <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                   <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                    <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">
-                      {isEditingUser ? 'Éditer l\'utilisateur' : 'Nouvel Utilisateur'}
-                    </h3>
+                    <div>
+                      <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">
+                        {isEditingUser ? 'Éditer l\'utilisateur' : 'Nouvel Utilisateur du Centre'}
+                      </h3>
+                      {!isEditingUser && (
+                        <p className="text-xs text-slate-500">Seul l'identifiant de connexion est obligatoire. Le mot de passe est généré automatiquement.</p>
+                      )}
+                    </div>
                     <button 
                       onClick={() => { 
                         setIsEditingUser(false); 
@@ -304,23 +1141,11 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
                   <div className="p-6 overflow-y-auto">
                     <form id="user-form" onSubmit={handleAddUser} className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Nom complet *</label>
-                        <input 
-                          type="text" 
-                          placeholder="Ex: Dr. Jean Dupont" 
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 ring-blue-600/20 outline-none"
-                          value={newUser.name || ''}
-                          onChange={e => setNewUser({...newUser, name: e.target.value})}
-                          required
-                        />
-                      </div>
-                      
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Username *</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Username (Identifiant) *</label>
                         <input 
                           type="text" 
                           placeholder="Ex: jdupont" 
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 ring-blue-600/20 outline-none"
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 ring-blue-600/20 outline-none font-medium"
                           value={newUser.username || ''}
                           onChange={e => setNewUser({...newUser, username: e.target.value})}
                           required
@@ -328,27 +1153,67 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
                       </div>
 
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Email *</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Mot de passe (Généré auto)</label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="text" 
+                            placeholder="Mot de passe" 
+                            className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-mono font-bold text-blue-700 outline-none"
+                            value={newUser.password || ''}
+                            onChange={e => setNewUser({...newUser, password: e.target.value})}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setNewUser({...newUser, password: generateAutoPassword()})}
+                            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors shrink-0"
+                            title="Régénérer"
+                          >
+                            Régénérer
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Nom complet</label>
+                        <input 
+                          type="text" 
+                          placeholder="Ex: Dr. Jean Dupont" 
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 ring-blue-600/20 outline-none"
+                          value={newUser.name || ''}
+                          onChange={e => setNewUser({...newUser, name: e.target.value})}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Email</label>
                         <input 
                           type="email" 
                           placeholder="Ex: jean.dupont@hopital.com" 
                           className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 ring-blue-600/20 outline-none"
                           value={newUser.email || ''}
                           onChange={e => setNewUser({...newUser, email: e.target.value})}
-                          required
                         />
                       </div>
 
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Mot de passe {isEditingUser ? '(laisser vide pour ne pas changer)' : '*'}</label>
-                        <input 
-                          type="password" 
-                          placeholder="Min. 8 caractères" 
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 ring-blue-600/20 outline-none"
-                          value={newUser.password || ''}
-                          onChange={e => setNewUser({...newUser, password: e.target.value})}
-                          required={!isEditingUser}
-                          minLength={8}
+                      <div className="sm:col-span-2">
+                        <ImageUpload
+                          currentImageUrl={newUser.profile_image_url || newUser.profileImage}
+                          userId={newUser.id || newUser.username || 'staff'}
+                          label="Photo de profil du personnel"
+                          onImageUploaded={(url) => {
+                            setNewUser({
+                              ...newUser,
+                              profile_image_url: url,
+                              profileImage: url
+                            });
+                          }}
+                          onImageRemoved={() => {
+                            setNewUser({
+                              ...newUser,
+                              profile_image_url: undefined,
+                              profileImage: undefined
+                            });
+                          }}
                         />
                       </div>
 
@@ -512,8 +1377,13 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
                         filteredUsers.map(u => (
                           <tr key={u.id} onClick={() => setViewingUser(u)} className="hover:bg-slate-50/50 transition-colors cursor-pointer">
                             <td className="px-6 py-4">
-                              <div className="font-bold text-slate-900">{u.name}</div>
-                              <div className="text-xs text-slate-500 font-medium">@{u.username}</div>
+                              <div className="flex items-center gap-3">
+                                <Avatar user={u} size={36} />
+                                <div>
+                                  <div className="font-bold text-slate-900">{u.name}</div>
+                                  <div className="text-xs text-slate-500 font-medium">@{u.username}</div>
+                                </div>
+                              </div>
                             </td>
                             <td className="px-6 py-4 text-sm text-slate-600">{u.email || '-'}</td>
                             <td className="px-6 py-4">
@@ -548,6 +1418,14 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
                             </td>
                             <td className="px-6 py-4 text-right">
                               <div className="flex items-center justify-end gap-2">
+                                <button 
+                                  onClick={(e) => { e.stopPropagation(); setViewingUser(u); }}
+                                  className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer"
+                                  title="Consulter la Fiche Performance RH & Quotes-parts"
+                                >
+                                  <TrendingUp size={14} />
+                                  <span>Performance RH</span>
+                                </button>
                                 <button onClick={(e) => { e.stopPropagation(); handleEditUser(u); }} className="p-2 text-slate-400 hover:text-blue-600 transition-colors" title="Éditer">
                                   <Edit2 size={16} />
                                 </button>
@@ -576,100 +1454,14 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
             </div>
           )}
 
-          {/* User Details Modal */}
+          {/* User Details & Fiche Performance RH Modal */}
           {viewingUser && (
-            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setViewingUser(null)}>
-              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
-                <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight">
-                    Détails de l'utilisateur
-                  </h3>
-                  <button 
-                    onClick={() => setViewingUser(null)}
-                    className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-200 text-slate-500 transition-colors"
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-                <div className="p-6 space-y-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 text-2xl font-black">
-                      {viewingUser.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <h4 className="text-xl font-bold text-slate-900">{viewingUser.name}</h4>
-                      <p className="text-sm text-slate-500">@{viewingUser.username}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Email</p>
-                      <p className="text-sm font-medium text-slate-700">{viewingUser.email || 'Non renseigné'}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Profession</p>
-                      <p className="text-sm font-medium text-slate-700">{viewingUser.profession || 'Non renseignée'}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Rôles</p>
-                      <div className="flex flex-wrap gap-2">
-                        {viewingUser.roles && viewingUser.roles.length > 0 ? (
-                          viewingUser.roles.map(roleId => {
-                            const role = roles.find(r => r.id === roleId);
-                            return role ? (
-                              <span key={roleId} className="px-2 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold">
-                                {role.name}
-                              </span>
-                            ) : null;
-                          })
-                        ) : (
-                          <span className="px-2 py-1 bg-slate-100 text-slate-500 rounded-lg text-xs font-bold">
-                            {viewingUser.role}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Statut</p>
-                        <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase ${
-                          viewingUser.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600' : 
-                          viewingUser.status === 'BLOCKED' ? 'bg-rose-50 text-rose-600' : 
-                          'bg-slate-100 text-slate-500'
-                        }`}>
-                          {viewingUser.status || 'ACTIVE'}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Dernière Connexion</p>
-                        <p className="text-sm font-medium text-slate-700">
-                          {viewingUser.lastLogin ? new Date(viewingUser.lastLogin).toLocaleString('fr-FR') : 'Jamais'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
-                  <button 
-                    onClick={() => {
-                      const u = viewingUser;
-                      setViewingUser(null);
-                      handleEditUser(u);
-                    }}
-                    className="px-6 py-3 rounded-xl font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 transition-colors flex items-center gap-2"
-                  >
-                    <Edit2 size={16} /> Éditer
-                  </button>
-                  <button 
-                    onClick={() => setViewingUser(null)}
-                    className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"
-                  >
-                    Fermer
-                  </button>
-                </div>
-              </div>
-            </div>
+            <StaffPerformanceModal
+              staffUser={viewingUser}
+              currentUser={user!}
+              isOpen={!!viewingUser}
+              onClose={() => setViewingUser(null)}
+            />
           )}
 
           {activeTab === 'establishment' && (
@@ -764,12 +1556,87 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Logo (Badge initiales)</label>
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest text-center block">Logo de l'Hôpital</label>
+                    <div className="flex flex-col items-center gap-3">
+                      <div className="w-24 h-24 rounded-2xl bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm">
+                        {establishment.logo ? (
+                          <img src={establishment.logo} alt="Logo" className="w-full h-full object-contain p-2" />
+                        ) : (
+                          <Hospital className="text-slate-300" size={40} />
+                        )}
+                      </div>
+                      <input 
+                        type="file" 
+                        accept="image/*"
+                        id="establishment-logo-upload"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setEstablishment({...establishment, logo: reader.result as string});
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      <label 
+                        htmlFor="establishment-logo-upload"
+                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest cursor-pointer transition-all border border-slate-200"
+                      >
+                        {establishment.logo ? 'Changer le logo' : 'Charger un logo'}
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="col-span-2 mt-4 pt-6 border-t border-slate-100">
+                    <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight mb-4 flex items-center gap-2">
+                      <CreditCard size={18} className="text-blue-600" />
+                      Informations de Facturation
+                    </h3>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Identifiant Fiscal (NIF/RCCM)</label>
                     <input 
                       type="text" 
                       className="w-full px-4 py-3 rounded-xl border border-slate-200"
-                      value={establishment.logo || ''}
-                      onChange={e => setEstablishment({...establishment, logo: e.target.value})}
+                      value={establishment.taxId || ''}
+                      onChange={e => setEstablishment({...establishment, taxId: e.target.value})}
+                      placeholder="Ex: NIF: M0123... / RCCM: RC/YAO/..."
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Site Web</label>
+                    <input 
+                      type="text" 
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200"
+                      value={establishment.website || ''}
+                      onChange={e => setEstablishment({...establishment, website: e.target.value})}
+                      placeholder="www.hopital.com"
+                    />
+                  </div>
+
+                  <div className="col-span-2 space-y-2">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Informations Bancaires (RIB)</label>
+                    <input 
+                      type="text" 
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200"
+                      value={establishment.bankInfo || ''}
+                      onChange={e => setEstablishment({...establishment, bankInfo: e.target.value})}
+                      placeholder="Banque - Code - Agence - N° Compte"
+                    />
+                  </div>
+
+                  <div className="col-span-2 space-y-2">
+                    <label className="text-xs font-black text-slate-400 uppercase tracking-widest">Pied de page de Facture</label>
+                    <textarea 
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 min-h-[80px]"
+                      value={establishment.invoiceFooter || ''}
+                      onChange={e => setEstablishment({...establishment, invoiceFooter: e.target.value})}
+                      placeholder="Texte qui s'affichera au bas de chaque facture..."
                     />
                   </div>
                   
@@ -788,7 +1655,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
                             // Appliquer le thème immédiatement pour prévisualisation
                             const root = document.documentElement;
                             Object.entries(THEMES[themeName]).forEach(([shade, color]) => {
-                              root.style.setProperty(`--theme-${shade}`, color);
+                              root.style.setProperty(`--theme-${shade}`, color as string);
                             });
                           }}
                           className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 transition-all ${
@@ -818,7 +1685,21 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
           )}
 
           {activeTab === 'services' && (
-            <ServicesDepartments users={users} />
+            <div className="bg-slate-50 border border-slate-200 p-8 rounded-3xl text-center space-y-4">
+              <div className="w-16 h-16 bg-rose-100 text-rose-600 rounded-2xl mx-auto flex items-center justify-center">
+                <ShieldAlert size={32} />
+              </div>
+              <h3 className="text-xl font-black text-slate-900">Gouvernance Commerciale Centralisée</h3>
+              <p className="text-sm text-slate-600 max-w-lg mx-auto">
+                La gestion et l'activation des services hospitaliers sont désormais gérées exclusivement par le Super Administrateur de SmartHosto selon votre forfait commercial.
+              </p>
+              <button 
+                onClick={() => setActiveTab('establishment')}
+                className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all"
+              >
+                Retour aux paramètres de l'établissement
+              </button>
+            </div>
           )}
 
           {activeTab === 'protocols' && (
@@ -866,32 +1747,160 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
               {/* Acts */}
               {activeReferentialTab === 'acts' && (
                 <div className="space-y-4 animate-in fade-in duration-300">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-black text-slate-400 uppercase tracking-widest text-xs">Actes Médicaux & Tarifs</h3>
-                    <button 
-                      onClick={() => setShowAddMedicalAct(true)}
-                      className="text-blue-600 font-bold text-xs flex items-center gap-1"
-                    >
-                      <Plus size={14} /> Ajouter
-                    </button>
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
+                    <div>
+                      <h3 className="font-black text-slate-900 text-sm uppercase tracking-wider flex items-center gap-2">
+                        <Stethoscope className="text-blue-600" size={18} />
+                        Référentiel des Actes Médicaux & Tarifs ({acts.length})
+                      </h3>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        Catalogue officiel des prestations utilisées pour l'admission, l'orientation et la facturation
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                          setEditingMedicalAct(null);
+                          setShowAddMedicalAct(true);
+                        }}
+                        className="px-4 py-2 rounded-xl text-xs font-extrabold bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center gap-1.5 shadow-md shadow-blue-500/20"
+                      >
+                        <Plus size={16} />
+                        Nouvel Acte Médical
+                      </button>
+                    </div>
                   </div>
-                  <div className="overflow-hidden rounded-2xl border border-slate-100">
-                    <table className="w-full text-left">
-                      <thead className="bg-slate-50">
+
+                  {/* Filters */}
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                      <input 
+                        type="text"
+                        value={actSearchQuery}
+                        onChange={(e) => setActSearchQuery(e.target.value)}
+                        placeholder="Rechercher un acte, code, spécialité..."
+                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                      {actSearchQuery && (
+                        <button onClick={() => setActSearchQuery('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                          <X size={14} />
+                        </button>
+                      )}
+                    </div>
+
+                    <select
+                      value={actCategoryFilter}
+                      onChange={(e) => setActCategoryFilter(e.target.value)}
+                      className="px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
+                    >
+                      <option value="tous">Toutes les catégories</option>
+                      <option value="consultation">Consultations</option>
+                      <option value="accouchement">Maternité / Accouchement</option>
+                      <option value="urgence">Urgences</option>
+                      <option value="hospitalisation">Hospitalisation</option>
+                      <option value="soin">Soins infirmiers</option>
+                      <option value="analyse">Analyses / Laboratoire</option>
+                      <option value="chirurgie">Chirurgie / Bloc</option>
+                    </select>
+                  </div>
+
+                  <div className="overflow-hidden rounded-2xl border border-slate-150 shadow-sm bg-white">
+                    <table className="w-full text-left border-collapse">
+                      <thead className="bg-slate-50 border-b border-slate-150">
                         <tr>
-                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase">Acte</th>
-                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase">Catégorie</th>
-                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase text-right">Tarif</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Acte Médical</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Service / Spécialité</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider">Catégorie</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Tarif Prestation</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-50">
-                        {acts.map(a => (
-                          <tr key={a.id}>
-                            <td className="px-4 py-3 font-bold text-sm">{a.name}</td>
-                            <td className="px-4 py-3 text-xs text-slate-500">{a.category}</td>
-                            <td className="px-4 py-3 text-right font-black text-blue-600">{a.price.toLocaleString()} {establishment.currency}</td>
+                      <tbody className="divide-y divide-slate-100">
+                        {acts
+                          .filter(a => {
+                            if (actCategoryFilter !== 'tous') {
+                              const cat = (a.category || a.categorie || '').toLowerCase();
+                              if (!cat.includes(actCategoryFilter.toLowerCase())) return false;
+                            }
+                            if (actSearchQuery.trim()) {
+                              const q = actSearchQuery.toLowerCase();
+                              const nameMatch = (a.name || a.nom || '').toLowerCase().includes(q);
+                              const codeMatch = (a.codeInterne || a.id || '').toLowerCase().includes(q);
+                              const srvMatch = (a.servicePrincipal || a.sousService || '').toLowerCase().includes(q);
+                              const catMatch = (a.category || '').toLowerCase().includes(q);
+                              return nameMatch || codeMatch || srvMatch || catMatch;
+                            }
+                            return true;
+                          })
+                          .map(a => (
+                            <tr key={a.id} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="px-4 py-3.5">
+                                <div className="font-extrabold text-sm text-slate-900">{a.name || a.nom}</div>
+                                {a.codeInterne && (
+                                  <span className="inline-block mt-0.5 text-[9px] font-mono font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+                                    {a.codeInterne}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <span className="text-xs font-bold text-slate-700 block capitalize">
+                                  {a.servicePrincipal ? a.servicePrincipal.replace('_', ' ') : 'Consultation'}
+                                </span>
+                                {a.sousService && (
+                                  <span className="text-[10px] text-blue-600 font-semibold">
+                                    {a.sousService}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3.5">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200">
+                                  {a.category || a.categorie || 'Acte'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3.5 text-right font-black text-sm text-blue-600">
+                                {(a.price || 0).toLocaleString()} {establishment.currency}
+                              </td>
+                              <td className="px-4 py-3.5 text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button
+                                    onClick={() => {
+                                      setEditingMedicalAct(a);
+                                      setShowAddMedicalAct(true);
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="Modifier la prestation"
+                                  >
+                                    <Edit2 size={16} />
+                                  </button>
+                                  <button
+                                    onClick={async () => {
+                                      if (window.confirm(`Confirmer la suppression de l'acte médical "${a.name || a.nom}" ?`)) {
+                                        try {
+                                          await deleteDoc(doc(db, 'medical_acts', a.id));
+                                          showMessage('success', `Acte "${a.name || a.nom}" supprimé`);
+                                        } catch (err) {
+                                          console.error("Error deleting act:", err);
+                                          showMessage('error', "Erreur lors de la suppression");
+                                        }
+                                      }
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                    title="Supprimer l'acte"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        {acts.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="py-10 text-center text-slate-400 text-xs font-bold">
+                              Aucun acte médical enregistré dans le référentiel.
+                            </td>
                           </tr>
-                        ))}
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -900,41 +1909,186 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
 
               {/* Meds */}
               {activeReferentialTab === 'medications' && (
-                <div className="space-y-4 animate-in fade-in duration-300">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-black text-slate-400 uppercase tracking-widest text-xs">Médicaments de Base</h3>
-                    <button 
-                      onClick={() => setShowAddMedication(true)}
-                      className="text-blue-600 font-bold text-xs flex items-center gap-1"
+                <div className="space-y-6 animate-in fade-in duration-300">
+                  {/* Header & Main Actions */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
+                    <div>
+                      <h3 className="font-black text-slate-900 text-sm uppercase tracking-wider flex items-center gap-2">
+                        <Pill className="text-blue-600" size={18} />
+                        Référentiel des Médicaments ({meds.length})
+                      </h3>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        Gestion du catalogue des médicaments et réapprovisionnement des stocks
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => setShowStockMovements(true)}
+                        className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors flex items-center gap-1.5 shadow-sm"
+                      >
+                        <History size={16} className="text-slate-500" />
+                        Historique Mouvements
+                      </button>
+                      <button 
+                        onClick={() => setShowAddMedication(true)}
+                        className="px-4 py-2 rounded-xl text-xs font-extrabold bg-blue-600 text-white hover:bg-blue-700 transition-colors flex items-center gap-1.5 shadow-md shadow-blue-500/20"
+                      >
+                        <Plus size={16} />
+                        Nouveau Médicament
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Search & Category Filter Bar */}
+                  <div className="flex flex-col md:flex-row gap-3">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input 
+                        type="text" 
+                        placeholder="Rechercher par nom commercial, DCI, catégorie..."
+                        value={medSearchQuery}
+                        onChange={(e) => setMedSearchQuery(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-xs font-bold text-slate-800"
+                      />
+                    </div>
+                    <select
+                      value={medFamilyFilter}
+                      onChange={(e) => setMedFamilyFilter(e.target.value)}
+                      className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
                     >
-                      <Plus size={14} /> Ajouter
-                    </button>
+                      <option value="tous">Toutes les familles</option>
+                      {Array.from(new Set(meds.map(m => m.family || m.classeTherapeutique).filter(Boolean))).map(fam => (
+                        <option key={fam as string} value={fam as string}>{fam as string}</option>
+                      ))}
+                    </select>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {meds.map(m => (
-                      <div key={m.id} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
-                        <div>
-                          <p className="font-bold text-slate-900">{m.name}</p>
-                          <p className="text-[10px] text-slate-500 font-medium">{m.dosage} • Stock: {m.stock}</p>
+
+                  {/* Medications List */}
+                  {(() => {
+                    const filteredMeds = meds.filter(m => {
+                      const matchSearch = (m.name || '').toLowerCase().includes(medSearchQuery.toLowerCase()) ||
+                                          (m.dci || '').toLowerCase().includes(medSearchQuery.toLowerCase()) ||
+                                          (m.family || m.classeTherapeutique || '').toLowerCase().includes(medSearchQuery.toLowerCase());
+                      const matchFam = medFamilyFilter === 'tous' || (m.family || m.classeTherapeutique) === medFamilyFilter;
+                      return matchSearch && matchFam;
+                    });
+
+                    if (filteredMeds.length === 0) {
+                      return (
+                        <div className="p-8 text-center bg-slate-50 border border-slate-100 rounded-2xl text-slate-400 text-xs font-bold">
+                          Aucun médicament ne correspond aux critères de recherche.
                         </div>
-                        <p className="font-black text-emerald-600">{m.price} {establishment.currency}</p>
+                      );
+                    }
+
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {filteredMeds.map(m => {
+                          const currentStock = Number(m.stock) || 0;
+                          const threshold = Number(m.seuilAlerte) || Number(m.minThreshold) || 10;
+                          const isLowStock = currentStock <= threshold;
+
+                          return (
+                            <div key={m.id} className="p-4 bg-white rounded-2xl border border-slate-200/80 hover:border-blue-200 transition-all shadow-sm flex flex-col justify-between gap-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h4 className="font-extrabold text-slate-900 text-sm">{m.name}</h4>
+                                    <span className="text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
+                                      {m.family || m.classeTherapeutique || 'Général'}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                                    Conditionnement: <span className="font-bold text-slate-700">{m.unit || m.typeConditionnement || 'Boîte'}</span>
+                                    {m.batchNumber && (
+                                      <span className="ml-2 font-mono text-[10px] text-slate-400">• Lot: {m.batchNumber}</span>
+                                    )}
+                                  </p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className="font-black text-emerald-600 text-sm block">
+                                    {m.price || m.prixVente || 0} {establishment.currency}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                                <div className="flex items-center gap-2">
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black ${
+                                    isLowStock 
+                                      ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                  }`}>
+                                    <Package size={14} />
+                                    Stock: {currentStock}
+                                  </span>
+                                  {isLowStock && (
+                                    <span className="text-[10px] text-rose-500 font-bold">
+                                      (Seuil ≤ {threshold})
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => setSelectedMedForRestock(m)}
+                                    className="px-3 py-1.5 rounded-xl font-bold text-xs bg-emerald-600 text-white hover:bg-emerald-700 transition-colors flex items-center gap-1 shadow-sm"
+                                    title="Ajouter du stock pour ce médicament"
+                                  >
+                                    <PlusCircle size={14} /> Réapprovisionner
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteMedication(m.id, m.name)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors"
+                                    title="Supprimer la référence"
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })()}
                 </div>
               )}
 
               {/* Consumables */}
               {activeReferentialTab === 'consumables' && (
                 <div className="space-y-6 animate-in fade-in duration-300">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-black text-slate-400 uppercase tracking-widest text-xs">Consommables</h3>
-                    <button 
-                      onClick={() => setShowAddConsumable(true)}
-                      className="text-emerald-600 font-bold text-xs flex items-center gap-1 bg-emerald-50 px-3 py-2 rounded-xl hover:bg-emerald-100 transition-colors"
-                    >
-                      <Plus size={14} /> Ajouter un consommable
-                    </button>
+                  {/* Header & Main Actions */}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200/80">
+                    <div>
+                      <h3 className="font-black text-slate-900 text-sm uppercase tracking-wider flex items-center gap-2">
+                        <Package className="text-emerald-600" size={18} />
+                        Référentiel des Consommables ({consumables.length})
+                      </h3>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        Gestion du matériel médical consommable et alimentation du stock via réapprovisionnement
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                          setSelectedConsumableForRestock(null);
+                          setSelectedMedForRestock(null);
+                          setShowUniversalRestock(true);
+                        }}
+                        className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors flex items-center gap-1.5 shadow-md shadow-emerald-600/20 cursor-pointer"
+                      >
+                        <PlusCircle size={16} />
+                        Réapprovisionner Consommable
+                      </button>
+                      <button 
+                        onClick={() => setShowAddConsumable(true)}
+                        className="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      >
+                        <Plus size={16} />
+                        Ajouter un consommable
+                      </button>
+                    </div>
                   </div>
 
                   {/* Filters & Search */}
@@ -950,7 +2104,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
                       />
                     </div>
                     <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 hide-scrollbar">
-                      {['tous', 'médical', 'laboratoire', 'administratif', 'technique'].map(cat => (
+                      {['tous', 'médical', 'laboratoire', 'chirurgical', 'administratif', 'technique'].map(cat => (
                         <button
                           key={cat}
                           onClick={() => setConsumableCategoryFilter(cat)}
@@ -972,11 +2126,11 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
                       <table className="w-full text-left">
                         <thead className="bg-slate-50 border-b border-slate-100">
                           <tr>
-                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Nom</th>
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Nom & Code</th>
                             <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Catégorie</th>
                             <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Service</th>
-                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Stock</th>
-                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Facturable</th>
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Stock Réel</th>
+                            <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Seuil Alerte</th>
                             <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-right">Actions</th>
                           </tr>
                         </thead>
@@ -985,54 +2139,72 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
                             .filter(c => consumableCategoryFilter === 'tous' || c.categorie === consumableCategoryFilter)
                             .filter(c => 
                               c.nom?.toLowerCase().includes(consumableSearch.toLowerCase()) || 
+                              c.name?.toLowerCase().includes(consumableSearch.toLowerCase()) ||
                               c.codeInterne?.toLowerCase().includes(consumableSearch.toLowerCase()) ||
                               c.categorie?.toLowerCase().includes(consumableSearch.toLowerCase()) ||
                               c.sousCategorie?.toLowerCase().includes(consumableSearch.toLowerCase())
                             )
                             .map(c => {
-                              const stockStatus = c.stockInitial <= (c.seuilAlerte || 10) ? 'rouge' : (c.stockInitial <= (c.seuilAlerte || 10) * 2 ? 'jaune' : 'vert');
+                              const currentLiveStock = Number(c.stock !== undefined ? c.stock : (c.stockInitial || 0));
+                              const alertThreshold = Number(c.seuilAlerte) || 10;
+                              const isLowStock = currentLiveStock <= alertThreshold;
+                              const stockStatus = currentLiveStock <= alertThreshold ? 'rouge' : (currentLiveStock <= alertThreshold * 2 ? 'jaune' : 'vert');
+
                               return (
                                 <tr key={c.id} className="hover:bg-slate-50 transition-colors">
                                   <td className="px-6 py-4">
-                                    <p className="font-bold text-slate-900 text-sm">{c.nom}</p>
-                                    {c.codeInterne && <p className="text-xs text-slate-500 font-medium">{c.codeInterne}</p>}
+                                    <p className="font-bold text-slate-900 text-sm">{c.nom || c.name}</p>
+                                    {c.codeInterne && <p className="text-xs text-slate-500 font-mono font-medium">{c.codeInterne}</p>}
                                   </td>
                                   <td className="px-6 py-4">
-                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 capitalize">
+                                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-800 capitalize">
                                       {c.categorie}
                                     </span>
                                     {c.sousCategorie && <p className="text-xs text-slate-500 mt-1">{c.sousCategorie}</p>}
                                   </td>
                                   <td className="px-6 py-4">
-                                    <span className="text-sm text-slate-600 capitalize">{c.servicePrincipal?.replace('_', ' ')}</span>
+                                    <span className="text-sm text-slate-600 capitalize">{c.servicePrincipal?.replace('_', ' ') || 'Consultation'}</span>
                                   </td>
                                   <td className="px-6 py-4">
                                     <div className="flex items-center gap-2">
-                                      <div className={`w-2 h-2 rounded-full ${
-                                        stockStatus === 'vert' ? 'bg-emerald-500' : 
-                                        stockStatus === 'jaune' ? 'bg-amber-500' : 'bg-rose-500'
-                                      }`} />
-                                      <span className="font-bold text-slate-700 text-sm">{c.stockInitial}</span>
-                                      <span className="text-xs text-slate-500">{c.uniteGestion}</span>
-                                    </div>
-                                  </td>
-                                  <td className="px-6 py-4">
-                                    {c.facturableAuPatient ? (
-                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-50 text-blue-700">
-                                        Oui ({c.prixVente} {establishment.currency})
+                                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black ${
+                                        isLowStock 
+                                          ? 'bg-rose-50 text-rose-700 border border-rose-200' 
+                                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                      }`}>
+                                        <div className={`w-2 h-2 rounded-full ${
+                                          stockStatus === 'vert' ? 'bg-emerald-500' : 
+                                          stockStatus === 'jaune' ? 'bg-amber-500' : 'bg-rose-500'
+                                        }`} />
+                                        Stock: {currentLiveStock}
                                       </span>
-                                    ) : (
-                                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-500">
-                                        Non
+                                      <span className="text-xs text-slate-500 font-medium">{c.uniteGestion || c.unit || 'unités'}</span>
+                                    </div>
+                                    {currentLiveStock === 0 && (
+                                      <span className="text-[10px] text-rose-500 font-bold block mt-0.5">
+                                        À réapprovisionner
                                       </span>
                                     )}
                                   </td>
+                                  <td className="px-6 py-4">
+                                    <span className="text-xs font-bold text-slate-600">
+                                      ≤ {alertThreshold} {c.uniteGestion || 'unités'}
+                                    </span>
+                                  </td>
                                   <td className="px-6 py-4 text-right">
                                     <div className="flex items-center justify-end gap-2">
-                                      <button className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                                        <Edit2 size={16} />
+                                      <button 
+                                        onClick={() => setSelectedConsumableForRestock(c)}
+                                        className="px-3 py-1.5 rounded-xl font-bold text-xs bg-emerald-600 text-white hover:bg-emerald-700 transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
+                                        title="Réapprovisionner ce consommable"
+                                      >
+                                        <PlusCircle size={14} /> Réapprovisionner
                                       </button>
-                                      <button className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors">
+                                      <button 
+                                        onClick={() => handleDeleteConsumable(c.id, c.nom || c.name)}
+                                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                        title="Supprimer la référence"
+                                      >
                                         <Trash2 size={16} />
                                       </button>
                                     </div>
@@ -1215,47 +2387,88 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
             </div>
           )}
         </div>
-      </div>
+      </main>
 
       {showAddMedication && (
         <AddMedicationForm 
           onClose={() => setShowAddMedication(false)}
-          onSave={(med) => {
-            const newMed = {
-              id: Date.now().toString(),
-              name: med.nomCommercial,
-              dosage: `${med.dosageValeur}${med.dosageUnite}`,
-              price: Number(med.prixVente) || 0,
-              stock: 0,
-              ...med
-            };
-            const updatedMeds = [...meds, newMed];
-            setMeds(updatedMeds);
-            localStorage.setItem('hospital_meds', JSON.stringify(updatedMeds));
-            setShowAddMedication(false);
-            setMessage({ type: 'success', text: 'Médicament ajouté avec succès' });
-            setTimeout(() => setMessage(null), 3000);
+          onSave={async (med) => {
+            try {
+              const medId = `MED-${Date.now()}`;
+              const newMed = {
+                id: medId,
+                name: med.name,
+                family: med.family,
+                classeTherapeutique: med.family,
+                unit: med.unit,
+                typeConditionnement: med.unit,
+                price: med.price,
+                prixVente: med.price,
+                seuilAlerte: med.seuilAlerte,
+                stock: 0, // Initial stock is 0
+                reservedStock: 0,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              };
+              await setDoc(doc(db, 'pharmacy_inventory', medId), sanitizeData(newMed));
+              setShowAddMedication(false);
+              showMessage('success', `Médicament "${med.name}" ajouté avec succès`);
+            } catch (error) {
+              console.error("Error saving medication:", error);
+              showMessage('error', 'Erreur lors de l\'enregistrement');
+            }
           }}
+        />
+      )}
+
+      {(selectedMedForRestock || selectedConsumableForRestock || showUniversalRestock) && (
+        <RestockModal
+          medication={selectedMedForRestock}
+          consumable={selectedConsumableForRestock}
+          initialType={selectedConsumableForRestock ? 'CONSUMABLE' : 'MEDICATION'}
+          currency={establishment.currency}
+          onClose={() => {
+            setSelectedMedForRestock(null);
+            setSelectedConsumableForRestock(null);
+            setShowUniversalRestock(false);
+          }}
+          onSubmit={handleRestockSubmit}
+        />
+      )}
+
+      {showStockMovements && (
+        <StockMovementsModal
+          currency={establishment.currency}
+          onClose={() => setShowStockMovements(false)}
         />
       )}
 
       {showAddMedicalAct && (
         <AddMedicalActForm 
-          onClose={() => setShowAddMedicalAct(false)}
-          onSave={(act) => {
-            const newAct = {
-              id: Date.now().toString(),
-              name: act.nom,
-              price: Number(act.prixBase) || 0,
-              category: act.categorie || 'Non catégorisé',
-              ...act
-            };
-            const updatedActs = [...acts, newAct];
-            setActs(updatedActs);
-            localStorage.setItem('hospital_acts', JSON.stringify(updatedActs));
+          initialData={editingMedicalAct}
+          onClose={() => {
             setShowAddMedicalAct(false);
-            setMessage({ type: 'success', text: 'Acte médical ajouté avec succès' });
-            setTimeout(() => setMessage(null), 3000);
+            setEditingMedicalAct(null);
+          }}
+          onSave={async (act) => {
+            try {
+              const actId = editingMedicalAct?.id || Date.now().toString();
+              const newAct = {
+                id: actId,
+                name: act.nom,
+                price: Number(act.prixBase) || 0,
+                category: act.categorie || 'Non catégorisé',
+                ...act,
+                updatedAt: new Date().toISOString()
+              };
+              await setDoc(doc(db, 'medical_acts', actId), sanitizeData(newAct), { merge: true });
+              setShowAddMedicalAct(false);
+              setEditingMedicalAct(null);
+              showMessage('success', editingMedicalAct ? 'Prestation mise à jour avec succès' : 'Prestation ajoutée avec succès');
+            } catch (error) {
+              console.error("Error saving medical act:", error);
+              showMessage('error', 'Erreur lors de l\'enregistrement de la prestation');
+            }
           }}
         />
       )}
@@ -1263,20 +2476,26 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user }) =>
       {showAddConsumable && (
         <AddConsumableForm 
           onClose={() => setShowAddConsumable(false)}
-          onSave={(consumable) => {
-            const newConsumable = {
-              id: Date.now().toString(),
-              name: consumable.nom,
-              price: Number(consumable.prixVente) || 0,
-              stock: Number(consumable.stockInitial) || 0,
-              ...consumable
-            };
-            const updatedConsumables = [...consumables, newConsumable];
-            setConsumables(updatedConsumables);
-            localStorage.setItem('hospital_consumables', JSON.stringify(updatedConsumables));
-            setShowAddConsumable(false);
-            setMessage({ type: 'success', text: 'Consommable ajouté avec succès' });
-            setTimeout(() => setMessage(null), 3000);
+          onSave={async (consumable) => {
+            try {
+              const consumableId = Date.now().toString();
+              const newConsumable = {
+                id: consumableId,
+                name: consumable.nom,
+                price: Number(consumable.prixVente) || 0,
+                ...consumable,
+                stock: 0, // Strict accounting: starts strictly at 0 until restocked!
+                stockInitial: 0,
+                updatedAt: new Date().toISOString(),
+                createdAt: new Date().toISOString()
+              };
+              await setDoc(doc(db, 'hospital_consumables', consumableId), sanitizeData(newConsumable));
+              setShowAddConsumable(false);
+              showMessage('success', 'Consommable enregistré avec succès (Stock initial: 0)');
+            } catch (error) {
+              console.error("Error saving consumable:", error);
+              showMessage('error', 'Erreur lors de l\'enregistrement');
+            }
           }}
         />
       )}
