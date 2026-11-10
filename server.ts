@@ -1533,12 +1533,18 @@ async function buildStaffHospitalContext(staffDoc: any) {
         rec.isPendingDischarge === true;
       if (!isDischarged) {
         activeInpatients.push({
+          id: d.id,
+          patientId: rec.patientId || '',
           patientName: rec.patientName || rec.patient || 'Patient Hospitalisé',
-          bed: rec.bedName || rec.room || 'Lit assigné',
-          admissionDate: rec.admissionDate || rec.createdAt || '',
-          status: isPendingDischarge ? 'EN_ATTENTE_DE_SORTIE' : 'HOSPITALISE',
+          bed: rec.bedId || rec.bedName || rec.room || 'Lit assigné',
+          service: rec.service || rec.department || 'Médecine Générale',
+          admissionDate: String(rec.admissionDate || rec.createdAt || '').slice(0, 10),
+          status: isPendingDischarge ? 'EN_ATTENTE_DE_SORTIE' : 'HOSPITALISÉ',
           dischargePlanned: isPendingDischarge || !!rec.plannedDischargeDate,
-          doctor: rec.doctorName || rec.attendingDoctor || rec.doctor || ''
+          doctor: rec.doctorName || rec.attendingDoctor || rec.doctor || 'Médecin Référent',
+          reason: rec.reason || rec.diagnosis || rec.motif || 'Observation & Soins hospitaliers',
+          priority: rec.priority || 'Normal',
+          financialStatus: isPendingDischarge ? 'Quitus en attente' : 'Facturation en cours'
         });
       }
     });
@@ -1653,51 +1659,78 @@ function buildFallbackReportSpec(queryOrType: string, ctx: any): DynamicReportSp
   const pharm = ctx.pharmacy || {};
   const currentDate = ctx.currentDate || new Date().toLocaleDateString('fr-FR');
 
-  if (lower.includes('sortie') || lower.includes('hospitalis') || lower.includes('inpatient') || lower.includes('lit') || lower.includes('chambre')) {
+  if (
+    lower.includes('admis') ||
+    lower.includes('admission') ||
+    lower.includes('patient') ||
+    lower.includes('sejour') ||
+    lower.includes('séjour') ||
+    lower.includes('entree') ||
+    lower.includes('entrée') ||
+    lower.includes('sortie') ||
+    lower.includes('hospitalis') ||
+    lower.includes('inpatient') ||
+    lower.includes('lit') ||
+    lower.includes('chambre')
+  ) {
     const admissions = inpat.allActiveAdmissions || [];
     const pendingDischarge = inpat.patientsPendingDischarge || [];
+    const pendingAmount = adm?.pendingCashierAmountFCFA || 0;
+    const pendingInvoices = adm?.pendingCashierInvoicesCount || 0;
+
     return {
-      title: 'REGISTRE DÉCISIONNEL DES HOSPITALISATIONS & SORTIES',
-      subtitle: `Suivi des séjours en cours, flux des lits et prévisions de décharge au ${currentDate}`,
-      category: 'GESTION DES LITS & PARCOURS PATIENT',
+      title: 'REGISTRE DÉCISIONNEL DES ADMISSIONS, MOTIFS & SITUATION FINANCIÈRE',
+      subtitle: `Recensement nominatif des patients admis, motifs de séjour, médecins référents et suivi financier au ${currentDate}`,
+      category: 'GESTION DES SÉJOURS & PARCOURS PATIENT',
       dateStr: currentDate,
-      requesterName: s.name || 'Personnel Soignant',
-      requesterRole: s.profession || s.role || 'Praticien',
-      executiveSummary: `Le présent registre certifie l'état actuel des séjours hospitaliers au sein de SMART-HOSTO. L'établissement enregistre ${inpat.totalAdmitted || 0} patient(s) actuellement hospitalisé(s), avec un volume de ${inpat.pendingDischargeCount || 0} dossier(s) en attente de formalisation de décharge. La coordination médicale et financière est activement requise pour la libération optimale des lits.`,
+      requesterName: s.name || 'Direction Administrative',
+      requesterRole: s.profession || s.role || 'Personnel Soignant',
+      executiveSummary: `Le présent registre officiel certifie l'état exhaustif des admissions et séjours au sein de SMART-HOSTO. L'établissement compte actuellement ${inpat.totalAdmitted || 0} patient(s) admis, dont ${inpat.pendingDischargeCount || 0} dossier(s) en attente de décharge. Sur le plan financier, la caisse enregistre ${pendingInvoices} facture(s) en attente représentant un encours global de ${pendingAmount.toLocaleString('fr-FR')} FCFA à recouvrer.`,
       kpis: [
-        { label: 'Lits Occupés', value: `${inpat.totalAdmitted || 0}`, subtext: 'Patients hospitalisés' },
-        { label: 'Sorties en Attente', value: `${inpat.pendingDischargeCount || 0}`, subtext: 'Avis médical prêt' },
-        { label: 'Séjours Clôturés', value: `${(inpat.patientsDischargedToday || []).length}`, subtext: 'Sorties validées' },
-        { label: 'Capacité Active', value: '100%', subtext: 'Unités sous surveillance' }
+        { label: 'Patients Admis', value: `${inpat.totalAdmitted || 0}`, subtext: 'Séjours en cours' },
+        { label: 'Sorties en Attente', value: `${inpat.pendingDischargeCount || 0}`, subtext: 'Quitus en attente' },
+        { label: 'Créances en Caisse', value: `${pendingAmount.toLocaleString('fr-FR')} FCFA`, subtext: `${pendingInvoices} factures en souffrance` },
+        { label: 'Commissions Praticiens', value: `${(fin.totalCommissionsEarnedFCFA || 0).toLocaleString('fr-FR')} FCFA`, subtext: 'Honoraires engagés' }
       ],
       sections: [
         {
-          title: '1. Analyse Opérationnelle du Taux d\'Occupation',
-          narrative: `L'analyse des unités d'hospitalisation montre une tension contrôlée. ${inpat.pendingDischargeCount || 0} patient(s) ont déjà reçu un protocole de sortie favorable et nécessitent la délivrance de leur quitus de facturation avant sortie physique.`,
-          bulletPoints: [
-            `${inpat.totalAdmitted || 0} lit(s) sous surveillance médicale continue.`,
-            `${pendingDischarge.length} patient(s) prioritaires pour la finalisation administrative.`
-          ],
+          title: '1. Recensement Nominatif des Patients Admis & Motifs',
+          narrative: `État nominatif des patients actuellement hospitalisés, avec identification de leur motif d'admission, lit assigné, praticien référent et statut administratif.`,
           table: {
-            headers: ['Patient', 'Chambre / Lit', 'Admission', 'Médecin Traitant', 'Statut Séjour'],
+            headers: ['Patient', 'Motif / Service', 'Lit / Unité', 'Date Entrée', 'Médecin Responsable', 'Statut Séjour', 'Volet Financier'],
             rows: admissions.length > 0
               ? admissions.map((p: any) => [
                   p.patientName || 'Patient',
-                  p.bed || 'Non assigné',
+                  p.reason || p.service || 'Observation médicale',
+                  p.bed || 'Lit assigné',
                   String(p.admissionDate || '').slice(0, 10) || '-',
-                  p.doctor || 'Non assigné',
-                  p.status === 'EN_ATTENTE_DE_SORTIE' ? 'Sortie en attente' : 'Hospitalisé'
+                  p.doctor || 'Médecin Référent',
+                  p.status === 'EN_ATTENTE_DE_SORTIE' ? 'Sortie en attente' : 'Hospitalisé',
+                  p.financialStatus || (p.status === 'EN_ATTENTE_DE_SORTIE' ? 'Quitus en attente' : 'En cours')
                 ])
-              : [['N/A', '-', '-', '-', 'Aucun patient actuellement hospitalisé']]
+              : [['N/A', '-', '-', '-', '-', 'Aucun patient actuellement hospitalisé', '-']]
+          }
+        },
+        {
+          title: '2. Paramètres Financiers & Encours de Recouvrement',
+          narrative: 'Synthèse des postes comptables et des engagements financiers rattachés aux hospitalisations et actes clôturés.',
+          table: {
+            headers: ['Indicateur Financier Hospitalier', 'Montant / Volume Réel', 'Priorité Comptable'],
+            rows: [
+              ['Factures impayées globales en caisse', `${pendingAmount.toLocaleString('fr-FR')} FCFA (${pendingInvoices} dossiers)`, 'Priorité Haute'],
+              ['Quitus de décharge en attente de régularisation', `${inpat.pendingDischargeCount || 0} dossier(s) de sortie`, 'Priorité Immédiate'],
+              ['Honoraires praticiens en attente de liquidation', `${(fin.totalCommissionsPendingFCFA || 0).toLocaleString('fr-FR')} FCFA`, 'Priorité Normale'],
+              ['Honoraires praticiens déjà réglés', `${(fin.totalCommissionsPaidFCFA || 0).toLocaleString('fr-FR')} FCFA`, 'Soldé']
+            ]
           }
         }
       ],
       recommendations: [
-        'Vérifier la complétude des dossiers cliniques et contre-signatures des médecins référents.',
-        'Coordonner avec le service caisse la délivrance immédiate des quitus pour les sorties validées.',
-        'Signaler en temps réel les lits nettoyés et disponibles aux équipes des urgences.'
+        'Vérifier la délivrance du quitus de caisse pour chaque patient en attente de décharge avant remise du bulletin de sortie.',
+        'Contrôler la complétude des motifs cliniques et protocoles d\'admission sur les dossiers informatisés.',
+        'Assurer la transmission journalière des états d\'occupation des lits à la direction financière.'
       ],
-      conclusion: 'Registre certifié conforme, validé par le système décisionnel hospitalier SMART-HOSTO.'
+      conclusion: 'Registre officiel certifié conforme, validé par le système décisionnel hospitalier SMART-HOSTO.'
     };
   }
 
@@ -1924,6 +1957,67 @@ function buildDynamicReportFromAiReply(aiReplyText: string, userPrompt: string, 
         'Effectuer un contrôle périodique de conformité selon les protocoles internes.'
       ];
 
+  const isPatientInquiry =
+    userPrompt.toLowerCase().includes('admis') ||
+    userPrompt.toLowerCase().includes('admission') ||
+    userPrompt.toLowerCase().includes('patient') ||
+    userPrompt.toLowerCase().includes('hospitalis') ||
+    userPrompt.toLowerCase().includes('sejour') ||
+    userPrompt.toLowerCase().includes('séjour') ||
+    aiReplyText.toLowerCase().includes('admis') ||
+    aiReplyText.toLowerCase().includes('hospitalis');
+
+  const inpatList = ctx.inpatients?.allActiveAdmissions || [];
+
+  const sections: DynamicReportSection[] = [];
+
+  if (isPatientInquiry && inpatList.length > 0) {
+    sections.push({
+      title: '1. Recensement Nominatif des Patients Admis & Motifs',
+      narrative: 'Liste exhaustive des patients actuellement hospitalisés, avec motif clinique, lit assigné, praticien référent et statut de séjour.',
+      table: {
+        headers: ['Patient', 'Motif / Service', 'Lit / Unité', 'Date Entrée', 'Médecin Responsable', 'Statut Séjour', 'Volet Financier'],
+        rows: inpatList.map((p: any) => [
+          p.patientName || 'Patient',
+          p.reason || p.service || 'Observation & Soins',
+          p.bed || 'Lit assigné',
+          String(p.admissionDate || '').slice(0, 10) || '-',
+          p.doctor || 'Médecin Référent',
+          p.status === 'EN_ATTENTE_DE_SORTIE' ? 'Sortie en attente' : 'Hospitalisé',
+          p.financialStatus || (p.status === 'EN_ATTENTE_DE_SORTIE' ? 'Quitus en attente' : 'En cours')
+        ])
+      }
+    });
+
+    if (ctx.adminHospitalSummary) {
+      const adm = ctx.adminHospitalSummary;
+      sections.push({
+        title: '2. Paramètres Financiers & Encours Caisse',
+        narrative: 'Situation des créances hospitalières et des factures en attente de règlement au guichet.',
+        table: {
+          headers: ['Indicateur Financier Hospitalier', 'Montant / Volume Réel', 'Priorité Comptable'],
+          rows: [
+            ['Factures en attente de règlement en caisse', `${(adm.pendingCashierAmountFCFA || 0).toLocaleString('fr-FR')} FCFA (${adm.pendingCashierInvoicesCount || 0} factures)`, 'À recouvrer'],
+            ['Patients en attente de quitus de sortie', `${ctx.inpatients?.pendingDischargeCount || 0} dossier(s)`, 'Contrôle caisse'],
+            ['Commissions praticiens cumulées', `${(ctx.personalFinanceAndActs?.totalCommissionsEarnedFCFA || 0).toLocaleString('fr-FR')} FCFA`, 'Engagé']
+          ]
+        }
+      });
+    }
+  } else {
+    sections.push({
+      title: '1. Synthèse des Données Observées',
+      narrative: executiveSummary,
+      bulletPoints: detailLines.map(b => b.replace(/^[-•]\s*/, '').replace(/[*_]/g, '').trim()).slice(0, 8),
+      ...(tableRows.length > 0 ? {
+        table: {
+          headers: ['Élément / Référence', 'Détail / Montant / Statut'],
+          rows: tableRows
+        }
+      } : {})
+    });
+  }
+
   return {
     title,
     subtitle,
@@ -1933,19 +2027,7 @@ function buildDynamicReportFromAiReply(aiReplyText: string, userPrompt: string, 
     requesterRole: staff.profession || staff.role || 'Praticien',
     executiveSummary,
     kpis: kpis.length > 0 ? kpis : undefined,
-    sections: [
-      {
-        title: '1. Synthèse des Données Observées',
-        narrative: executiveSummary,
-        bulletPoints: detailLines.map(b => b.replace(/^[-•]\s*/, '').replace(/[*_]/g, '').trim()).slice(0, 8),
-        ...(tableRows.length > 0 ? {
-          table: {
-            headers: ['Élément / Référence', 'Détail / Montant / Statut'],
-            rows: tableRows
-          }
-        } : {})
-      }
-    ],
+    sections,
     recommendations,
     conclusion: 'Document certifié conforme, validé par le système décisionnel hospitalier SMART-HOSTO.'
   };
