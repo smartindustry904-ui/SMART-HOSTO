@@ -1296,13 +1296,14 @@ async function buildStaffHospitalContext(staffDoc: any) {
   }
 
   // Run all Firestore collection fetches in parallel with a strict 2000ms cap
-  const [cSnap, naSnap, qSnap, mSnap, aSnap, prSnap] = await Promise.all([
+  const [cSnap, naSnap, qSnap, mSnap, aSnap, prSnap, inpSnap] = await Promise.all([
     withFastTimeout(getDocs(collection(db, 'consultations')), 2000).catch(() => null),
     withFastTimeout(getDocs(collection(db, 'nursing_acts')), 2000).catch(() => null),
     withFastTimeout(getDocs(collection(db, 'service_queues')), 2000).catch(() => null),
     withFastTimeout(getDocs(collection(db, 'pharmacy_inventory')), 2000).catch(() => null),
     withFastTimeout(getDocs(collection(db, 'medical_acts')), 2000).catch(() => null),
-    isAdmin ? withFastTimeout(getDocs(collection(db, 'payment_requests')), 2000).catch(() => null) : Promise.resolve(null)
+    isAdmin ? withFastTimeout(getDocs(collection(db, 'payment_requests')), 2000).catch(() => null) : Promise.resolve(null),
+    withFastTimeout(getDocs(collection(db, 'inpatient_records')), 2000).catch(() => null)
   ]);
 
   // 1. Personal Completed Acts & Commissions
@@ -1471,6 +1472,39 @@ async function buildStaffHospitalContext(staffDoc: any) {
     };
   }
 
+  // 6. Inpatient & Stays / Discharges (inpatient_records)
+  const activeInpatients: Array<{
+    patientName: string;
+    bed: string;
+    admissionDate: string;
+    status: string;
+    dischargePlanned: boolean;
+    doctor: string;
+  }> = [];
+
+  if (inpSnap) {
+    inpSnap.forEach(d => {
+      const rec = d.data();
+      const status = String(rec.status || '').toLowerCase();
+      const isDischarged = status === 'discharged' || status === 'sorti';
+      const isPendingDischarge =
+        status === 'pending_discharge' ||
+        status === 'attente_sortie' ||
+        rec.dischargePending === true ||
+        rec.isPendingDischarge === true;
+      if (!isDischarged) {
+        activeInpatients.push({
+          patientName: rec.patientName || rec.patient || 'Patient Hospitalisé',
+          bed: rec.bedName || rec.room || 'Lit assigné',
+          admissionDate: rec.admissionDate || rec.createdAt || '',
+          status: isPendingDischarge ? 'EN_ATTENTE_DE_SORTIE' : 'HOSPITALISE',
+          dischargePlanned: isPendingDischarge || !!rec.plannedDischargeDate,
+          doctor: rec.doctorName || rec.attendingDoctor || rec.doctor || ''
+        });
+      }
+    });
+  }
+
   return {
     currentDate: new Date().toLocaleString('fr-FR'),
     staff: {
@@ -1492,6 +1526,12 @@ async function buildStaffHospitalContext(staffDoc: any) {
       totalWaiting: waitingPatients.length,
       urgentCount: waitingPatients.filter(p => p.priority === 'urgent' || p.priority === 'critique').length,
       patients: waitingPatients.slice(0, 10)
+    },
+    inpatients: {
+      totalAdmitted: activeInpatients.length,
+      pendingDischargeCount: activeInpatients.filter(p => p.status === 'EN_ATTENTE_DE_SORTIE' || p.dischargePlanned).length,
+      patientsPendingDischarge: activeInpatients.filter(p => p.status === 'EN_ATTENTE_DE_SORTIE' || p.dischargePlanned),
+      allActiveAdmissions: activeInpatients.slice(0, 15)
     },
     pharmacy: {
       totalMedicationsInCatalog: medications.length,
@@ -1516,10 +1556,31 @@ function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<ty
       `Voici ce que vous pouvez me demander en langage naturel ou par commande :\n` +
       `• 📊 *"Mes commissions"* ou */stats* : Vos actes clôturés et quotes-parts gagnées\n` +
       `• 🏥 *"File d'attente"* ou */file* : Patients en attente aujourd'hui\n` +
+      `• 🛏️ *"Patients en attente de sortie"* ou */sorties* : Lits & sorties prévues\n` +
       `• 💊 *"Stock [médicament]"* ou */stock* : Disponibilité et alertes pharmacie\n` +
       `• 💰 *"Tarif [acte]"* ou */tarif* : Prix des consultations et examens\n` +
       (ctx.adminHospitalSummary ? `• 🛡️ *"Bilan admin"* ou */admin* : Quota licence & caisse en attente\n` : '') +
       `\n_Propulsé par Meta Cloud API & Google Gemini_`
+    );
+  }
+
+  if (lower.includes('sortie') || lower.includes('hospitalis') || lower.includes('inpatient') || lower.includes('lit')) {
+    const pendingDischarge = ctx.inpatients?.patientsPendingDischarge || [];
+    const totalAdmitted = ctx.inpatients?.totalAdmitted || 0;
+    if (pendingDischarge.length === 0) {
+      return (
+        `🛏️ *Hospitalisations & Sorties*\n` +
+        `• Total patients actuellement hospitalisés : *${totalAdmitted}*\n` +
+        `• Aucun patient n'est actuellement marqué en attente de sortie.\n\n` +
+        `_Tous les patients hospitalisés sont en cours de soins._`
+      );
+    }
+    const list = pendingDischarge.map(p => `  - *${p.patientName}* (Lit: ${p.bed}${p.doctor ? `, Dr: ${p.doctor}` : ''})`).join('\n');
+    return (
+      `🛏️ *Patients en attente de sortie (${pendingDischarge.length})* :\n` +
+      `• Total hospitalisés : *${totalAdmitted}*\n\n` +
+      `${list}\n\n` +
+      `_Validez la sortie médicale dans le module Hospitalisation._`
     );
   }
 
