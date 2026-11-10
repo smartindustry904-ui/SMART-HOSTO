@@ -16,6 +16,7 @@ import { Patient, VisitMotif, Role, User as UserType, PatientStatus, LabExamRequ
 import LabExamRequestForm from '../components/LabExamRequestForm';
 import { useSettings, useHospitalServices, useMedicalActs, getDefaultServices, getDefaultMedicalActs } from '../hooks/useSettings';
 import { Avatar } from '../components/common/Avatar';
+import { PrintReceiptModal, PrintableReceiptData } from '../components/common/PrintReceiptModal';
 
 import { 
   collection, 
@@ -751,6 +752,75 @@ const Reception: React.FC<ReceptionProps> = ({
     } catch (err) {
       console.error('Audit trace failed:', err);
     }
+  };
+
+  const formatAdmissionTicket = (tx: any): PrintableReceiptData => {
+    let txDate = tx.date || '';
+    let txTime = tx.time || '';
+    if (tx.createdAt) {
+      try {
+        const d = new Date(tx.createdAt);
+        if (!isNaN(d.getTime())) {
+          txDate = d.toLocaleDateString('fr-FR');
+          txTime = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        }
+      } catch (err) {}
+    }
+    if (!txDate) txDate = new Date().toLocaleDateString('fr-FR');
+    if (!txTime) txTime = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+    const pName = tx.patient || tx.patientName || 'Patient Anonyme';
+    const dme = tx.dme || tx.patientId || 'ACCUEIL';
+    let motif = tx.motif || tx.requestingService || tx.type || 'Acte Médical / Orientation';
+    if (motif === 'CONSULTATION') motif = 'Consultation Générale';
+
+    const totalVal = tx.total !== undefined ? tx.total : (tx.totalAmount || 0);
+    const paidVal = tx.paid !== undefined ? tx.paid : (tx.amountPaid || 0);
+
+    const items = [
+      {
+        id: 'item-1',
+        name: motif,
+        quantity: 1,
+        unitPrice: totalVal,
+        totalPrice: totalVal,
+        category: 'Orientation'
+      }
+    ];
+
+    if (notebookAdded) {
+      items.push({
+        id: 'item-carnet',
+        name: 'Carnet de Santé',
+        quantity: 1,
+        unitPrice: 1000,
+        totalPrice: 1000,
+        category: 'Fourniture'
+      });
+    }
+
+    const calculatedTotal = notebookAdded ? totalVal + 1000 : totalVal;
+
+    return {
+      id: tx.id || `TKT-${Date.now()}`,
+      date: txDate,
+      time: txTime,
+      type: 'TICKET_ADMISSION',
+      title: 'TICKET D\'ADMISSION & FICHE D\'ORIENTATION',
+      patientName: pName,
+      patientId: dme,
+      dmeId: dme,
+      department: tx.service || tx.requestingService || 'Orientation',
+      operatorName: agentProfile?.name || 'Accueil',
+      operatorRole: 'Réceptionniste',
+      paymentMethod: tx.paymentMethod || 'À régler en caisse',
+      items,
+      subtotal: calculatedTotal,
+      totalAmount: calculatedTotal,
+      amountPaid: paidVal,
+      notes: 'Document d\'orientation valable pour consultation après règlement en caisse.',
+      isPaid: paidVal >= calculatedTotal
+    };
   };
 
   // Modern PDF Generator for Receipts, Proformas, Prescriptions and Discharges
@@ -1707,167 +1777,15 @@ const Reception: React.FC<ReceptionProps> = ({
 
   return (
     <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
-      {/* MODAL PRO-FORMA IMPRIMABLE */}
-      {showProforma && selectedTxForProforma && (() => {
-        const txId = selectedTxForProforma.id || '';
-        
-        let txDate = selectedTxForProforma.date || '';
-        let txTime = selectedTxForProforma.time || '';
-        if (selectedTxForProforma.createdAt) {
-          try {
-            const d = new Date(selectedTxForProforma.createdAt);
-            if (!isNaN(d.getTime())) {
-              txDate = d.toLocaleDateString('fr-FR');
-              txTime = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-            }
-          } catch (err) {}
-        }
-        if (!txDate) txDate = new Date().toLocaleDateString('fr-FR');
-        if (!txTime) txTime = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-        const patientName = selectedTxForProforma.patient || selectedTxForProforma.patientName || 'Patient Anonyme';
-        const dme = selectedTxForProforma.dme || selectedTxForProforma.patientId || 'VENTE DIRECTE';
-        
-        let motif = selectedTxForProforma.motif || selectedTxForProforma.requestingService || selectedTxForProforma.type || 'Acte Médical';
-        if (motif === 'CONSULTATION') motif = 'Consultation Générale';
-        
-        const totalVal = selectedTxForProforma.total !== undefined ? selectedTxForProforma.total : (selectedTxForProforma.totalAmount || 0);
-        const paidVal = selectedTxForProforma.paid !== undefined ? selectedTxForProforma.paid : (selectedTxForProforma.amountPaid || 0);
-        
-        const changeVal = selectedTxForProforma.change !== undefined ? selectedTxForProforma.change : Math.max(0, paidVal - totalVal);
-        const remainingVal = selectedTxForProforma.remaining !== undefined ? selectedTxForProforma.remaining : Math.max(0, totalVal - paidVal);
-
-        return (
-          <div className="fixed inset-0 z-[120] bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
-             <div className="ticket-print-wrapper bg-white w-full max-w-md max-h-[90vh] flex flex-col rounded-[32px] shadow-2xl overflow-hidden border border-slate-150 animate-in zoom-in-95 duration-300">
-               {/* Fixed Top Header with Dotted Cutout Effect */}
-               <div className="p-6 bg-slate-50 border-b border-dashed border-slate-200 relative shrink-0">
-                 <div className="flex justify-between items-start">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center font-black text-white italic text-xs shadow-md">{establishment.logo || 'SH'}</div>
-                      <div>
-                        <h2 className="text-base font-extrabold uppercase tracking-tight text-slate-900">{establishment.name}</h2>
-                        <p className="text-[9px] font-bold text-slate-400">Fiche d'Orientation N° {txId}</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider mb-1">
-                        <span className="w-1 h-1 rounded-full bg-amber-500 animate-pulse"></span> À Régler en Caisse
-                      </span>
-                      <p className="text-[10px] font-bold text-slate-500">{txDate} • {txTime}</p>
-                    </div>
-                 </div>
-                 {/* Left & Right small visual semicircles for "ticket punch" effect */}
-                 <div className="absolute -left-3 bottom-[-12px] w-6 h-6 bg-slate-900/70 rounded-full no-print"></div>
-                 <div className="absolute -right-3 bottom-[-12px] w-6 h-6 bg-slate-900/70 rounded-full no-print"></div>
-               </div>
-
-               {/* Scrollable Ticket Content Body */}
-               <div className="ticket-scroll-area flex-1 overflow-y-auto p-6 space-y-5 custom-scrollbar">
-                 {/* Slogan */}
-                 {establishment.slogan && (
-                   <p className="text-[10px] font-medium italic text-center text-slate-500 mb-2 px-2 leading-tight">
-                     "{establishment.slogan}"
-                   </p>
-                 )}
-
-                 {/* Ticket Identification */}
-                 <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
-                   <div className="grid grid-cols-2 gap-4">
-                     <div>
-                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Patient</p>
-                       <p className="font-extrabold text-sm text-slate-900 truncate">{patientName}</p>
-                       <p className="text-[10px] text-blue-600 font-mono font-bold tracking-tighter">{dme}</p>
-                     </div>
-                     <div className="text-right border-l border-slate-100 pl-4">
-                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Opérateur</p>
-                       <p className="font-bold text-xs text-slate-700 truncate">{agentProfile.name}</p>
-                       <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Accueil</p>
-                     </div>
-                   </div>
-                 </div>
-
-                 {/* Prestation Details with thermal-style dashed lines */}
-                 <div className="space-y-2">
-                    <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Détails des Prestations</p>
-                    <div className="border-t border-b border-dashed border-slate-200 py-3 space-y-2">
-                      <div className="flex justify-between items-center text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-500">1x</span>
-                          <span className="font-bold text-slate-800">{motif}</span>
-                        </div>
-                        <span className="font-extrabold text-slate-900">{(totalVal || 0).toLocaleString()} F</span>
-                      </div>
-                      {notebookAdded && (
-                        <div className="flex justify-between items-center text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-500">1x</span>
-                            <span className="font-bold text-slate-800">Carnet de Santé</span>
-                          </div>
-                          <span className="font-extrabold text-slate-900">1 000 F</span>
-                        </div>
-                      )}
-                    </div>
-                 </div>
-
-                 {/* Premium Summary Grid */}
-                 <div className="bg-slate-900 text-white p-5 rounded-2xl space-y-2 relative overflow-hidden">
-                    <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-400">
-                      <span>Total Prestations</span>
-                      <span className="text-slate-200 font-bold">{(totalVal || 0).toLocaleString()} {currency}</span>
-                    </div>
-                    <div className="pt-2.5 border-t border-white/10 flex justify-between items-center">
-                      <div>
-                        <span className="text-[10px] font-black uppercase text-amber-400 tracking-wider block">Montant à Payer</span>
-                        <span className="text-[8px] text-slate-400 italic">Règlement à effectuer à la Caisse</span>
-                      </div>
-                      <span className="text-xl font-black text-amber-400">{(totalVal || 0).toLocaleString()} <span className="text-xs font-normal opacity-70 italic">CFA</span></span>
-                    </div>
-                 </div>
-
-                 {/* Warning Notice Box */}
-                 <div className="p-3.5 bg-rose-50 border border-rose-100 rounded-2xl text-left">
-                   <p className="text-[10px] font-black uppercase tracking-wider text-rose-700 mb-0.5">⚠️ Document Pro-forma</p>
-                   <p className="text-[9px] text-rose-600 font-medium leading-relaxed">
-                     Valable pour consultation uniquement après règlement effectif et validation à la Caisse centrale.
-                   </p>
-                 </div>
-
-                 {/* Invoice Footer */}
-                 {establishment.invoiceFooter && (
-                   <p className="text-[9px] text-center text-slate-400 font-medium leading-relaxed italic px-2">
-                     {establishment.invoiceFooter}
-                   </p>
-                 )}
-                 
-                 {establishment.website && (
-                   <p className="text-[9px] text-center text-blue-500 font-bold tracking-wider">
-                     {establishment.website}
-                   </p>
-                 )}
-               </div>
-
-               {/* Fixed Action Buttons at the Bottom */}
-               <div className="ticket-actions-bar p-5 bg-slate-50 border-t border-slate-100 shrink-0 no-print">
-                 <div className="flex gap-3">
-                   <button 
-                     onClick={() => setShowProforma(false)} 
-                     className="flex-1 py-3.5 bg-white border border-slate-200 text-slate-700 font-bold text-xs uppercase tracking-wider rounded-2xl hover:bg-slate-100 transition-colors shadow-sm"
-                   >
-                     Fermer
-                   </button>
-                   <button 
-                     onClick={() => handleGeneratePDF("proforma", selectedTxForProforma)} 
-                     className="flex-[2] bg-blue-600 text-white py-3.5 rounded-2xl font-bold text-xs uppercase tracking-wider shadow-md hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
-                   >
-                     <Printer size={16} /> Imprimer Fiche / Pro-forma
-                   </button>
-                 </div>
-               </div>
-             </div>
-          </div>
-        );
-      })()}
+      {/* MODAL PRO-FORMA / TICKET D'ADMISSION IMPRIMABLE (Dual format: Supermarché 80mm & A4 Standard) */}
+      {showProforma && selectedTxForProforma && (
+        <PrintReceiptModal
+          receipt={formatAdmissionTicket(selectedTxForProforma)}
+          establishment={establishment}
+          initialFormat={establishment.ticketFormat || establishment.receiptFormat}
+          onClose={() => setShowProforma(false)}
+        />
+      )}
 
       <MicroHeader
         icon={Users}

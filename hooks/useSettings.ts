@@ -794,6 +794,8 @@ export const useSettings = () => {
       website: 'www.smarthosto.com',
       bankInfo: 'RIB: 10001 00001 12345678901 23 - Afriland First Bank',
       invoiceFooter: 'Merci de votre confiance. En cas de réclamation, veuillez contacter le service facturation.',
+      receiptFormat: 'THERMAL_80MM',
+      ticketFormat: 'THERMAL_80MM',
       requireBiologistValidation: true,
       require_biologist_validation: true
     };

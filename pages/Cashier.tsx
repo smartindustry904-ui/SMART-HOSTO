@@ -12,6 +12,7 @@ import { MicroHeader } from '../components/common/MicroHeader';
 import { Avatar } from '../components/common/Avatar';
 
 import { useSettings } from '../hooks/useSettings';
+import { PrintReceiptModal, PrintableReceiptData } from '../components/common/PrintReceiptModal';
 
 interface CashierProps {
   user: any;
@@ -675,6 +676,7 @@ const Cashier: React.FC<CashierProps> = ({
       setShowPaymentModal(false);
       setSelectedRequest(null);
       setIsProcessing(false);
+      setSelectedTransactionDetail(newTransaction);
 
       // Commit core writes to local IndexedDB cache + background Firestore sync
       batch.commit().catch(err => {
@@ -752,6 +754,55 @@ const Cashier: React.FC<CashierProps> = ({
       return formatPatientFullName(prPatient, pr.patientName);
     }
     return 'Patient Anonyme / Non renseigné';
+  };
+
+  const formatCashierReceipt = (tx: any): PrintableReceiptData => {
+    const d = tx.date ? new Date(tx.date) : new Date();
+    const dateStr = !isNaN(d.getTime()) ? d.toLocaleDateString('fr-FR') : new Date().toLocaleDateString('fr-FR');
+    const timeStr = !isNaN(d.getTime()) ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+
+    const items = (tx.lignes && tx.lignes.length > 0)
+      ? tx.lignes.map((l: any, idx: number) => ({
+          id: `item-${idx}`,
+          name: l.libelle || l.designation || 'Prestation médicale',
+          quantity: l.quantite || 1,
+          unitPrice: l.prixUnitaire || (l.montantTotal ? Math.round(l.montantTotal / (l.quantite || 1)) : 0),
+          totalPrice: l.montantTotal || 0,
+          category: l.source
+        }))
+      : [{
+          name: tx.description || 'Prestation médicale / Encaissement',
+          quantity: 1,
+          unitPrice: getTxAmount(tx),
+          totalPrice: getTxAmount(tx)
+        }];
+
+    const total = tx.totalDu !== undefined ? tx.totalDu : (tx.totalGeneral !== undefined ? tx.totalGeneral : getTxAmount(tx));
+    const paid = tx.montantPaye !== undefined ? tx.montantPaye : (tx.amount !== undefined ? tx.amount : getTxAmount(tx));
+
+    return {
+      id: tx.id || `REC-${Date.now()}`,
+      date: dateStr,
+      time: timeStr,
+      type: 'RECU_ENCAISSEMENT',
+      patientName: getTxPatientName(tx),
+      patientId: tx.patientId || tx.patientNumber || tx.patientDossierNumber,
+      dmeId: tx.patientDossierNumber || tx.patientId,
+      patientPhone: tx.patientPhone,
+      operatorName: tx.cashierName || tx.caissierName || user?.name || 'Caissier Principal',
+      operatorRole: 'Caisse Centrale',
+      paymentMethod: tx.paymentMethod || 'ESPÈCES',
+      items,
+      subtotal: tx.totalGeneral || total,
+      insuranceCoverage: tx.partAssurance || 0,
+      totalAmount: total,
+      amountPaid: paid,
+      changeGiven: tx.monnaieRendue || 0,
+      creditApplied: tx.avoirUtilise || 0,
+      newDebt: tx.detteCreee || 0,
+      newAdvance: tx.surplusGenere || 0,
+      isPaid: true
+    };
   };
 
   return (
@@ -1429,160 +1480,13 @@ const Cashier: React.FC<CashierProps> = ({
         </div>
       )}
 
-      {/* Transaction Details Modal */}
+      {/* Transaction Details Modal (Dual format: Supermarché 80mm & A4 Standard) */}
       {selectedTransactionDetail && (
-        <div className="fixed inset-0 z-[110] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="ticket-print-wrapper bg-white w-full max-w-xl rounded-[32px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-            <div className="p-6 sm:p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0 no-print">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 bg-emerald-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-600/20">
-                  <Landmark size={24} />
-                </div>
-                <div>
-                  <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Détails Transaction</h3>
-                  <p className="text-xs font-bold text-slate-400 font-mono">{selectedTransactionDetail.id}</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setSelectedTransactionDetail(null)}
-                className="w-10 h-10 flex items-center justify-center hover:bg-white rounded-full text-slate-400 transition-all border border-transparent hover:border-slate-200 cursor-pointer"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="ticket-scroll-area p-6 sm:p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
-              <div className="bg-slate-50 p-6 rounded-[24px] border border-slate-100 flex justify-between items-center">
-                <div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Patient</p>
-                  <p className="text-lg font-black text-slate-900">{getTxPatientName(selectedTransactionDetail)}</p>
-                </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Total Crédité Facture</p>
-                  <p className="text-2xl font-black text-emerald-600">{(getTxAmount(selectedTransactionDetail)).toLocaleString()} F</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="p-4 bg-white rounded-2xl border border-slate-200">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Mode de paiement</p>
-                  <p className="text-sm font-bold text-slate-700 uppercase tracking-wider">{selectedTransactionDetail.paymentMethod || 'ESPÈCES'}</p>
-                </div>
-                <div className="p-4 bg-white rounded-2xl border border-slate-200">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Date & Heure</p>
-                  <p className="text-sm font-bold text-slate-700">{new Date(selectedTransactionDetail.date).toLocaleString('fr-FR')}</p>
-                </div>
-                <div className="p-4 bg-white rounded-2xl border border-slate-200">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Caissier</p>
-                  <div className="flex items-center gap-2">
-                    <Avatar 
-                      user={{ 
-                        name: selectedTransactionDetail.cashierName || selectedTransactionDetail.caissierName || user?.name || 'Caissier',
-                        profile_image_url: selectedTransactionDetail.cashierImage || (selectedTransactionDetail.cashierId === user?.id ? user?.profile_image_url || user?.profileImage : undefined)
-                      }} 
-                      size={22} 
-                      roundedClassName="rounded-full"
-                    />
-                    <p className="text-sm font-black text-slate-900 uppercase truncate" title={selectedTransactionDetail.cashierName || selectedTransactionDetail.caissierName || user?.name || 'Caissier'}>
-                      {selectedTransactionDetail.cashierName || selectedTransactionDetail.caissierName || user?.name || 'Caissier'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Accounting Breakdown */}
-              <div className="space-y-3 pt-4 border-t border-slate-100">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Détail Financier</p>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-500 font-bold">Montant Initial Facturé:</span>
-                    <span className="text-slate-900 font-black">{(selectedTransactionDetail.totalDu || selectedTransactionDetail.totalGeneral || 0).toLocaleString()} F</span>
-                  </div>
-                  {selectedTransactionDetail.avoirUtilise > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-emerald-600 font-bold">Avoir/Avance utilisé:</span>
-                      <span className="text-emerald-600 font-black">-{(selectedTransactionDetail.avoirUtilise).toLocaleString()} F</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-sm">
-                    <span className="text-slate-500 font-bold">Montant Remis:</span>
-                    <span className="text-slate-900 font-black">{(selectedTransactionDetail.montantPaye || selectedTransactionDetail.amount || 0).toLocaleString()} F</span>
-                  </div>
-                  
-                  {selectedTransactionDetail.surplusGenere > 0 && (
-                    <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex justify-between items-center">
-                      <span className="text-xs font-bold text-emerald-600 uppercase">Nouvelle Avance générée</span>
-                      <span className="text-sm font-black text-emerald-700">+{(selectedTransactionDetail.surplusGenere).toLocaleString()} F</span>
-                    </div>
-                  )}
-
-                  {selectedTransactionDetail.monnaieRendue > 0 && (
-                    <div className="p-3 bg-blue-50 rounded-xl border border-blue-100 flex justify-between items-center">
-                      <span className="text-xs font-bold text-blue-600 uppercase">Monnaie rendue au patient</span>
-                      <span className="text-sm font-black text-blue-700">-{(selectedTransactionDetail.monnaieRendue).toLocaleString()} F</span>
-                    </div>
-                  )}
-                  
-                  {selectedTransactionDetail.detteCreee > 0 && (
-                    <div className="p-3 bg-rose-50 rounded-xl border border-rose-100 flex justify-between items-center">
-                      <span className="text-xs font-bold text-rose-600 uppercase">Nouvelle Dette générée</span>
-                      <span className="text-sm font-black text-rose-700">{(selectedTransactionDetail.detteCreee).toLocaleString()} F</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {selectedTransactionDetail.lignes && selectedTransactionDetail.lignes.length > 0 && (
-                <div className="space-y-3 pt-4 border-t border-slate-100">
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Prestations</p>
-                  <div className="space-y-2">
-                    {selectedTransactionDetail.lignes.map((l: any, i: number) => (
-                      <div key={i} className="flex justify-between items-center p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <div>
-                          <p className="text-xs font-bold text-slate-900">{l.libelle}</p>
-                          <p className="text-[9px] text-slate-400 uppercase font-bold">{l.source} x {l.quantite}</p>
-                        </div>
-                        <p className="text-xs font-black text-slate-900">{(l.montantTotal || 0).toLocaleString()} F</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Hard-printed Cashier stamp on receipt/ticket */}
-              <div className="pt-4 border-t border-dashed border-slate-300 text-center text-xs text-slate-600">
-                <div className="flex items-center justify-center gap-2">
-                  <Avatar 
-                    user={{ 
-                      name: selectedTransactionDetail.cashierName || selectedTransactionDetail.caissierName || user?.name || 'Caissier',
-                      profile_image_url: selectedTransactionDetail.cashierImage || (selectedTransactionDetail.cashierId === user?.id ? user?.profile_image_url || user?.profileImage : undefined)
-                    }} 
-                    size={20} 
-                    roundedClassName="rounded-full"
-                  />
-                  <p className="font-bold text-slate-800 uppercase tracking-wider">
-                    Caissier : {selectedTransactionDetail.cashierName || selectedTransactionDetail.caissierName || user?.name || 'Caissier Principal'}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="ticket-actions-bar no-print p-6 bg-slate-50 border-t border-slate-100 flex gap-4 shrink-0">
-              <button 
-                onClick={() => setSelectedTransactionDetail(null)}
-                className="flex-1 py-4 bg-white text-slate-600 rounded-2xl font-black text-sm uppercase tracking-widest border border-slate-200 hover:bg-slate-50 transition-colors cursor-pointer"
-              >
-                Fermer
-              </button>
-              <button 
-                className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-emerald-600 transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-slate-900/10"
-                onClick={() => window.print()}
-              >
-                <Printer size={18} /> Réimprimer
-              </button>
-            </div>
-          </div>
-        </div>
+        <PrintReceiptModal
+          receipt={formatCashierReceipt(selectedTransactionDetail)}
+          establishment={establishment}
+          onClose={() => setSelectedTransactionDetail(null)}
+        />
       )}
 
       {/* Redesigned Elegant Encaissement Modal */}

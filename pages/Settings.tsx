@@ -35,7 +35,10 @@ import {
   ShieldAlert,
   Zap,
   AlertTriangle,
-  TrendingUp
+  TrendingUp,
+  Printer,
+  Receipt,
+  FileText
 } from 'lucide-react';
 import { Role, User, EstablishmentConfig, MedicalAct, Medication, CustomRole, UserStatus, Supplier, SupplierInvoice, Licence } from '../types';
 import { THEMES, ThemeColor } from '../constants/themes';
@@ -934,6 +937,40 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
     }
   };
 
+  const handleSaveCashierSettings = async () => {
+    try {
+      const qCaisse = query(collection(db, 'parametres_caisse'), limit(1));
+      const snapCaisse = await getDocs(qCaisse);
+      const caissePayload = {
+        paiementPartielAutorise: cashierSettings.partialPayment,
+        seuilDetteMax: cashierSettings.maxDebt,
+        avoirPatientAutorise: cashierSettings.allowCredit,
+        applicationAutoAvoir: cashierSettings.autoApplyCredit,
+        updatedAt: new Date().toISOString()
+      };
+      if (snapCaisse.empty) {
+        await addDoc(collection(db, 'parametres_caisse'), sanitizeData(caissePayload));
+      } else {
+        await updateDoc(doc(db, 'parametres_caisse', snapCaisse.docs[0].id), sanitizeData(caissePayload));
+      }
+
+      const qConfig = query(collection(db, 'hospital_config'), limit(1));
+      const snapConfig = await getDocs(qConfig);
+      if (snapConfig.empty) {
+        await addDoc(collection(db, 'hospital_config'), sanitizeData(establishment));
+      } else {
+        await updateDoc(doc(db, 'hospital_config', snapConfig.docs[0].id), sanitizeData(establishment));
+      }
+      localStorage.setItem('hospital_config', JSON.stringify(establishment));
+      window.dispatchEvent(new CustomEvent('settings-updated'));
+
+      showMessage('success', 'Paramètres de caisse et format de reçu enregistrés avec succès');
+    } catch (error) {
+      console.error("Error saving cashier settings:", error);
+      showMessage('error', 'Erreur lors de l\'enregistrement des paramètres de caisse');
+    }
+  };
+
   const tabLabels: Record<string, string> = {
     users: 'Utilisateurs',
     roles: 'Rôles & Permissions',
@@ -1658,6 +1695,77 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                       placeholder="Texte qui s'affichera au bas de chaque facture..."
                     />
                   </div>
+
+                  {/* Format d'impression des Tickets & Reçus (Thermique 80mm vs A4) */}
+                  <div className="col-span-2 space-y-4 pt-4 border-t border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <Printer size={20} className="text-blue-600" />
+                      <div>
+                        <label className="text-sm font-black text-slate-800 uppercase tracking-widest block">Format d'Impression des Reçus & Tickets</label>
+                        <p className="text-xs text-slate-500 font-medium">Sélectionnez le format par défaut utilisé pour l'impression des tickets d'admission et des reçus de caisse.</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Option 1: Format Thermique Supermarché 80mm */}
+                      <button
+                        type="button"
+                        onClick={() => setEstablishment({...establishment, receiptFormat: 'THERMAL_80MM', ticketFormat: 'THERMAL_80MM'})}
+                        className={`p-5 rounded-2xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                          (establishment.receiptFormat || 'THERMAL_80MM') === 'THERMAL_80MM'
+                            ? 'border-blue-600 bg-blue-50/50 shadow-sm'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-2">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center font-black text-xs shrink-0">
+                              80mm
+                            </div>
+                            <div>
+                              <p className="font-black text-slate-900 text-sm">Ticket Thermique (Supermarché / 80mm)</p>
+                              <p className="text-xs text-slate-500 font-medium">Rouleau compact pour imprimantes de caisse POS</p>
+                            </div>
+                          </div>
+                          {(establishment.receiptFormat || 'THERMAL_80MM') === 'THERMAL_80MM' && (
+                            <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">✓</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed mt-1">
+                          Idéal pour les imprimantes thermiques de comptoir (Epson, Xprinter, Star). Format rouleau économique, coupe automatique et impression instantanée.
+                        </p>
+                      </button>
+
+                      {/* Option 2: Format A4 Facture Standard */}
+                      <button
+                        type="button"
+                        onClick={() => setEstablishment({...establishment, receiptFormat: 'A4', ticketFormat: 'A4'})}
+                        className={`p-5 rounded-2xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                          establishment.receiptFormat === 'A4'
+                            ? 'border-blue-600 bg-blue-50/50 shadow-sm'
+                            : 'border-slate-200 hover:border-slate-300 bg-white'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-2">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0">
+                              A4
+                            </div>
+                            <div>
+                              <p className="font-black text-slate-900 text-sm">Format A4 (Facture Pleine Page)</p>
+                              <p className="text-xs text-slate-500 font-medium">Feuille standard bureautique laser / jet d'encre</p>
+                            </div>
+                          </div>
+                          {establishment.receiptFormat === 'A4' && (
+                            <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold shrink-0">✓</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed mt-1">
+                          Idéal pour les imprimantes de bureau. Présentation officielle avec en-tête hospitalier, tableau complet des prestations, cadre pour cachet et signatures.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
                   
                   <div className="col-span-2 space-y-4 mt-4">
                     <div className="flex items-center gap-2">
@@ -2336,26 +2444,121 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
               {/* Informations d'impression */}
               <div className="bg-white p-8 rounded-[32px] border border-slate-200 shadow-sm space-y-6">
                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight border-b border-slate-100 pb-4">C. Informations d'impression (Reçus)</h3>
+                
+                {/* Format Toggle for Tickets & Receipts */}
+                <div className="space-y-3 pb-4 border-b border-slate-100">
+                  <label className="text-xs font-black uppercase tracking-widest text-slate-700 flex items-center gap-2">
+                    <Printer size={16} className="text-blue-600" />
+                    Format d'impression des Tickets & Reçus
+                  </label>
+                  <p className="text-xs text-slate-500 font-medium">Basculez entre le format rouleau compact thermique et la facture pleine page A4.</p>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setEstablishment({...establishment, receiptFormat: 'THERMAL_80MM', ticketFormat: 'THERMAL_80MM'})}
+                      className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                        (establishment.receiptFormat || 'THERMAL_80MM') === 'THERMAL_80MM'
+                          ? 'border-blue-600 bg-blue-50/50 shadow-sm'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-1">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-slate-900 text-white flex items-center justify-center font-black text-xs shrink-0 font-mono">
+                            80mm
+                          </div>
+                          <div>
+                            <p className="font-black text-slate-900 text-xs">Ticket Thermique (Supermarché / 80mm)</p>
+                            <p className="text-[10px] text-slate-500">Imprimante ticket de caisse POS</p>
+                          </div>
+                        </div>
+                        {(establishment.receiptFormat || 'THERMAL_80MM') === 'THERMAL_80MM' && (
+                          <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold shrink-0">✓</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-tight mt-1">
+                        Format rouleau continu compact, économique et idéal pour les encaissements rapides de comptoir.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEstablishment({...establishment, receiptFormat: 'A4', ticketFormat: 'A4'})}
+                      className={`p-4 rounded-2xl border-2 text-left transition-all cursor-pointer relative flex flex-col justify-between ${
+                        establishment.receiptFormat === 'A4'
+                          ? 'border-blue-600 bg-blue-50/50 shadow-sm'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3 mb-1">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center font-black text-xs shrink-0 font-mono">
+                            A4
+                          </div>
+                          <div>
+                            <p className="font-black text-slate-900 text-xs">Format A4 (Facture Pleine Page)</p>
+                            <p className="text-[10px] text-slate-500">Imprimante bureautique standard</p>
+                          </div>
+                        </div>
+                        {establishment.receiptFormat === 'A4' && (
+                          <span className="w-4 h-4 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold shrink-0">✓</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-600 leading-tight mt-1">
+                        Présentation officielle pleine page avec en-tête hospitalier, tableau d'actes et signatures.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nom de la structure</label>
-                    <input type="text" defaultValue={establishment.name} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" />
+                    <input 
+                      type="text" 
+                      value={establishment.name} 
+                      onChange={e => setEstablishment({...establishment, name: e.target.value})}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" 
+                    />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Téléphone</label>
-                    <input type="text" defaultValue={establishment.phone} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" />
+                    <input 
+                      type="text" 
+                      value={establishment.phone} 
+                      onChange={e => setEstablishment({...establishment, phone: e.target.value})}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" 
+                    />
                   </div>
                   <div className="space-y-2 md:col-span-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Adresse</label>
-                    <input type="text" defaultValue={establishment.address} className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" />
+                    <input 
+                      type="text" 
+                      value={establishment.address} 
+                      onChange={e => setEstablishment({...establishment, address: e.target.value})}
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" 
+                    />
                   </div>
                   <div className="space-y-2 md:col-span-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Slogan ou Message</label>
-                    <input type="text" defaultValue="Votre santé, notre priorité" className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" />
+                    <input 
+                      type="text" 
+                      value={establishment.slogan || ''} 
+                      onChange={e => setEstablishment({...establishment, slogan: e.target.value})}
+                      placeholder="Votre santé, notre priorité" 
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" 
+                    />
                   </div>
                   <div className="space-y-2 md:col-span-2">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Pied de page des reçus</label>
-                    <input type="text" defaultValue="Merci de votre confiance. Les reçus ne sont ni repris ni échangés." className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" />
+                    <input 
+                      type="text" 
+                      value={establishment.invoiceFooter || ''} 
+                      onChange={e => setEstablishment({...establishment, invoiceFooter: e.target.value})}
+                      placeholder="Merci de votre confiance. En cas de réclamation, contactez la facturation." 
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900" 
+                    />
                   </div>
                 </div>
               </div>
@@ -2399,7 +2602,11 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
               </div>
 
               <div className="flex justify-end pt-4">
-                <button className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20">
+                <button 
+                  type="button"
+                  onClick={handleSaveCashierSettings}
+                  className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+                >
                   Enregistrer les paramètres de caisse
                 </button>
               </div>

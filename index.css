@@ -285,16 +285,31 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     border: none !important;
     box-shadow: none !important;
     border-radius: 0 !important;
-    width: 100% !important;
-    max-width: 80mm !important;
     margin: 0 auto !important;
     padding: 0 !important;
+  }
+
+  /* Thermal / Supermarket 80mm format */
+  .ticket-print-wrapper.print-format-thermal,
+  .print-format-thermal .ticket-print-wrapper,
+  .ticket-print-wrapper:not(.print-format-a4) {
+    width: 80mm !important;
+    max-width: 80mm !important;
+  }
+
+  /* Full Page A4 Invoice format */
+  .ticket-print-wrapper.print-format-a4,
+  .print-format-a4 .ticket-print-wrapper {
+    width: 100% !important;
+    max-width: 210mm !important;
+    padding: 8mm !important;
   }
 
   .ticket-scroll-area {
     max-height: none !important;
     overflow: visible !important;
     padding: 0 !important;
+    background: transparent !important;
   }
 
   .ticket-actions-bar {
@@ -302,7 +317,7 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   }
 
   @page {
-    size: 80mm auto;
+    size: auto;
     margin: 3mm;
   }
 }

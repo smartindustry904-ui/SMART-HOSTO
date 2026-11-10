@@ -506,6 +506,9 @@ export interface TransactionFacturation {
   avoirUtilise: number;
   surplusConserve: number;
   detteCreee: number;
+  detteIncluse?: number;
+  monnaieRendue?: number;
+  totalFacture?: number;
   modePaiement: 'CASH' | 'CARD' | 'MOBILE_MONEY' | 'TRANSFER' | 'CHECK' | 'OTHER';
   caissierId: string;
   caissierName: string;
@@ -655,6 +658,10 @@ export interface EstablishmentConfig {
   hospital_id?: string;
   tenantId?: string;
   
+  // Print / Ticket / Receipt Format Configuration
+  receiptFormat?: 'THERMAL_80MM' | 'A4';
+  ticketFormat?: 'THERMAL_80MM' | 'A4';
+
   // Laboratory Workflow Configuration
   requireBiologistValidation?: boolean;
   require_biologist_validation?: boolean;

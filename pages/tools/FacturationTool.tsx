@@ -4,6 +4,7 @@ import { db, sanitizeData } from '../../src/firebase';
 import { doc, updateDoc, collection, setDoc, query, where, getDocs, writeBatch, onSnapshot } from 'firebase/firestore';
 import { PaymentRequest, LigneFacturation, TransactionFacturation, AvoirPatient, DettePatient, HistoriqueFinancierPatient, ParametresCaisse, Patient } from '../../types';
 import { useSettings } from '../../hooks/useSettings';
+import { PrintReceiptModal, PrintableReceiptData } from '../../components/common/PrintReceiptModal';
 import { formatPatientFullName } from '../../src/patientUtils';
 
 export const formatDateTime = (dateInput?: string | number | Date): string => {
@@ -516,6 +517,46 @@ export const FacturationTool: React.FC<FacturationToolProps> = ({
     }
   };
 
+  const formatFacturationReceipt = (tx: TransactionFacturation): PrintableReceiptData => {
+    const d = tx.date ? new Date(tx.date) : new Date();
+    const dateStr = !isNaN(d.getTime()) ? d.toLocaleDateString('fr-FR') : new Date().toLocaleDateString('fr-FR');
+    const timeStr = !isNaN(d.getTime()) ? d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+
+    const items = (tx.lignes || []).map((l, idx) => ({
+      id: `item-${idx}`,
+      name: l.libelle,
+      quantity: l.quantite,
+      unitPrice: l.prixUnitaire,
+      totalPrice: l.montantTotal,
+      category: l.source
+    }));
+
+    return {
+      id: tx.id,
+      date: dateStr,
+      time: timeStr,
+      type: 'RECU_ENCAISSEMENT',
+      patientName: tx.patientName,
+      patientId: tx.patientId,
+      dmeId: tx.patientId,
+      operatorName: tx.caissierName || (tx as any).cashierName || user?.name || 'Caissier Principal',
+      operatorRole: 'Caisse Centrale',
+      paymentMethod: tx.modePaiement || 'ESPÈCES',
+      items,
+      subtotal: tx.sousTotal,
+      insuranceCoverage: 0,
+      previousDebt: tx.detteIncluse || 0,
+      totalAmount: tx.totalGeneral,
+      amountPaid: tx.montantPaye,
+      changeGiven: tx.monnaieRendue || 0,
+      creditApplied: tx.avoirUtilise || 0,
+      newDebt: tx.detteCreee || 0,
+      newAdvance: tx.surplusConserve || 0,
+      isPaid: true,
+      footer: establishment?.invoiceFooter
+    };
+  };
+
   return (
     <div className="flex flex-col h-full bg-slate-50">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 flex-1 overflow-hidden">
@@ -961,141 +1002,13 @@ export const FacturationTool: React.FC<FacturationToolProps> = ({
         </div>
       </div>
 
-      {/* Modal Reçu */}
+      {/* Modal Reçu (Dual Format: A4 & Supermarché 80mm) */}
       {showReceipt && lastTransaction && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="ticket-print-wrapper bg-white rounded-2xl shadow-xl w-full max-w-md flex flex-col max-h-[90vh] overflow-hidden">
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center no-print">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2">
-                <Printer size={18} className="text-blue-600" />
-                Aperçu du reçu
-              </h3>
-              <button onClick={() => setShowReceipt(false)} className="p-2 text-slate-400 hover:bg-slate-100 rounded-lg cursor-pointer">
-                <X size={18} />
-              </button>
-            </div>
-            
-            <div className="ticket-scroll-area p-4 sm:p-6 overflow-y-auto custom-scrollbar bg-slate-50" id="receipt-content">
-              <div className="bg-white p-6 shadow-sm border border-slate-200" style={{ width: '80mm', maxWidth: '100%', margin: '0 auto', fontFamily: 'monospace' }}>
-                <div className="text-center mb-4">
-                  <h2 className="font-bold text-lg uppercase tracking-wide">{establishment?.name || parametres.impression.nomStructure || 'SmartHosto SIH'}</h2>
-                  <p className="text-xs">{establishment?.address || parametres.impression.adresse}</p>
-                  <p className="text-xs">Tél: {establishment?.phone || parametres.impression.telephone} {establishment?.email ? `• ${establishment.email}` : ''}</p>
-                  {establishment?.taxId && <p className="text-[10px] text-slate-500 mt-0.5">{establishment.taxId}</p>}
-                  {establishment?.slogan && <p className="text-xs italic mt-1 font-sans text-slate-600">{establishment.slogan}</p>}
-                </div>
-                
-                <div className="border-t border-b border-dashed border-slate-300 py-2 mb-4 text-xs space-y-0.5">
-                  <p className="flex justify-between"><span>Reçu N° :</span> <span className="font-bold">{lastTransaction.id}</span></p>
-                  <p className="flex justify-between"><span>Date & Heure :</span> <span>{formatDateTime(lastTransaction.date)}</span></p>
-                  <p className="flex justify-between"><span>Patient :</span> <span className="font-bold">{lastTransaction.patientName}</span></p>
-                  <p className="flex justify-between font-bold border-t border-dotted border-slate-200 pt-1 mt-1">
-                    <span>Caissier :</span> 
-                    <span className="font-extrabold uppercase">{lastTransaction.caissierName || (lastTransaction as any).cashierName || user?.name || 'Caissier Principal'}</span>
-                  </p>
-                </div>
-
-                <div className="mb-4">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200">
-                        <th className="text-left pb-1">Désignation</th>
-                        <th className="text-right pb-1">Qte</th>
-                        <th className="text-right pb-1">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lastTransaction.lignes.map((ligne, idx) => (
-                        <tr key={idx}>
-                          <td className="py-1">{ligne.libelle}</td>
-                          <td className="text-right py-1">{ligne.quantite}</td>
-                          <td className="text-right py-1">{(ligne.montantTotal || 0).toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="border-t border-slate-300 pt-2 text-xs space-y-1">
-                  <div className="flex justify-between">
-                    <span>Prestations:</span>
-                    <span>{(lastTransaction.sousTotal || 0).toLocaleString()} CFA</span>
-                  </div>
-                  {lastTransaction.detteIncluse > 0 && (
-                    <div className="flex justify-between text-rose-600">
-                      <span>Dettes précédentes:</span>
-                      <span>+{(lastTransaction.detteIncluse || 0).toLocaleString()} CFA</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between font-bold border-t border-slate-100 pt-1">
-                    <span>Total Facturé:</span>
-                    <span>{(lastTransaction.totalFacture || 0).toLocaleString()} CFA</span>
-                  </div>
-                  {lastTransaction.avoirUtilise > 0 && (
-                    <div className="flex justify-between text-emerald-600">
-                      <span>Avoir utilisé:</span>
-                      <span>-{(lastTransaction.avoirUtilise || 0).toLocaleString()} CFA</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between font-bold text-sm mt-1 border-t border-slate-200 pt-1">
-                    <span>Net à payer:</span>
-                    <span>{(lastTransaction.totalGeneral || 0).toLocaleString()} CFA</span>
-                  </div>
-                  <div className="flex justify-between mt-2">
-                    <span>Montant remis:</span>
-                    <span>{(lastTransaction.montantPaye || 0).toLocaleString()} CFA</span>
-                  </div>
-                  {lastTransaction.monnaieRendue > 0 && (
-                    <div className="flex justify-between">
-                      <span>Monnaie rendue:</span>
-                      <span>{(lastTransaction.monnaieRendue || 0).toLocaleString()} CFA</span>
-                    </div>
-                  )}
-                  {lastTransaction.surplusConserve > 0 && (
-                    <div className="flex justify-between text-blue-600">
-                      <span>Mise en avance:</span>
-                      <span>{(lastTransaction.surplusConserve || 0).toLocaleString()} CFA</span>
-                    </div>
-                  )}
-                  {lastTransaction.detteCreee > 0 && (
-                    <div className="flex justify-between text-rose-600">
-                      <span>Nouvelle Dette:</span>
-                      <span>{(lastTransaction.detteCreee || 0).toLocaleString()} CFA</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between mt-1 text-[10px] text-slate-500">
-                    <span>Mode:</span>
-                    <span>{lastTransaction.modePaiement}</span>
-                  </div>
-                </div>
-
-                <div className="mt-6 text-center text-[10px] text-slate-500 border-t border-dashed border-slate-300 pt-3 space-y-1">
-                  <p className="font-bold text-slate-800 uppercase tracking-wider">
-                    Caissier : {lastTransaction.caissierName || (lastTransaction as any).cashierName || user?.name || 'Caissier Principal'}
-                  </p>
-                  <p>{parametres.impression.piedDePage || establishment?.invoiceFooter || 'Merci pour votre confiance.'}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="ticket-actions-bar no-print p-4 border-t border-slate-100 flex gap-2 bg-white">
-              <button 
-                onClick={() => setShowReceipt(false)}
-                className="flex-1 py-2.5 bg-slate-100 text-slate-700 rounded-xl font-bold hover:bg-slate-200 transition-colors cursor-pointer"
-              >
-                Fermer
-              </button>
-              <button 
-                onClick={() => {
-                  window.print();
-                }}
-                className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-500 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-blue-600/20"
-              >
-                <Printer size={18} /> Imprimer Reçu
-              </button>
-            </div>
-          </div>
-        </div>
+        <PrintReceiptModal
+          receipt={formatFacturationReceipt(lastTransaction)}
+          establishment={establishment}
+          onClose={() => setShowReceipt(false)}
+        />
       )}
     </div>
   );
