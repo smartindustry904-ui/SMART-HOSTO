@@ -1581,6 +1581,16 @@ async function buildStaffHospitalContext(staffDoc: any) {
   };
 }
 
+function applyAutoTable(doc: any, options: any) {
+  const at = autoTable as any;
+  const fn = typeof doc?.autoTable === 'function'
+    ? doc.autoTable.bind(doc)
+    : (typeof at === 'function' ? at : (at?.default || at?.autoTable || at));
+  if (typeof fn === 'function') {
+    fn(doc, options);
+  }
+}
+
 function generateReportPdf(type: string, ctx: any): Buffer {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const s = ctx.staff || {};
@@ -1617,7 +1627,7 @@ function generateReportPdf(type: string, ctx: any): Buffer {
       a.paymentStatus === 'PAID' ? 'Réglé' : 'En attente'
     ]);
 
-    (autoTable as any)(doc, {
+    applyAutoTable(doc, {
       startY: 68,
       head: [['Date', 'Acte Médical', 'Patient', 'Montant Total', 'Quote-Part', 'Statut']],
       body: rows.length > 0 ? rows : [['N/A', 'Aucun acte récent', '-', '-', '-', '-']],
@@ -1642,7 +1652,7 @@ function generateReportPdf(type: string, ctx: any): Buffer {
       p.status === 'EN_ATTENTE_DE_SORTIE' ? 'Sortie en attente' : 'Hospitalisé'
     ]);
 
-    (autoTable as any)(doc, {
+    applyAutoTable(doc, {
       startY: 54,
       head: [['Patient', 'Chambre / Lit', 'Date d\'Admission', 'Médecin Traitant', 'Statut']],
       body: rows.length > 0 ? rows : [['N/A', 'Aucun patient hospitalisé', '-', '-', '-']],
@@ -1667,7 +1677,7 @@ function generateReportPdf(type: string, ctx: any): Buffer {
       m.stock <= m.alertThreshold ? 'ALERTE STOCK BAS' : 'Normal'
     ]);
 
-    (autoTable as any)(doc, {
+    applyAutoTable(doc, {
       startY: 54,
       head: [['Désignation', 'Stock Réel', 'Seuil d\'Alerte', 'Prix Unitaire', 'Statut']],
       body: rows.length > 0 ? rows : [['N/A', 'Aucun médicament', '-', '-', '-']],
@@ -1685,7 +1695,7 @@ function generateReportPdf(type: string, ctx: any): Buffer {
     doc.text(`Montant total à recouvrer : ${(adm.pendingCashierAmountFCFA || 0).toLocaleString('fr-FR')} FCFA`, 14, 47);
     doc.text(`Licence établissement : ${adm.licence || 'Standard'}`, 14, 52);
 
-    (autoTable as any)(doc, {
+    applyAutoTable(doc, {
       startY: 58,
       head: [['Indicateur de Gestion', 'Valeur en Temps Réel']],
       body: [
