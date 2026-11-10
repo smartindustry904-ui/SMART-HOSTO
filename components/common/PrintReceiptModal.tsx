@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import { Printer, X, Receipt, FileText, CheckCircle2, Building2, Phone, Mail, MapPin, User, ShieldCheck } from 'lucide-react';
 import { EstablishmentConfig } from '../../types';
 
@@ -77,8 +76,10 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
     window.print();
   };
 
-  return createPortal(
-    <div id="print-modal-portal">
+  return (
+    <div className={`fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto ${
+      selectedFormat === 'THERMAL_80MM' ? 'print-format-thermal' : 'print-format-a4'
+    }`}>
       {/* Format-specific dynamic @page CSS rule for browser print preview */}
       {selectedFormat === 'THERMAL_80MM' ? (
         <style>{`
@@ -100,9 +101,6 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
         `}</style>
       )}
 
-      <div className={`fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto ${
-        selectedFormat === 'THERMAL_80MM' ? 'print-format-thermal' : 'print-format-a4'
-      }`}>
       <div className={`ticket-print-wrapper bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200 transition-all ${
         selectedFormat === 'THERMAL_80MM' 
           ? 'w-full max-w-md print-format-thermal' 
@@ -549,7 +547,5 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
 
       </div>
     </div>
-  </div>,
-  document.body
-);
+  );
 };

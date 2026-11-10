@@ -256,7 +256,6 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   animation: shine 3s infinite;
 }
 
-/* Print Media Queries for Thermal Receipt / Orientation Sheet */
 /* Print Media Queries for Thermal Receipt / Orientation Sheet / Official A4 */
 @media print {
   /* 1. Global Print Reset */
@@ -270,42 +269,29 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     overflow: visible !important;
   }
 
-  /* 2. When a print modal is open, COMPLETELY HIDE the background app (#root) */
-  body.has-print-modal > #root,
-  body.has-print-modal > *:not(#print-modal-portal),
-  body:has(#print-modal-portal) > #root,
-  body:has(#print-modal-portal) > *:not(#print-modal-portal) {
-    display: none !important;
+  /* 2. When a print modal is open: HIDE EVERYTHING EXCEPT THE RECEIPT */
+  body.has-print-modal * {
     visibility: hidden !important;
-    height: 0 !important;
-    max-height: 0 !important;
-    overflow: hidden !important;
-    position: absolute !important;
-    left: -9999px !important;
+  }
+
+  body.has-print-modal .ticket-print-wrapper,
+  body.has-print-modal .ticket-print-wrapper * {
+    visibility: visible !important;
   }
 
   /* 3. Hide all non-printable chrome and interactive UI */
   header, nav, aside, footer, button, .no-print, [role="navigation"],
   .ticket-actions-bar,
-  #print-modal-portal .no-print,
-  #print-modal-portal button {
+  body.has-print-modal .no-print,
+  body.has-print-modal .no-print *,
+  body.has-print-modal button {
     display: none !important;
     visibility: hidden !important;
   }
 
-  /* 4. Display the Print Portal as the sole printable content */
-  #print-modal-portal {
-    display: block !important;
-    position: static !important;
-    width: 100% !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #ffffff !important;
-    overflow: visible !important;
-  }
-
-  #print-modal-portal .fixed.inset-0,
-  #print-modal-portal [class*="fixed"] {
+  /* 4. Display the receipt modal cleanly at the top of the page */
+  body.has-print-modal .fixed.inset-0,
+  body.has-print-modal [class*="fixed"] {
     position: static !important;
     background: transparent !important;
     backdrop-filter: none !important;
@@ -320,24 +306,27 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     display: block !important;
   }
 
-  #print-modal-portal .ticket-print-wrapper,
+  body.has-print-modal .ticket-print-wrapper,
   .ticket-print-wrapper {
-    position: static !important;
-    max-height: none !important;
-    overflow: visible !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
     border: none !important;
     box-shadow: none !important;
     border-radius: 0 !important;
-    margin: 0 auto !important;
-    padding: 0 !important;
     background: #ffffff !important;
     color: #000000 !important;
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 
-  #print-modal-portal .ticket-scroll-area,
+  body.has-print-modal .ticket-scroll-area,
   .ticket-scroll-area {
     max-height: none !important;
     overflow: visible !important;
@@ -345,6 +334,17 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     margin: 0 !important;
     background: transparent !important;
     display: block !important;
+  }
+
+  /* Ensure containers do not clip printing */
+  body.has-print-modal,
+  body.has-print-modal #root,
+  body.has-print-modal #root > div,
+  body.has-print-modal main {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+    max-height: none !important;
   }
 
   /* 5. Thermal Supermarket 80mm format styling */
@@ -380,7 +380,7 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     break-inside: avoid !important;
   }
 
-  /* 7. Fallback if a modal is inside #root (e.g. shift closing slip or debt slip) */
+  /* 7. Fallback if a modal is inside #root without has-print-modal (e.g. shift closing slip or debt slip) */
   body:not(.has-print-modal):has(.ticket-print-wrapper) > #root > *:not(:has(.ticket-print-wrapper)) {
     display: none !important;
   }
