@@ -4,6 +4,8 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getFirestore,
@@ -1175,67 +1177,41 @@ interface WhatsAppAgentConfig {
   updatedAt?: string;
 }
 
-const DEFAULT_WHATSAPP_SYSTEM_PROMPT = `Tu es l'Assistant Exécutif Hospitalier officiel sur WhatsApp pour la plateforme hospitalière SMART-HOSTO.
-Tu t'adresses aux praticiens, cadres de santé et directeurs médicaux/administratifs de l'établissement.
+const DEFAULT_WHATSAPP_SYSTEM_PROMPT = `Tu es l'Assistant Hospitalier Officiel sur WhatsApp pour la plateforme hospitalière SMART-HOSTO.
+Tu t'adresses aux praticiens, cadres de santé, infirmiers et directeurs administratifs de l'établissement.
 
-DIRECTIVES MAJEURES DE STYLE ET MISE EN FORME PROFESSIONNELLE :
-1. TON EXÉCUTIF & MÉDICAL :
-   - Adopte une posture formelle, courtoise, rigoureuse et institutionnelle d'un Système d'Information Hospitalier (SIH) de référence.
-   - Évite formellement les accumulations d'emojis informels ou enfantins. Utilise uniquement des marqueurs fonctionnels sobres (ex: [PAYÉ], [EN ATTENTE], [URGENT], ▪, ▫, 🏥).
-   - Salutation protocolaire : "Bonjour Dr [Nom]" pour les praticiens, "Bonjour [Nom] — Direction Administrative" pour les administrateurs.
+DIRECTIVES DE STYLE & MISE EN FORME (MARKDOWN NATUREL, ÉLÉGANT ET AÉRÉ) :
+1. STRICTEMENT AUCUN CADRE NI TABLEAU BRUT :
+   - N'utilise JAMAIS de cadres ASCII, de bordures (┌, ─, └, │, ━) ni de blocs de code monospace (\`\`\`) pour formater du texte comme des tableaux. L'utilisateur trouve cela inélégant et lourd sur mobile.
+   - Privilégie un formatage Markdown standard WhatsApp naturel, fluide et agréable à lire :
+     *Gras* pour les titres de sections, montants financiers, noms de patients et statuts.
+     _Italique_ pour les sous-titres, dates, précisions de service et mentions administratives.
+     Listes à puces simples (• ou -) avec des sauts de ligne clairs entre chaque bloc d'information.
+   - Emojis sobres et ciblés : utilise un emoji pertinent en tête de titre (ex: 🏥, 📊, 🛏️, 💊, 💼) sans enchaîner plusieurs emojis à la suite.
 
-2. CARTES ET EN-TÊTES DE MODULES :
-   - Structure tes messages avec des cartes délimitées par des séparateurs horizontaux propres :
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-     🏥 *SMART-HOSTO* • *[TITRE DU RAPPORT]*
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. SALUTATION PROFESSIONNELLE & RÔLE :
+   - Salue courtoisement selon le rôle : "Bonjour Dr [Nom]" pour les médecins/chirurgiens, "Bonjour [Nom] (Direction Administrative)" pour les administrateurs.
 
-3. TABLEAUX & GRILLES ALIGNÉES EN MONOSPACE (Triple Backticks \`\`\`) :
-   - WhatsApp prend parfaitement en charge les blocs de texte monospace grâce aux triples apostrophes inverses (\`\`\`).
-   - Pour TOUTE liste de 2 éléments ou plus (patients, lits, factures, tarifs, stocks), utilise OBLIGATOIREMENT un bloc monospace pour afficher un tableau à colonnes alignées :
-   Exemple pour les patients / hospitalisations :
-   \`\`\`
-   PATIENT          LIT       DATE ADM.   STATUT
-   ───────────────────────────────────────────
-   DERAIN DJOFANG   Lit 1    17/07/2026  Attente
-   nkounadji DJOF.  Lit 3    17/07/2026  Attente
-   DERA DJOFANG     Lit 2    04/08/2026  Attente
-   \`\`\`
-   Exemple pour la trésorerie / facturation :
-   \`\`\`
-   DOSSIER          PATIENT        MONTANT     STATUT
-   ──────────────────────────────────────────────────
-   FAC-2026-089     Paul KAMGA     15 000 F   Impayé
-   FAC-2026-090     Alice NGONO    25 000 F   Impayé
-   \`\`\`
-   Exemple pour les commissions et actes :
-   \`\`\`
-   DATE     ACTE            HONORAIRES  STATUT
-   ───────────────────────────────────────────
-   09/11    Consultation      +750 F    Attente
-   06/11    Consultation      +750 F    Attente
-   \`\`\`
-   Exemple pour la pharmacie :
-   \`\`\`
-   ARTICLE             STOCK  SEUIL  STATUT
-   ───────────────────────────────────────────
-   Doliprane 1000mg       2     10   CRITIQUE
-   Amoxicilline 500mg    45     15   Normal
-   \`\`\`
+3. STRUCTURE RECOMMANDEE D'UNE REPONSE :
+   *🏥 Titre du Bilan*
+   _Sous-titre explicatif avec horodatage_
 
-4. ENCADRÉS KPI & CHIFFRES CLÉS :
-   - Présente les métriques financières ou capacitaires sous forme de fiches synthétiques encadrées :
-   ┌────────────────────────────────────────┐
-   │ COMMISSIONS EN ATTENTE : 1 500 FCFA    │
-   │ DOSSIERS CLÔTURÉS      : 3             │
-   └────────────────────────────────────────┘
+   • *Indicateur 1 :* Valeur en FCFA
+   • *Indicateur 2 :* Nombre ou état
+
+   *Détails des dossiers :*
+   - Date ou Nom : *Désignation de l'acte* → *Montant FCFA* _(Statut)_
+
+   📄 _Envoyez *"PDF"* ou *"Excel"* pour recevoir le document officiel certifié._
+   _SMART-HOSTO SIH • Service d'Information Médicale_
+
+4. CAPACITÉ D'ENVOI DE DOCUMENTS OFFICIELS (PDF / EXCEL) :
+   - Le système peut générer et transmettre directement des rapports officiels certifiés en PDF ou tableur Excel dans cette conversation WhatsApp.
+   - Si l'utilisateur demande un rapport, un bilan complet, un export, ou mentionne "PDF", "Excel", "Document", "Télécharger" ou "Stats", confirme-lui avec bienveillance que le document est préparé et transmis.
 
 5. RÈGLES MÉTIER :
    - Devise obligatoire : FCFA.
-   - Respect absolu de la confidentialité et du rôle : seul le profil ADMIN a accès aux agrégats de caisse et finances globales de l'établissement.
-   - Signature en pied de page :
-     ─────────────────────────────
-     _SMART-HOSTO SIH • Données certifiées en temps réel_`;
+   - Confidentialité : les praticiens ne voient que leurs propres honoraires/commissions ; seuls les ADMIN ont accès aux caisses globales de l'établissement.`;
 
 // In-memory cache & fallback logs so the agent works seamlessly even during brief Firestore latency
 let cachedWhatsAppConfig: WhatsAppAgentConfig | null = null;
@@ -1605,16 +1581,171 @@ async function buildStaffHospitalContext(staffDoc: any) {
   };
 }
 
-function padRight(str: string | number, len: number): string {
-  const s = String(str ?? '').slice(0, len);
-  return s + ' '.repeat(Math.max(0, len - s.length));
+function generateReportPdf(type: string, ctx: any): Buffer {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const s = ctx.staff || {};
+  const fin = ctx.personalFinanceAndActs || {};
+
+  // Header banner
+  doc.setFillColor(30, 58, 138); // Hospital navy blue
+  doc.rect(0, 0, 210, 24, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(15);
+  doc.text('SMART-HOSTO • SYSTÈME D\'INFORMATION HOSPITALIER', 14, 11);
+  doc.setFontSize(9);
+  doc.text('Rapport Certifié Officiel — Édité le ' + (ctx.currentDate || new Date().toLocaleString('fr-FR')), 14, 18);
+
+  doc.setTextColor(30, 41, 59);
+
+  if (type === 'commissions') {
+    doc.setFontSize(13);
+    doc.text('RELEVÉ D\'HONORAIRES & COMMISSIONS MÉDICALES', 14, 34);
+
+    doc.setFontSize(9.5);
+    doc.text(`Praticien : ${s.name || 'Praticien'} (${s.profession || 'Médical'})`, 14, 42);
+    doc.text(`Taux de quote-part appliqué : ${s.quotePartRatePercent || 0}%`, 14, 47);
+    doc.text(`Total honoraires générés : ${(fin.totalCommissionsEarnedFCFA || 0).toLocaleString('fr-FR')} FCFA`, 14, 52);
+    doc.text(`Règlements perçus : ${(fin.totalCommissionsPaidFCFA || 0).toLocaleString('fr-FR')} FCFA`, 14, 57);
+    doc.text(`Solde en attente de paiement : ${(fin.totalCommissionsPendingFCFA || 0).toLocaleString('fr-FR')} FCFA`, 14, 62);
+
+    const rows = (fin.recentActs || []).map((a: any) => [
+      String(a.date || '').slice(0, 10),
+      a.typeLabel || 'Consultation',
+      a.patientName || 'Patient',
+      (a.amount || 0).toLocaleString('fr-FR') + ' FCFA',
+      (a.commissionAmount || 0).toLocaleString('fr-FR') + ' FCFA',
+      a.paymentStatus === 'PAID' ? 'Réglé' : 'En attente'
+    ]);
+
+    (autoTable as any)(doc, {
+      startY: 68,
+      head: [['Date', 'Acte Médical', 'Patient', 'Montant Total', 'Quote-Part', 'Statut']],
+      body: rows.length > 0 ? rows : [['N/A', 'Aucun acte récent', '-', '-', '-', '-']],
+      theme: 'grid',
+      headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 8.5 }
+    });
+  } else if (type === 'inpatient' || type === 'sorties') {
+    doc.setFontSize(13);
+    doc.text('REGISTRE DES HOSPITALISATIONS & SORTIES', 14, 34);
+
+    doc.setFontSize(9.5);
+    doc.text(`Lits occupés actuellement : ${ctx.inpatients?.totalAdmitted || 0}`, 14, 42);
+    doc.text(`Patients en attente de sortie : ${ctx.inpatients?.pendingDischargeCount || 0}`, 14, 47);
+
+    const admissions = ctx.inpatients?.allActiveAdmissions || [];
+    const rows = admissions.map((p: any) => [
+      p.patientName || 'Patient',
+      p.bed || 'Lit non assigné',
+      String(p.admissionDate || '').slice(0, 10),
+      p.doctor || 'Non assigné',
+      p.status === 'EN_ATTENTE_DE_SORTIE' ? 'Sortie en attente' : 'Hospitalisé'
+    ]);
+
+    (autoTable as any)(doc, {
+      startY: 54,
+      head: [['Patient', 'Chambre / Lit', 'Date d\'Admission', 'Médecin Traitant', 'Statut']],
+      body: rows.length > 0 ? rows : [['N/A', 'Aucun patient hospitalisé', '-', '-', '-']],
+      theme: 'grid',
+      headStyles: { fillColor: [13, 148, 136], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 8.5 }
+    });
+  } else if (type === 'pharmacy' || type === 'stock') {
+    doc.setFontSize(13);
+    doc.text('INVENTAIRE DU STOCK DE LA PHARMACIE CENTRALE', 14, 34);
+
+    doc.setFontSize(9.5);
+    doc.text(`Références totales au catalogue : ${ctx.pharmacy?.totalMedicationsInCatalog || 0}`, 14, 42);
+    doc.text(`Articles en alerte de stock : ${ctx.pharmacy?.lowStockCount || 0}`, 14, 47);
+
+    const meds = ctx.pharmacy?.sampleInventory || [];
+    const rows = meds.map((m: any) => [
+      m.name || 'Produit',
+      String(m.stock || 0),
+      String(m.alertThreshold || 10),
+      (m.price || 0).toLocaleString('fr-FR') + ' FCFA',
+      m.stock <= m.alertThreshold ? 'ALERTE STOCK BAS' : 'Normal'
+    ]);
+
+    (autoTable as any)(doc, {
+      startY: 54,
+      head: [['Désignation', 'Stock Réel', 'Seuil d\'Alerte', 'Prix Unitaire', 'Statut']],
+      body: rows.length > 0 ? rows : [['N/A', 'Aucun médicament', '-', '-', '-']],
+      theme: 'grid',
+      headStyles: { fillColor: [147, 51, 234], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 8.5 }
+    });
+  } else {
+    doc.setFontSize(13);
+    doc.text('BILAN COMPTABLE & SITUATION DE RECOUVREMENT', 14, 34);
+
+    doc.setFontSize(9.5);
+    const adm = ctx.adminHospitalSummary || {};
+    doc.text(`Dossiers de caisse en attente : ${adm.pendingCashierInvoicesCount || 0}`, 14, 42);
+    doc.text(`Montant total à recouvrer : ${(adm.pendingCashierAmountFCFA || 0).toLocaleString('fr-FR')} FCFA`, 14, 47);
+    doc.text(`Licence établissement : ${adm.licence || 'Standard'}`, 14, 52);
+
+    (autoTable as any)(doc, {
+      startY: 58,
+      head: [['Indicateur de Gestion', 'Valeur en Temps Réel']],
+      body: [
+        ['Factures impayées en caisse', `${adm.pendingCashierInvoicesCount || 0} dossiers`],
+        ['Créances globales en attente', `${(adm.pendingCashierAmountFCFA || 0).toLocaleString('fr-FR')} FCFA`],
+        ['Comptes utilisateurs actifs', `${adm.activeStaffUsers || 1} / ${adm.maxStaffUsers || 25}`],
+        ['Commissions globales praticiens', `${(fin.totalCommissionsEarnedFCFA || 0).toLocaleString('fr-FR')} FCFA`]
+      ],
+      theme: 'grid',
+      headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
+      styles: { fontSize: 9.5 }
+    });
+  }
+
+  const pageHeight = doc.internal.pageSize.getHeight();
+  doc.setFontSize(8);
+  doc.setTextColor(148, 163, 184);
+  doc.text('Document certifié SMART-HOSTO SIH • Validité officielle interne', 14, pageHeight - 8);
+
+  return Buffer.from(doc.output('arraybuffer'));
 }
 
-function renderAsciiTable(headers: string[], rows: string[][], colWidths: number[]): string {
-  const headerLine = headers.map((h, i) => padRight(h, colWidths[i])).join('  ');
-  const sepLine = '─'.repeat(colWidths.reduce((a, b) => a + b, 0) + (headers.length - 1) * 2);
-  const dataLines = rows.map(r => r.map((c, i) => padRight(c, colWidths[i])).join('  '));
-  return '```\n' + headerLine + '\n' + sepLine + '\n' + dataLines.join('\n') + '\n```';
+function generateReportExcel(type: string, ctx: any): string {
+  const s = ctx.staff || {};
+  const fin = ctx.personalFinanceAndActs || {};
+  let csv = '\ufeff'; // UTF-8 BOM for Microsoft Excel
+
+  if (type === 'commissions') {
+    csv += 'RELEVE DES HONORAIRES ET COMMISSIONS MEDICALES - SMART-HOSTO\n';
+    csv += `Praticien;${s.name || ''};Profession;${s.profession || ''};Taux;${s.quotePartRatePercent || 0}%\n`;
+    csv += `Date d edition;${ctx.currentDate || ''}\n\n`;
+    csv += 'Date;Acte Medical;Patient;Montant Acte (FCFA);Quote-Part (FCFA);Statut\n';
+    (fin.recentActs || []).forEach((a: any) => {
+      csv += `${String(a.date || '').slice(0, 10)};"${a.typeLabel || ''}";"${a.patientName || ''}";${a.amount || 0};${a.commissionAmount || 0};${a.paymentStatus === 'PAID' ? 'Regle' : 'En attente'}\n`;
+    });
+  } else if (type === 'inpatient' || type === 'sorties') {
+    csv += 'REGISTRE DES HOSPITALISATIONS ET SORTIES - SMART-HOSTO\n';
+    csv += `Date d edition;${ctx.currentDate || ''}\n\n`;
+    csv += 'Patient;Chambre_Lit;Date_Admission;Medecin_Traitant;Statut\n';
+    (ctx.inpatients?.allActiveAdmissions || []).forEach((p: any) => {
+      csv += `"${p.patientName || ''}";"${p.bed || ''}";${String(p.admissionDate || '').slice(0, 10)};"${p.doctor || ''}";${p.status || ''}\n`;
+    });
+  } else if (type === 'pharmacy' || type === 'stock') {
+    csv += 'INVENTAIRE DES STOCKS DE PHARMACIE - SMART-HOSTO\n';
+    csv += `Date d edition;${ctx.currentDate || ''}\n\n`;
+    csv += 'Designation;Stock_Reel;Seuil_Alerte;Prix_Unitaire_FCFA;Statut\n';
+    (ctx.pharmacy?.sampleInventory || []).forEach((m: any) => {
+      csv += `"${m.name || ''}";${m.stock || 0};${m.alertThreshold || 10};${m.price || 0};${m.stock <= m.alertThreshold ? 'ALERTE STOCK BAS' : 'Normal'}\n`;
+    });
+  } else {
+    const adm = ctx.adminHospitalSummary || {};
+    csv += 'BILAN DE GESTION ET RECOUVREMENT - SMART-HOSTO\n';
+    csv += `Date d edition;${ctx.currentDate || ''}\n\n`;
+    csv += 'Indicateur;Valeur\n';
+    csv += `Factures impayees en caisse;${adm.pendingCashierInvoicesCount || 0} dossiers\n`;
+    csv += `Montant global a recouvrer;${adm.pendingCashierAmountFCFA || 0} FCFA\n`;
+    csv += `Comptes actifs;${adm.activeStaffUsers || 1} / ${adm.maxStaffUsers || 25}\n`;
+  }
+
+  return csv;
 }
 
 function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<typeof buildStaffHospitalContext>>): string {
@@ -1624,28 +1755,22 @@ function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<ty
 
   if (lower.includes('aide') || lower.includes('menu') || lower.includes('help') || lower === '/start' || lower === 'bonjour' || lower === 'salut') {
     return (
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🏥 *SMART-HOSTO* • *ASSISTANT EXÉCUTIF SIH*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Bonjour *${s.name}* [${s.profession}]\n\n` +
-      `┌──────────────────────────────────────────┐\n` +
-      `│ POINT HOSPITALIER AU ${ctx.currentDate}\n` +
-      `├──────────────────────────────────────────┤\n` +
-      `│ Commissions en attente : ${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA\n` +
-      `│ Patients en file d'attente : ${ctx.waitingQueueToday.totalWaiting}\n` +
-      `│ Patients hospitalisés      : ${ctx.inpatients.totalAdmitted}\n` +
-      `│ Sorties en attente         : ${ctx.inpatients.pendingDischargeCount}\n` +
-      `│ Alertes pharmacie          : ${ctx.pharmacy.lowStockCount}\n` +
-      `└──────────────────────────────────────────┘\n\n` +
-      `*Requêtes disponibles :*\n` +
-      `▪ *"Mes commissions"* → Relevé d'honoraires et quotes-parts\n` +
-      `▪ *"File d'attente"* → Liste des patients en triage\n` +
-      `▪ *"Patients en attente de sortie"* → Tableau des sorties d'hospitalisation\n` +
-      `▪ *"Stock pharmacie"* → État des stocks et alertes\n` +
-      `▪ *"Tarifs"* → Nomenclature des actes médicaux\n` +
-      (ctx.adminHospitalSummary ? `▪ *"Bilan admin"* → Recouvrement caisse & licence\n` : '') +
-      `\n─────────────────────────────\n` +
-      `_SMART-HOSTO SIH • Service d'Information Médicale_`
+      `*🏥 Assistant Hospitalier SMART-HOSTO*\n` +
+      `_Bonjour ${s.name} (${s.profession})_\n\n` +
+      `• *Commissions en attente :* *${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA*\n` +
+      `• *Patients en attente au triage :* *${ctx.waitingQueueToday.totalWaiting}*\n` +
+      `• *Patients actuellement hospitalisés :* *${ctx.inpatients.totalAdmitted}*\n` +
+      `• *Sorties d'hospitalisation prévues :* *${ctx.inpatients.pendingDischargeCount}*\n` +
+      `• *Alertes stock pharmacie :* *${ctx.pharmacy.lowStockCount}*\n\n` +
+      `*Demandes fréquentes :*\n` +
+      `• *"Mes commissions"* : Détail de vos honoraires et quotes-parts\n` +
+      `• *"Sorties"* : Patients en attente de sortie d'hospitalisation\n` +
+      `• *"File d'attente"* : Patients en salle d'attente\n` +
+      `• *"Stock [médicament]"* : Disponibilité et alertes pharmacie\n` +
+      `• *"Tarifs"* : Prix des consultations et actes\n` +
+      `• *"Rapport PDF"* ou *"Export Excel"* : Recevoir vos documents officiels certifiés\n` +
+      (ctx.adminHospitalSummary ? `• *"Bilan caisse"* : Factures impayées & trésorerie\n` : '') +
+      `\n_SMART-HOSTO SIH • Service d'Information Médicale_`
     );
   }
 
@@ -1654,69 +1779,47 @@ function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<ty
     const totalAdmitted = ctx.inpatients?.totalAdmitted || 0;
     if (pendingDischarge.length === 0) {
       return (
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🏥 *SMART-HOSTO* • *HOSPITALISATION & SORTIES*\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `┌──────────────────────────────────────────┐\n` +
-        `│ LITS OCCUPÉS       : ${totalAdmitted} patients\n` +
-        `│ SORTIES EN ATTENTE : 0 dossier\n` +
-        `└──────────────────────────────────────────┘\n\n` +
-        `▪ _Tous les patients actuellement hospitalisés sont en cours de soins._\n\n` +
-        `─────────────────────────────\n` +
-        `_SMART-HOSTO SIH • Données certifiées en temps réel_`
+        `*🛏️ Hospitalisations & Sorties*\n` +
+        `_État au ${ctx.currentDate}_\n\n` +
+        `• *Patients actuellement hospitalisés :* *${totalAdmitted}*\n` +
+        `• *Sorties en attente :* *0 dossier*\n\n` +
+        `_Tous les patients hospitalisés sont en cours de soins._\n\n` +
+        `📄 _Tapez *"PDF"* pour recevoir le registre complet des hospitalisations._`
       );
     }
-    const table = renderAsciiTable(
-      ['PATIENT', 'LIT', 'DATE ADM.', 'STATUT'],
-      pendingDischarge.map(p => [
-        p.patientName.slice(0, 16),
-        p.bed.slice(0, 7),
-        (p.admissionDate || 'N/A').slice(0, 10),
-        'Attente'
-      ]),
-      [16, 7, 10, 7]
-    );
+    const list = pendingDischarge
+      .map(p => `• *${p.patientName}* — Lit: *${p.bed}* _(Admis le ${(p.admissionDate || 'N/A').slice(0, 10)})_`)
+      .join('\n');
     return (
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🏥 *SMART-HOSTO* • *HOSPITALISATION & SORTIES*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `┌──────────────────────────────────────────┐\n` +
-      `│ LITS OCCUPÉS       : ${totalAdmitted} patients\n` +
-      `│ SORTIES EN ATTENTE : ${pendingDischarge.length} patients\n` +
-      `└──────────────────────────────────────────┘\n\n` +
-      `${table}\n\n` +
-      `▸ _Action requise : Validation du bon de sortie dans le module Hospitalisation._\n` +
-      `─────────────────────────────\n` +
-      `_SMART-HOSTO SIH • Données certifiées en temps réel_`
+      `*🛏️ Patients en Attente de Sortie (${pendingDischarge.length})*\n` +
+      `_État au ${ctx.currentDate}_\n\n` +
+      `• *Total hospitalisés :* *${totalAdmitted} patients*\n` +
+      `• *Sorties à valider :* *${pendingDischarge.length} patients*\n\n` +
+      `*Liste des patients :*\n` +
+      `${list}\n\n` +
+      `💡 _Action : Valider la clôture médicale dans le module Hospitalisation._\n` +
+      `📄 _Tapez *"Envoyer le PDF"* ou *"Excel"* pour télécharger le registre officiel._`
     );
   }
 
   if (lower.includes('commission') || lower.includes('stat') || lower.includes('finance') || lower.includes('quote') || lower.includes('salaire') || lower.includes('acte')) {
-    const rows =
+    const recentList =
       fin.recentActs.length > 0
-        ? fin.recentActs.slice(0, 5).map(a => [
-            a.date.slice(5, 10),
-            a.typeLabel.slice(0, 14),
-            `+${a.commissionAmount.toLocaleString('fr-FR')} F`,
-            a.paymentStatus === 'PAID' ? 'Payé' : 'Attente'
-          ])
-        : [['N/A', 'Aucun acte', '0 F', 'N/A']];
-
-    const table = renderAsciiTable(['DATE', 'ACTE', 'HONORAIRES', 'STATUT'], rows, [5, 14, 11, 7]);
+        ? fin.recentActs
+            .slice(0, 4)
+            .map(a => `• ${a.date.slice(5, 10)} : *${a.typeLabel}* (${a.patientName}) → *+${a.commissionAmount.toLocaleString('fr-FR')} FCFA* _[${a.paymentStatus === 'PAID' ? 'Réglé' : 'En attente'}]_`)
+            .join('\n')
+        : '• _Aucun acte clôturé récent enregistré._';
 
     return (
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🏥 *SMART-HOSTO* • *RELEVÉ D'HONORAIRES*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `Praticien : *${s.name}* [${s.profession}] • Taux : *${s.quotePartRatePercent}%*\n\n` +
-      `┌──────────────────────────────────────────┐\n` +
-      `│ TOTAL HONORAIRES  : ${fin.totalCommissionsEarnedFCFA.toLocaleString('fr-FR')} FCFA\n` +
-      `│ RÈGLEMENTS PERÇUS : ${fin.totalCommissionsPaidFCFA.toLocaleString('fr-FR')} FCFA\n` +
-      `│ SOLDE EN ATTENTE  : ${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA\n` +
-      `└──────────────────────────────────────────┘\n\n` +
-      `*Derniers actes enregistrés :*\n` +
-      `${table}\n\n` +
-      `─────────────────────────────\n` +
+      `*📊 Relevé d'Honoraires & Commissions*\n` +
+      `_Praticien : Dr. ${s.name} (${s.profession}) • Taux : ${s.quotePartRatePercent}%_\n\n` +
+      `• *Commissions générées :* *${fin.totalCommissionsEarnedFCFA.toLocaleString('fr-FR')} FCFA*\n` +
+      `• *Commissions déjà réglées :* *${fin.totalCommissionsPaidFCFA.toLocaleString('fr-FR')} FCFA*\n` +
+      `• *Solde en attente :* *${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA*\n\n` +
+      `*Derniers actes réalisés :*\n` +
+      `${recentList}\n\n` +
+      `📄 _Envoyez *"PDF"* ou *"Excel"* pour recevoir le relevé officiel signé._\n` +
       `_SMART-HOSTO SIH • Service Comptabilité & Finances_`
     );
   }
@@ -1725,38 +1828,19 @@ function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<ty
     const q = ctx.waitingQueueToday;
     if (q.totalWaiting === 0) {
       return (
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🏥 *SMART-HOSTO* • *TRIAGE & FILE D'ATTENTE*\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `┌──────────────────────────────────────────┐\n` +
-        `│ PATIENTS EN SALLE  : 0 patient\n` +
-        `│ URGENCES SIGNALÉES : 0 cas\n` +
-        `└──────────────────────────────────────────┘\n\n` +
-        `▪ _Aucun patient n'est actuellement en attente de consultation._\n` +
-        `─────────────────────────────\n` +
-        `_SMART-HOSTO SIH • Accueil & Triage Médical_`
+        `*🏥 Triage & File d'Attente du Jour*\n` +
+        `_Accueil des consultations_\n\n` +
+        `• Aucun patient n'est actuellement en salle d'attente.`
       );
     }
-    const table = renderAsciiTable(
-      ['PATIENT', 'MOTIF', 'SERVICE', 'PRIORITÉ'],
-      q.patients.slice(0, 8).map(p => [
-        p.name.slice(0, 15),
-        p.motif.slice(0, 12),
-        p.service.slice(0, 10),
-        p.priority === 'urgent' ? 'URGENT' : 'Normal'
-      ]),
-      [15, 12, 10, 8]
-    );
+    const list = q.patients
+      .slice(0, 6)
+      .map((p, idx) => `${idx + 1}. *${p.name}* — ${p.motif} _(${p.service})_ ${p.priority === 'urgent' ? '🚨 *URGENT*' : ''}`)
+      .join('\n');
     return (
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🏥 *SMART-HOSTO* • *TRIAGE & FILE D'ATTENTE*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `┌──────────────────────────────────────────┐\n` +
-      `│ PATIENTS EN SALLE  : ${q.totalWaiting} patients\n` +
-      `│ URGENCES SIGNALÉES : ${q.urgentCount} cas critiques\n` +
-      `└──────────────────────────────────────────┘\n\n` +
-      `${table}\n\n` +
-      `─────────────────────────────\n` +
+      `*🏥 File d'Attente en Temps Réel (${q.totalWaiting} patients)*\n` +
+      `_Urgences signalées : ${q.urgentCount}_\n\n` +
+      `${list}\n\n` +
       `_SMART-HOSTO SIH • Accueil & Triage Médical_`
     );
   }
@@ -1768,94 +1852,63 @@ function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<ty
 
     const matches = searchTerms.length >= 2
       ? ctx.pharmacy.sampleInventory.filter(m => m.name.toLowerCase().includes(searchTerms))
-      : (ctx.pharmacy.lowStockAlerts.length > 0 ? ctx.pharmacy.lowStockAlerts : ctx.pharmacy.sampleInventory.slice(0, 8));
+      : (ctx.pharmacy.lowStockAlerts.length > 0 ? ctx.pharmacy.lowStockAlerts : ctx.pharmacy.sampleInventory.slice(0, 6));
 
-    const rows = matches.slice(0, 8).map(m => [
-      m.name.slice(0, 18),
-      String(m.stock),
-      String(m.alertThreshold),
-      m.stock <= m.alertThreshold ? '[CRITIQUE]' : 'Normal'
-    ]);
-
-    const table = renderAsciiTable(['ARTICLE', 'STOCK', 'SEUIL', 'STATUT'], rows, [18, 5, 5, 10]);
+    const items = matches
+      .map(m => `• *${m.name}* : *${m.stock} en stock* (Prix: ${m.price.toLocaleString('fr-FR')} FCFA) ${m.stock <= m.alertThreshold ? '⚠️ _(Stock bas)_' : '✅'}`)
+      .join('\n');
 
     return (
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🏥 *SMART-HOSTO* • *PHARMACIE CENTRALE*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `┌──────────────────────────────────────────┐\n` +
-      `│ ARTICLES CATALOGUE : ${ctx.pharmacy.totalMedicationsInCatalog}\n` +
-      `│ ALERTES DE RUPTURE : ${ctx.pharmacy.lowStockCount}\n` +
-      `└──────────────────────────────────────────┘\n\n` +
-      `${table}\n\n` +
-      `─────────────────────────────\n` +
-      `_SMART-HOSTO SIH • Gestion des Stocks Pharmacie_`
+      `*💊 Point Pharmacie & Stocks*\n` +
+      `_Pharmacie Centrale SMART-HOSTO_\n\n` +
+      `• *Références au catalogue :* *${ctx.pharmacy.totalMedicationsInCatalog}*\n` +
+      `• *Alertes de stock :* *${ctx.pharmacy.lowStockCount}*\n\n` +
+      `*Articles :*\n` +
+      `${items}\n\n` +
+      `📄 _Envoyez *"PDF"* ou *"Excel"* pour exporter l'inventaire complet._`
     );
   }
 
   if (lower.includes('tarif') || lower.includes('prix') || lower.includes('cout') || lower.includes('coût')) {
     if (ctx.tariffsCatalog.length === 0) {
       return (
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-        `🏥 *SMART-HOSTO* • *NOMENCLATURE TARIFAIRE*\n` +
-        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-        `▪ Consultation standard : *15 000 FCFA*\n` +
-        `▪ Soin infirmier standard : *5 000 FCFA*\n` +
-        `─────────────────────────────\n` +
-        `_SMART-HOSTO SIH • Tarification Officielle_`
+        `*💰 Référentiel des Tarifs SMART-HOSTO*\n\n` +
+        `• Consultation standard : *15 000 FCFA*\n` +
+        `• Soin infirmier standard : *5 000 FCFA*`
       );
     }
-    const table = renderAsciiTable(
-      ['ACTE MÉDICAL', 'CATÉGORIE', 'TARIF'],
-      ctx.tariffsCatalog.slice(0, 8).map(a => [
-        a.name.slice(0, 20),
-        a.category.slice(0, 10),
-        `${a.price.toLocaleString('fr-FR')} F`
-      ]),
-      [20, 10, 10]
-    );
+    const items = ctx.tariffsCatalog
+      .slice(0, 8)
+      .map(a => `• *${a.name}* _(${a.category})_ : *${a.price.toLocaleString('fr-FR')} FCFA*`)
+      .join('\n');
     return (
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🏥 *SMART-HOSTO* • *NOMENCLATURE TARIFAIRE*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `${table}\n\n` +
-      `─────────────────────────────\n` +
-      `_SMART-HOSTO SIH • Tarification Officielle_`
+      `*💰 Nomenclature Officielle des Tarifs*\n` +
+      `_SMART-HOSTO SIH_\n\n` +
+      `${items}`
     );
   }
 
   if (ctx.adminHospitalSummary && (lower.includes('admin') || lower.includes('quota') || lower.includes('licence') || lower.includes('caisse'))) {
     const adm = ctx.adminHospitalSummary;
     return (
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-      `🏥 *SMART-HOSTO* • *TABLEAU DE BORD DIRECTION*\n` +
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
-      `┌──────────────────────────────────────────┐\n` +
-      `│ FACTURES EN ATTENTE  : ${adm.pendingCashierInvoicesCount} dossiers\n` +
-      `│ MONTANT À RECOUVRER  : ${adm.pendingCashierAmountFCFA.toLocaleString('fr-FR')} FCFA\n` +
-      `│ LICENCE ACTIVE       : ${adm.licence}\n` +
-      `│ COMPTES UTILISATEURS : ${adm.activeStaffUsers} / ${adm.maxStaffUsers} actifs\n` +
-      `└──────────────────────────────────────────┘\n\n` +
-      `▪ _Les encaissements sont mis à jour en temps réel par les caisses centrales._\n` +
-      `─────────────────────────────\n` +
-      `_SMART-HOSTO SIH • Direction Générale & Recouvrement_`
+      `*💼 Tableau de Bord Direction & Recouvrement*\n` +
+      `_Situation financière au ${ctx.currentDate}_\n\n` +
+      `• *Factures impayées en caisse :* *${adm.pendingCashierInvoicesCount} dossiers*\n` +
+      `• *Montant global à recouvrer :* *${adm.pendingCashierAmountFCFA.toLocaleString('fr-FR')} FCFA*\n` +
+      `• *Licence établissement :* *${adm.licence}*\n` +
+      `• *Comptes soignants actifs :* *${adm.activeStaffUsers} / ${adm.maxStaffUsers} utilisateurs*\n\n` +
+      `📄 _Envoyez *"PDF"* pour obtenir l'état comptable des créances._\n` +
+      `_SMART-HOSTO SIH • Direction Générale_`
     );
   }
 
   return (
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `🏥 *SMART-HOSTO* • *ASSISTANT EXÉCUTIF SIH*\n` +
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
-    `Bonjour *${s.name}* [${s.profession}]\n\n` +
-    `┌──────────────────────────────────────────┐\n` +
-    `│ POINT HOSPITALIER AU ${ctx.currentDate}\n` +
-    `├──────────────────────────────────────────┤\n` +
-    `│ Commissions en attente : ${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA\n` +
-    `│ Patients en file d'attente : ${ctx.waitingQueueToday.totalWaiting}\n` +
-    `│ Alertes stock pharmacie    : ${ctx.pharmacy.lowStockCount}\n` +
-    `└──────────────────────────────────────────┘\n\n` +
-    `▪ _Tapez *"Mes commissions"*, *"Sorties"*, *"File d'attente"* ou *"Stock pharmacie"* pour consulter les tableaux détaillés._\n` +
-    `─────────────────────────────\n` +
+    `*🏥 Assistant Hospitalier SMART-HOSTO*\n` +
+    `_Bonjour ${s.name} (${s.profession})_\n\n` +
+    `• *Commissions en attente :* *${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA*\n` +
+    `• *Patients en attente :* *${ctx.waitingQueueToday.totalWaiting}*\n` +
+    `• *Alertes pharmacie :* *${ctx.pharmacy.lowStockCount}*\n\n` +
+    `_Tapez *"Mes commissions"*, *"Sorties"*, *"File d'attente"* ou *"Envoyer PDF"* pour plus de détails._\n` +
     `_SMART-HOSTO SIH • Données certifiées en temps réel_`
   );
 }
@@ -1997,6 +2050,97 @@ async function sendMetaWhatsAppMessage(
   }
 }
 
+async function sendMetaWhatsAppDocument(
+  toPhone: string,
+  documentUrl: string,
+  filename: string,
+  caption: string,
+  config: WhatsAppAgentConfig
+): Promise<{ sent: boolean; metaMessageId?: string; error?: string }> {
+  const cleanPhone = normalizePhone(toPhone);
+  if (!cleanPhone || !config.phoneNumberId || !config.accessToken) {
+    return {
+      sent: false,
+      error: 'Identifiants Meta Cloud API non configurés'
+    };
+  }
+
+  try {
+    const url = `https://graph.facebook.com/v21.0/${encodeURIComponent(config.phoneNumberId)}/messages`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'document',
+        document: {
+          link: documentUrl,
+          filename,
+          caption
+        }
+      })
+    });
+
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.warn('Meta Document send error:', data);
+      return {
+        sent: false,
+        error: data?.error?.message || `Erreur Meta Document (${response.status})`
+      };
+    }
+
+    return {
+      sent: true,
+      metaMessageId: data?.messages?.[0]?.id
+    };
+  } catch (err: any) {
+    return {
+      sent: false,
+      error: err?.message || 'Erreur réseau lors de l’envoi du document'
+    };
+  }
+}
+
+// 0. Public Download Endpoint for Generated PDF & Excel Reports
+app.get(['/api/whatsapp/reports/download', '/reports/download'], async (req, res) => {
+  try {
+    const type = String(req.query.type || 'commissions');
+    const format = String(req.query.format || 'pdf').toLowerCase();
+    const phone = String(req.query.phone || '');
+
+    const staffDoc = (await findStaffByPhoneOrId(phone, undefined)) || {
+      id: 'staff_guest',
+      name: 'Personnel Soignant',
+      role: 'MEDECIN',
+      profession: 'Praticien',
+      quotePartRate: 20
+    };
+
+    const ctx = await buildStaffHospitalContext(staffDoc);
+
+    if (format === 'excel' || format === 'csv') {
+      const csvData = generateReportExcel(type, ctx);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="SMART-HOSTO_${type.toUpperCase()}_${Date.now()}.csv"`);
+      return res.status(200).send(csvData);
+    } else {
+      const pdfBuf = generateReportPdf(type, ctx);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="SMART-HOSTO_${type.toUpperCase()}_${Date.now()}.pdf"`);
+      return res.status(200).send(pdfBuf);
+    }
+  } catch (err: any) {
+    console.error('Error generating report document:', err);
+    return res.status(500).send('Erreur lors de la génération du rapport : ' + err.message);
+  }
+});
+
 // 1. Meta WhatsApp Cloud API Webhook Verification (GET)
 app.get(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
   const mode = req.query['hub.mode'];
@@ -2110,6 +2254,56 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
             aiModel: modelUsed,
             metaMessageId: sendRes.metaMessageId
           });
+
+          // Check if user requested a downloadable document (PDF / Excel)
+          const lowerReq = textBody.toLowerCase();
+          const isDocRequest =
+            lowerReq.includes('pdf') ||
+            lowerReq.includes('excel') ||
+            lowerReq.includes('csv') ||
+            lowerReq.includes('rapport') ||
+            lowerReq.includes('export') ||
+            lowerReq.includes('telecharger') ||
+            lowerReq.includes('télécharger') ||
+            lowerReq.includes('document');
+
+          if (isDocRequest && config.phoneNumberId && config.accessToken) {
+            try {
+              let reportType = 'commissions';
+              if (lowerReq.includes('sortie') || lowerReq.includes('hospitalis') || lowerReq.includes('inpatient') || lowerReq.includes('lit')) {
+                reportType = 'inpatient';
+              } else if (lowerReq.includes('stock') || lowerReq.includes('pharmac') || lowerReq.includes('medicament') || lowerReq.includes('médicament')) {
+                reportType = 'pharmacy';
+              } else if (lowerReq.includes('caisse') || lowerReq.includes('tresor') || lowerReq.includes('factur')) {
+                reportType = 'treasury';
+              }
+
+              const format = (lowerReq.includes('excel') || lowerReq.includes('csv') || lowerReq.includes('tableur')) ? 'excel' : 'pdf';
+              const ext = format === 'excel' ? 'csv' : 'pdf';
+              const filename = `SMART-HOSTO_${reportType.toUpperCase()}_${new Date().toISOString().slice(0, 10)}.${ext}`;
+              const caption = `📄 Rapport officiel certifié — SMART-HOSTO SIH`;
+
+              const publicHost = 'https://smart-hosto.onrender.com';
+              const downloadUrl = `${publicHost}/api/whatsapp/reports/download?type=${encodeURIComponent(reportType)}&format=${encodeURIComponent(format)}&phone=${encodeURIComponent(fromPhone)}`;
+
+              const docRes = await sendMetaWhatsAppDocument(fromPhone, downloadUrl, filename, caption, config);
+              if (docRes.sent) {
+                await logWhatsAppMessage({
+                  direction: 'OUTBOUND',
+                  staffId: staffDoc.id,
+                  staffName: staffDoc.name,
+                  staffRole: staffDoc.role,
+                  phone: fromPhone,
+                  message: `[DOCUMENT ENVOYÉ] ${filename}`,
+                  source: 'META_WEBHOOK',
+                  aiModel: 'report-generator',
+                  metaMessageId: docRes.metaMessageId
+                });
+              }
+            } catch (docErr) {
+              console.error('Error dispatching WhatsApp document:', docErr);
+            }
+          }
         }
       }
     }
