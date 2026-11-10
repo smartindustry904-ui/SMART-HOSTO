@@ -35,11 +35,11 @@ export const PREDEFINED_MEDICAL_ACTS: Partial<MedicalAct>[] = [
     price: 10000,
     category: 'consultation',
     type: 'acte médical',
-    servicePrincipal: 'maternite',
+    servicePrincipal: 'consultation',
     sousService: 'Gynécologie',
     priorite: 'normal',
     codeInterne: 'ACT-CONS-GYN',
-    description: 'Consultation et suivi gynécologique'
+    description: 'Consultation et suivi gynécologique (Médecin / Gynécologue)'
   },
   {
     id: 'ACT-CONS-OBS',
@@ -47,11 +47,11 @@ export const PREDEFINED_MEDICAL_ACTS: Partial<MedicalAct>[] = [
     price: 10000,
     category: 'consultation',
     type: 'acte médical',
-    servicePrincipal: 'maternite',
+    servicePrincipal: 'consultation',
     sousService: 'Obstétrique',
     priorite: 'normal',
     codeInterne: 'ACT-CONS-OBS',
-    description: 'Consultation spécialisée en obstétrique'
+    description: 'Consultation spécialisée en obstétrique (Médecin / Gynécologue)'
   },
   {
     id: 'ACT-CPN-01',

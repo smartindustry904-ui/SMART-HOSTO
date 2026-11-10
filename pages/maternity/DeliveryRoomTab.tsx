@@ -280,6 +280,10 @@ export const DeliveryRoomTab: React.FC<DeliveryRoomTabProps> = ({
         obstetricalHistory: admissionForm.obstetricalHistory,
         bedId: admissionForm.bedId || undefined,
         midwife: user.name || 'Sage-femme',
+        midwifeId: user.id || '',
+        practitionerId: user.id || '',
+        practitionerName: user.name || user.username || 'Sage-femme',
+        practitionerRole: user.role || 'SAGE_FEMME',
         createdAt: nowIso,
         updatedAt: nowIso
       };
@@ -346,7 +350,13 @@ export const DeliveryRoomTab: React.FC<DeliveryRoomTabProps> = ({
         deliveryTime: deliveryForm.deliveryTime,
         deliveryMode: deliveryForm.deliveryMode,
         location: deliveryForm.location,
-        attendedBy: deliveryForm.attendedBy,
+        attendedBy: deliveryForm.attendedBy || user.name || 'Sage-femme',
+        attendedById: user.id || '',
+        midwife: user.name || 'Sage-femme',
+        midwifeId: user.id || '',
+        practitionerId: user.id || '',
+        practitionerName: deliveryForm.attendedBy || user.name || 'Sage-femme',
+        practitionerRole: user.role || 'SAGE_FEMME',
         fetalPresentation: deliveryForm.fetalPresentation,
         newbornId: newbornId,
         newbornGender: deliveryForm.newbornGender,
@@ -386,6 +396,10 @@ export const DeliveryRoomTab: React.FC<DeliveryRoomTabProps> = ({
         establishment: establishment?.name || 'Maternité Hospitalière',
         observations: `${deliveryForm.newbornObservations} | Soins: ${deliveryForm.careGiven}`,
         status: 'VIVANT',
+        deliveredBy: deliveryForm.attendedBy || user.name || 'Sage-femme',
+        deliveredById: user.id || '',
+        practitionerId: user.id || '',
+        practitionerName: deliveryForm.attendedBy || user.name || 'Sage-femme',
         createdAt: nowIso
       };
       await setDoc(doc(db, 'newborns', newbornId), sanitizeData(newbornDoc));

@@ -697,6 +697,13 @@ const Consultation: React.FC<ConsultationProps> = ({
         motif: hospForm.motif,
         observations: hospForm.observations,
         status: 'pending',
+        requestedBy: user?.name || user?.username || 'Docteur',
+        requestedById: user?.id || '',
+        doctor: user?.name || user?.username || 'Docteur',
+        doctorId: user?.id || '',
+        practitionerId: user?.id || '',
+        practitionerName: user?.name || user?.username || 'Docteur',
+        practitionerRole: user?.role || 'MEDECIN',
         createdAt: today.toISOString()
       });
 
@@ -757,16 +764,24 @@ const Consultation: React.FC<ConsultationProps> = ({
 
       // 1. Create or update consultation in 'consultations'
       const consDocRef = doc(db, 'consultations', consultationId);
+      const practitionerName = user?.name || user?.username || 'Dr. Sarr';
+      const practitionerId = user?.id || '';
       const consultationPayload = {
         id: consultationId,
         patientId: activePatient.id,
         patient: `${activePatient.lastName} ${activePatient.firstName}`,
+        patientName: `${activePatient.lastName} ${activePatient.firstName}`,
         patientIdRaw: activePatient.id,
         age: activePatient.age,
         gender: activePatient.gender,
         date: dateStr,
         time: timeStr,
-        doctor: user?.name || 'Dr. Sarr',
+        doctor: practitionerName,
+        doctorName: practitionerName,
+        doctorId: practitionerId,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
+        practitionerRole: user?.role || 'MEDECIN',
         doctorEmail: user?.email || '',
         motif: data.motif || '',
         diagnosis: data.hypotheses?.principal || 'Diagnostic non précisé',
@@ -790,7 +805,12 @@ const Consultation: React.FC<ConsultationProps> = ({
         consultationId: consultationId,
         date: dateStr,
         time: timeStr,
-        doctor: user?.name || 'Dr. Sarr',
+        doctor: practitionerName,
+        doctorName: practitionerName,
+        doctorId: practitionerId,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
+        practitionerRole: user?.role || 'MEDECIN',
         motif: data.motif || '',
         diagnosis: data.hypotheses?.principal || 'Diagnostic non précisé',
         treatment: data.prescriptions || [],
@@ -933,12 +953,21 @@ const Consultation: React.FC<ConsultationProps> = ({
           id: `ORD-${Math.floor(Math.random() * 1000000)}`,
           patientId: activePatient.id,
           patient: `${activePatient.lastName} ${activePatient.firstName}`,
-          doctor: user?.name || 'Dr. Sarr',
+          doctor: practitionerName,
+          doctorName: practitionerName,
+          doctorId: practitionerId,
+          prescriberId: practitionerId,
+          prescriberName: practitionerName,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          practitionerRole: user?.role || 'MEDECIN',
           date: dateStr,
           items: compilationData.prescriptions.map((p: any) => ({
             name: p.name,
             posology: p.posologie,
-            price: p.price || 1500
+            price: p.price || 1500,
+            practitionerId: practitionerId,
+            practitionerName: practitionerName
           })),
           createdAt: today.toISOString(),
           status: 'pending'
@@ -954,10 +983,20 @@ const Consultation: React.FC<ConsultationProps> = ({
           patientName: `${activePatient.lastName} ${activePatient.firstName}`,
           date: dateStr,
           time: timeStr,
+          doctor: practitionerName,
+          doctorName: practitionerName,
+          doctorId: practitionerId,
+          prescriberId: practitionerId,
+          prescriberName: practitionerName,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          practitionerRole: user?.role || 'MEDECIN',
           status: 'pending',
           exams: compilationData.examensDemandes.map((e: any) => ({
             name: e.name,
-            urgent: e.urgent || false
+            urgent: e.urgent || false,
+            practitionerId: practitionerId,
+            practitionerName: practitionerName
           })),
           createdAt: today.toISOString()
         });
@@ -1225,12 +1264,21 @@ const Consultation: React.FC<ConsultationProps> = ({
         id: prescriptionId,
         patientId: activePatient.id,
         patient: `${activePatient.lastName} ${activePatient.firstName}`,
-        doctor: user?.name || 'Dr. Sarr',
+        doctor: user?.name || user?.username || 'Dr. Sarr',
+        doctorName: user?.name || user?.username || 'Dr. Sarr',
+        doctorId: user?.id || '',
+        prescriberId: user?.id || '',
+        prescriberName: user?.name || user?.username || 'Dr. Sarr',
+        practitionerId: user?.id || '',
+        practitionerName: user?.name || user?.username || 'Dr. Sarr',
+        practitionerRole: user?.role || 'MEDECIN',
         date: dateStr,
         items: prescriptions.map((p: any) => ({
           name: p.name,
           posology: p.posologie || p.dosage || 'Selon prescription',
-          price: p.price || 1500
+          price: p.price || 1500,
+          practitionerId: user?.id || '',
+          practitionerName: user?.name || user?.username || 'Dr. Sarr'
         })),
         createdAt: today.toISOString(),
         status: 'pending'
@@ -1298,19 +1346,30 @@ const Consultation: React.FC<ConsultationProps> = ({
       const labRequestId = `LAB-${Math.floor(Math.random() * 1000000)}`;
 
       // 1. Create entry in lab_requests
+      const practitionerName = user?.name || user?.username || 'Dr. Sarr';
+      const practitionerId = user?.id || '';
       await setDoc(doc(db, 'lab_requests', labRequestId), sanitizeData({
         id: labRequestId,
         patientId: activePatient.id,
         patientName: `${activePatient.lastName} ${activePatient.firstName}`,
         consultationId: consultationId,
-        prescriberName: user?.name || 'Dr. Sarr',
+        prescriberId: practitionerId,
+        prescriberName: practitionerName,
+        doctor: practitionerName,
+        doctorName: practitionerName,
+        doctorId: practitionerId,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
+        practitionerRole: user?.role || 'MEDECIN',
         date: today.toISOString(),
         time: timeStr,
         status: 'en attente',
         exams: exams.map((e: any) => ({
           name: e.name,
           urgent: e.urgent || false,
-          category: e.category || 'Analyse'
+          category: e.category || 'Analyse',
+          practitionerId: practitionerId,
+          practitionerName: practitionerName
         })),
         createdAt: today.toISOString()
       }));
@@ -1323,7 +1382,10 @@ const Consultation: React.FC<ConsultationProps> = ({
           name: `Examen Lab : ${e.name}`,
           quantity: 1,
           unitPrice: itemPrice,
-          totalPrice: itemPrice
+          totalPrice: itemPrice,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          practitionerRole: user?.role || 'MEDECIN'
         };
       });
 
@@ -1341,7 +1403,13 @@ const Consultation: React.FC<ConsultationProps> = ({
         amountPaid: 0,
         status: 'PENDING',
         createdAt: today.toISOString(),
-        createdBy: user?.name || 'Docteur'
+        createdBy: practitionerName,
+        createdById: practitionerId,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
+        practitionerRole: user?.role || 'MEDECIN',
+        requestedBy: practitionerName,
+        requestedById: practitionerId
       };
 
       await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(paymentPayload));
@@ -1666,8 +1734,8 @@ const Consultation: React.FC<ConsultationProps> = ({
       return false;
     }
     
-    // Dedicated maternity without gyneco/consultation specialty only if not selected
-    if (['maternité', 'maternity'].includes(s) && !spec.includes('gynéco') && !m.includes('gynéco') && selectedSpecialty !== 'Gynécologie') {
+    // Dedicated maternity (CPN & Accouchement) belongs to Maternity module. Gynecological consultations belong here in Consultation!
+    if (['maternité', 'maternity'].includes(s) && !spec.includes('gynéco') && !m.includes('gynéco') && !(p.queueName || '').toLowerCase().includes('gynéco')) {
       return false;
     }
 

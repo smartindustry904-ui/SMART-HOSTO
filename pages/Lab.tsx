@@ -167,9 +167,21 @@ const Lab: React.FC<LabProps> = ({
 
   const saveResultats = async (newResultats: ResultatLaboratoire[]) => {
     try {
+      const techName = user?.name || user?.username || 'Technicien Labo';
+      const techId = user?.id || '';
       for (const res of newResultats) {
+        const enriched = {
+          ...res,
+          validatedBy: (res as any).validatedBy || techName,
+          validatedById: (res as any).validatedById || techId,
+          technicianName: (res as any).technicianName || techName,
+          technicianId: (res as any).technicianId || techId,
+          practitionerId: techId,
+          practitionerName: techName,
+          practitionerRole: user?.role || 'LABORANTIN'
+        };
         const docRef = doc(db, 'lab_results', res.id);
-        await setDoc(docRef, sanitizeData(res), { merge: true });
+        await setDoc(docRef, sanitizeData(enriched), { merge: true });
       }
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'lab_results');
@@ -178,9 +190,19 @@ const Lab: React.FC<LabProps> = ({
 
   const saveRapports = async (newRapports: RapportLaboratoirePDF[]) => {
     try {
+      const techName = user?.name || user?.username || 'Biologiste';
+      const techId = user?.id || '';
       for (const rep of newRapports) {
+        const enriched = {
+          ...rep,
+          validatedBy: (rep as any).validatedBy || techName,
+          validatedById: (rep as any).validatedById || techId,
+          practitionerId: techId,
+          practitionerName: techName,
+          practitionerRole: user?.role || 'LABORANTIN'
+        };
         const docRef = doc(db, 'lab_reports', rep.id);
-        await setDoc(docRef, sanitizeData(rep), { merge: true });
+        await setDoc(docRef, sanitizeData(enriched), { merge: true });
       }
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'lab_reports');

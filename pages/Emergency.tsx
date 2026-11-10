@@ -210,7 +210,13 @@ const Emergency: React.FC<EmergencyProps> = ({
       const encounter = encounters.find(e => e.id === encounterId);
       if (!encounter) return false;
 
-      const updatedCares = [...(encounter.cares || []), care];
+      const enrichedCare: EmergencyCare = {
+        ...care,
+        professional: care.professional || user?.name || 'Soignant Urgences',
+        professionalId: care.professionalId || user?.id || ''
+      };
+
+      const updatedCares = [...(encounter.cares || []), enrichedCare];
       const updates: any = { cares: updatedCares };
 
       if (encounter.status === 'En attente') {
@@ -222,21 +228,43 @@ const Emergency: React.FC<EmergencyProps> = ({
       // If marked for cashier billing, transmit to payment_requests
       if (billToCashier) {
         const payDocRef = doc(collection(db, 'payment_requests'));
+        const actFee = 5000;
         await setDoc(payDocRef, sanitizeData({
           id: payDocRef.id,
           patientId: encounter.patientId,
           patientDme: encounter.patientDme,
           patientName: `${encounter.lastName} ${encounter.firstName}`,
           service: 'Urgences',
+          requestingService: 'Urgences',
+          sourceModule: 'Emergency',
           serviceType: 'URGENCES',
+          type: 'URGENCES',
+          items: [{
+            id: `ITEM-URG-${Date.now()}`,
+            name: `Acte d'urgence : ${care.type} - ${care.description}`,
+            quantity: 1,
+            unitPrice: actFee,
+            totalPrice: actFee,
+            practitionerId: user?.id || '',
+            practitionerName: user?.name || 'Soignant Urgences',
+            practitionerRole: user?.role || 'MEDECIN'
+          }],
+          totalAmount: actFee,
+          amountPaid: 0,
           description: `Acte d'urgence : ${care.type} - ${care.description}`,
-          amount: 5000, // Standard hospital fee
+          amount: actFee,
           status: 'PENDING',
           paymentStatus: 'AWAITING_PAYMENT',
           date: new Date().toISOString().split('T')[0],
           time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
           createdAt: new Date().toISOString(),
-          requestedBy: user?.name || 'Soignant Urgences'
+          createdBy: user?.name || 'Soignant Urgences',
+          createdById: user?.id || '',
+          requestedBy: user?.name || 'Soignant Urgences',
+          requestedById: user?.id || '',
+          practitionerId: user?.id || '',
+          practitionerName: user?.name || 'Soignant Urgences',
+          practitionerRole: user?.role || 'MEDECIN'
         }));
       }
 

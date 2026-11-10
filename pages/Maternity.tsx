@@ -155,22 +155,35 @@ const Maternity: React.FC<MaternityProps> = ({
     return (beds || []).filter(b => b.category === 'materniter' || b.category === 'all');
   }, [beds]);
 
-  // Filter waiting queue for maternity patients
+  // Filter waiting queue for maternity patients: STRICTLY CPN & Accouchement (Gynecology is routed to Consultation)
   const maternityQueue = useMemo(() => {
-    return (waitingQueue || []).filter(p => 
-      (p.serviceId === 'SRV-MATERNITE' || 
-      p.service === 'Maternité' || 
-      p.motif === 'MATERNITE' ||
-      p.speciality?.toLowerCase().includes('matern') ||
-      p.speciality?.toLowerCase().includes('obstétri') ||
-      p.speciality?.toLowerCase().includes('cpn') ||
-      p.queueName?.toLowerCase().includes('matern') ||
-      p.motifLabel?.toLowerCase().includes('accouchement') ||
-      p.motifLabel?.toLowerCase().includes('matern') ||
-      p.motifLabel?.toLowerCase().includes('gynéco') ||
-      p.motifLabel?.toLowerCase().includes('cpn')) &&
-      p.status !== 'in_consultation'
-    );
+    return (waitingQueue || []).filter(p => {
+      const motifLbl = (p.motifLabel || '').toLowerCase();
+      const spec = (p.speciality || '').toLowerCase();
+      const svc = (p.service || '').toLowerCase();
+      const qName = (p.queueName || '').toLowerCase();
+
+      // Exclude gynecological consultations from maternity queue (handled in Consultation module)
+      if (motifLbl.includes('gynéco') || spec.includes('gynéco') || qName.includes('gynéco')) {
+        return false;
+      }
+
+      const isMaternity = 
+        p.serviceId === 'SRV-MATERNITE' || 
+        svc === 'maternité' || 
+        p.motif === 'MATERNITE' ||
+        spec.includes('matern') ||
+        spec.includes('obstétri') ||
+        spec.includes('cpn') ||
+        qName.includes('matern') ||
+        motifLbl.includes('accouchement') ||
+        motifLbl.includes('matern') ||
+        motifLbl.includes('cpn') ||
+        motifLbl.includes('travail') ||
+        motifLbl.includes('césarienne');
+
+      return isMaternity && p.status !== 'in_consultation';
+    });
   }, [waitingQueue]);
 
   // Distinct Harmonized Dashboard Metrics (Consolidated Non-Redundant KPIs)

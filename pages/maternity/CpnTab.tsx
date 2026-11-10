@@ -631,6 +631,11 @@ export const CpnTab: React.FC<CpnTabProps> = ({
         nextVisitDate: visitForm.nextVisitDate,
         userId: user.id || 'maternity_user',
         userName: user.name || 'Sage-femme',
+        practitionerId: user.id || 'maternity_user',
+        practitionerName: user.name || user.username || 'Sage-femme',
+        practitionerRole: user.role || 'SAGE_FEMME',
+        performedBy: user.name || user.username || 'Sage-femme',
+        performedById: user.id || '',
         createdAt: nowIso
       };
 
@@ -647,6 +652,9 @@ export const CpnTab: React.FC<CpnTabProps> = ({
           cpnId: visitId,
           prescriberId: user.id || 'maternity',
           prescriberName: user.name || 'Sage-femme',
+          practitionerId: user.id || 'maternity',
+          practitionerName: user.name || 'Sage-femme',
+          practitionerRole: user.role || 'SAGE_FEMME',
           department: 'Maternité',
           requestingService: 'Maternité (CPN)',
           date: nowIso,
@@ -656,7 +664,9 @@ export const CpnTab: React.FC<CpnTabProps> = ({
             name: e.name,
             category: e.category || 'CPN',
             price: e.price || 2500,
-            urgent: false
+            urgent: false,
+            practitionerId: user.id || 'maternity',
+            practitionerName: user.name || 'Sage-femme'
           })),
           totalAmount: selectedExams.reduce((sum, e) => sum + (e.price || 0), 0),
           billingStatus: 'pending',
@@ -678,13 +688,22 @@ export const CpnTab: React.FC<CpnTabProps> = ({
               name: `Examen Lab CPN : ${e.name}`,
               quantity: 1,
               unitPrice: e.price || 2500,
-              totalPrice: e.price || 2500
+              totalPrice: e.price || 2500,
+              practitionerId: user.id || 'maternity',
+              practitionerName: user.name || 'Sage-femme',
+              practitionerRole: user.role || 'SAGE_FEMME'
             })),
             totalAmount: labTotal,
             amountPaid: 0,
             status: 'PENDING',
             createdAt: nowIso,
-            createdBy: user.name || 'Sage-femme'
+            createdBy: user.name || 'Sage-femme',
+            createdById: user.id || '',
+            practitionerId: user.id || '',
+            practitionerName: user.name || 'Sage-femme',
+            practitionerRole: user.role || 'SAGE_FEMME',
+            requestedBy: user.name || 'Sage-femme',
+            requestedById: user.id || ''
           };
           await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(labInvoice));
         }
@@ -700,6 +719,10 @@ export const CpnTab: React.FC<CpnTabProps> = ({
           consultationId: visitId,
           cpnId: visitId,
           prescriberName: user.name || 'Sage-femme',
+          prescriberId: user.id || '',
+          practitionerId: user.id || '',
+          practitionerName: user.name || 'Sage-femme',
+          practitionerRole: user.role || 'SAGE_FEMME',
           sourceService: 'Maternité',
           date: nowIso,
           items: prescriptionsList.map(p => ({
@@ -708,7 +731,9 @@ export const CpnTab: React.FC<CpnTabProps> = ({
             frequency: p.frequency,
             duration: p.duration,
             quantity: p.quantity || 1,
-            price: p.price || 1200
+            price: p.price || 1200,
+            practitionerId: user.id || '',
+            practitionerName: user.name || 'Sage-femme'
           })),
           status: 'pending',
           createdAt: nowIso
@@ -729,13 +754,22 @@ export const CpnTab: React.FC<CpnTabProps> = ({
               name: `Médicament CPN : ${p.name} ${p.dosage}`,
               quantity: p.quantity || 1,
               unitPrice: p.price || 1200,
-              totalPrice: (p.price || 1200) * (p.quantity || 1)
+              totalPrice: (p.price || 1200) * (p.quantity || 1),
+              practitionerId: user.id || '',
+              practitionerName: user.name || 'Sage-femme',
+              practitionerRole: user.role || 'SAGE_FEMME'
             })),
             totalAmount: medsTotal,
             amountPaid: 0,
             status: 'PENDING',
             createdAt: nowIso,
-            createdBy: user.name || 'Sage-femme'
+            createdBy: user.name || 'Sage-femme',
+            createdById: user.id || '',
+            practitionerId: user.id || '',
+            practitionerName: user.name || 'Sage-femme',
+            practitionerRole: user.role || 'SAGE_FEMME',
+            requestedBy: user.name || 'Sage-femme',
+            requestedById: user.id || ''
           };
           await setDoc(doc(db, 'payment_requests', pharmInvoiceId), sanitizeData(pharmInvoice));
         }

@@ -101,7 +101,16 @@ export const buildMotifsFromMedicalActsAndServices = (
     const catLower = (act.category || act.categorie || '').toLowerCase();
     const combined = `${nameLower} ${catLower} ${sId} ${sousService}`;
 
-    if (combined.includes('matern') || combined.includes('cpn') || combined.includes('accouchement') || combined.includes('obstétri') || combined.includes('postnatale')) {
+    // Priority 1: Gynecological consultations ALWAYS route to General/Specialized Consultation
+    if (combined.includes('gynéco') || combined.includes('gyneco')) {
+      return serviceById.get('srv-consultation') || serviceById.get('srv-gynecologie');
+    }
+
+    // Priority 2: ONLY CPN (prenatal/postnatal) and Delivery/Childbirth route to Maternité
+    if (combined.includes('cpn') || combined.includes('prénatale') || combined.includes('prenatale') || combined.includes('accouchement') || combined.includes('travail') || combined.includes('césarienne') || combined.includes('cesar') || combined.includes('postnatale') || combined.includes('grossesse')) {
+      return serviceById.get('srv-maternite');
+    }
+    if (combined.includes('matern') && !combined.includes('gyn')) {
       return serviceById.get('srv-maternite');
     }
     if (combined.includes('urgence') || combined.includes('trauma') || combined.includes('déchoquage')) {
@@ -210,7 +219,15 @@ export const buildMotifsFromMedicalActsAndServices = (
     // Determine category based on matched service and act
     let category: 'CONSULTATIONS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES' = 'CONSULTATIONS';
 
-    if (serviceId === 'SRV-MATERNITE' || (matchedService?.type === 'clinique' && /matern/i.test(matchedService.name))) {
+    const isGynecoAct = /gynéco|gyneco/i.test(`${actName} ${act.sousService} ${act.category}`);
+    const isCPNAct = /cpn|prénatale|prenatale|postnatale|grossesse/i.test(`${actName} ${act.sousService}`);
+    const isAccouchementAct = /accouchement|travail|césarienne|cesar/i.test(`${actName} ${act.sousService}`);
+
+    if (isGynecoAct) {
+      // Consultation Gynécologique is always grouped under CONSULTATIONS
+      category = 'CONSULTATIONS';
+    } else if (isCPNAct || isAccouchementAct || serviceId === 'SRV-MATERNITE' || (matchedService?.type === 'clinique' && /matern/i.test(matchedService.name))) {
+      // ONLY CPN and Accouchement are grouped under MATERNITE
       category = 'MATERNITE';
     } else if (serviceId === 'SRV-URGENCES' || /urgence/i.test(matchedService?.name || '')) {
       category = 'URGENCES';
@@ -226,14 +243,21 @@ export const buildMotifsFromMedicalActsAndServices = (
       category = 'CONSULTATIONS';
     }
 
-    const queueName = act.sousService || matchedService?.name || (
-      category === 'MATERNITE' ? 'Maternité' :
-      category === 'URGENCES' ? 'Urgences' :
-      category === 'HOSPITALISATION' ? 'Hospitalisation' :
-      'Consultation'
+    const queueName = isGynecoAct ? 'Consultation Gynécologique' : (
+      act.sousService || matchedService?.name || (
+        category === 'MATERNITE' ? (isAccouchementAct ? 'Maternité (Salle de travail)' : 'Salle d\'attente CPN') :
+        category === 'URGENCES' ? 'Urgences' :
+        category === 'HOSPITALISATION' ? 'Hospitalisation' :
+        'Consultation'
+      )
     );
 
-    const speciality = act.sousService || matchedService?.name || 'Médecine générale';
+    const speciality = isGynecoAct ? 'Gynécologie' : (
+      act.sousService || matchedService?.name || (
+        category === 'MATERNITE' ? (isAccouchementAct ? 'Salle de travail / Accouchement' : 'Consultation Prénatale (CPN)') :
+        'Médecine générale'
+      )
+    );
 
     motifs.push({
       id: act.id,
@@ -1051,7 +1075,12 @@ const Reception: React.FC<ReceptionProps> = ({
           name: selectedMotif.label,
           quantity: 1,
           unitPrice: selectedMotif.fee,
-          totalPrice: selectedMotif.fee
+          totalPrice: selectedMotif.fee,
+          actId: selectedMotif.actId || selectedMotif.id,
+          codeInterne: selectedMotif.codeInterne || '',
+          practitionerId: user?.id || '',
+          practitionerName: user?.name || user?.username || 'Agent Accueil',
+          practitionerRole: user?.role || 'RECEPTIONIST'
         });
       } else if (visitMotif) {
         items.push({
@@ -1059,7 +1088,10 @@ const Reception: React.FC<ReceptionProps> = ({
           name: getOrientationData(visitMotif).label,
           quantity: 1,
           unitPrice: getOrientationData(visitMotif).fee,
-          totalPrice: getOrientationData(visitMotif).fee
+          totalPrice: getOrientationData(visitMotif).fee,
+          practitionerId: user?.id || '',
+          practitionerName: user?.name || user?.username || 'Agent Accueil',
+          practitionerRole: user?.role || 'RECEPTIONIST'
         });
       }
 
@@ -1069,7 +1101,10 @@ const Reception: React.FC<ReceptionProps> = ({
           name: 'Carnet Médical',
           quantity: 1,
           unitPrice: 1000,
-          totalPrice: 1000
+          totalPrice: 1000,
+          practitionerId: user?.id || '',
+          practitionerName: user?.name || user?.username || 'Agent Accueil',
+          practitionerRole: user?.role || 'RECEPTIONIST'
         });
       }
 
@@ -1124,7 +1159,13 @@ const Reception: React.FC<ReceptionProps> = ({
         amountPaid: 0,
         status: 'PENDING',
         createdAt: new Date().toISOString(),
-        createdBy: user?.name || 'Système'
+        createdBy: user?.name || user?.username || 'Système',
+        createdById: user?.id || '',
+        practitionerId: user?.id || '',
+        practitionerName: user?.name || user?.username || 'Agent Accueil',
+        practitionerRole: user?.role || 'RECEPTIONIST',
+        requestedBy: user?.name || user?.username || 'Agent Accueil',
+        requestedById: user?.id || ''
       };
       reqIdForLog = createdRequest.id;
       p5 = setDoc(doc(db, 'payment_requests', createdRequest.id), sanitizeData(createdRequest));
@@ -1174,16 +1215,29 @@ const Reception: React.FC<ReceptionProps> = ({
         targetSpeciality = targetQueue;
       }
 
-      // Direct Maternity Routing: Bypass general nursing triage
-      // Maternity patients (CPN, labor, obstetrics) have their vitals and fetal heart tones taken directly by midwives
-      const isMaternityService = 
+      // Explicit Gynecological Consultation check: ALWAYS routed to Consultation
+      const isGynecoRecourse = 
+        (selectedMotif?.label && /gynéco|gyneco/i.test(selectedMotif.label)) ||
+        (selectedMotif?.speciality && /gynéco|gyneco/i.test(selectedMotif.speciality)) ||
+        (selectedMotif?.queueName && /gynéco|gyneco/i.test(selectedMotif.queueName));
+
+      // Direct Maternity Routing: ONLY CPN (prenatal/postnatal) and Accouchement (labor/delivery/cesarean)
+      // Gynecological consultation ALWAYS routes to Consultation module
+      const isMaternityService = !isGynecoRecourse && (
         selectedMotif?.category === 'MATERNITE' || 
         selectedMotif?.serviceId === 'SRV-MATERNITE' || 
         visitMotif === 'MATERNITE' ||
-        (selectedMotif?.label && /matern|cpn|gynéco|obstétri/i.test(selectedMotif.label)) ||
-        (targetService && /matern|cpn|gynéco|obstétri/i.test(targetService)) ||
-        (targetQueue && /matern|cpn|gynéco|obstétri/i.test(targetQueue)) ||
-        (targetSpeciality && /matern|cpn|gynéco|obstétri/i.test(targetSpeciality));
+        (selectedMotif?.label && /cpn|accouchement|travail|césarienne|cesar|postnatale|grossesse/i.test(selectedMotif.label)) ||
+        (targetService && /matern|cpn|accouchement|travail|césarienne/i.test(targetService)) ||
+        (targetQueue && /matern|cpn|accouchement|travail|césarienne/i.test(targetQueue)) ||
+        (targetSpeciality && /matern|cpn|accouchement|travail|césarienne/i.test(targetSpeciality))
+      );
+
+      if (isGynecoRecourse) {
+        targetService = 'Consultation';
+        targetQueue = 'Consultation Gynécologique';
+        targetSpeciality = 'Gynécologie';
+      }
 
       const effectiveSendToNurseTriage = isMaternityService ? false : sendToNurseTriage;
 
@@ -1194,14 +1248,19 @@ const Reception: React.FC<ReceptionProps> = ({
         id: dmeId,
         patientId: patientId,
         createdAt: new Date().toISOString(),
-        createdBy: user?.name || 'Agent Accueil',
+        createdBy: user?.name || user?.username || 'Agent Accueil',
+        createdById: user?.id || '',
+        practitionerRole: user?.role || 'RECEPTIONIST',
         vitals: finalPatient.vitals || {},
         history: [
           {
             action: isMaternityService 
-              ? `Patiente admise et orientée directement en Maternité (Triage infirmier général contourné)`
+              ? `Patiente admise et orientée directement en Maternité (Triage sage-femme)`
+              : isGynecoRecourse
+              ? `Patiente admise en Consultation Gynécologique (Médecin / Spécialiste)`
               : `Patient enregistré - Motif de recours: ${selectedMotif?.label || visitMotif}`,
-            user: user?.name || 'Agent Accueil',
+            user: user?.name || user?.username || 'Agent Accueil',
+            userId: user?.id || '',
             date: todayStr,
             time: timeStr
           }
@@ -1218,8 +1277,10 @@ const Reception: React.FC<ReceptionProps> = ({
         motif: visitMotif,
         motifId: selectedMotif?.id || '',
         motifLabel: selectedMotif?.label || '',
-        orientation: isMaternityService ? 'Maternité (Direct)' : (selectedMotif?.label || getOrientationData(visitMotif || 'CONSULTATION').label),
-        user: user?.name || 'Agent Accueil',
+        orientation: isMaternityService ? 'Maternité (Direct)' : isGynecoRecourse ? 'Consultation Gynécologique' : (selectedMotif?.label || getOrientationData(visitMotif || 'CONSULTATION').label),
+        user: user?.name || user?.username || 'Agent Accueil',
+        userId: user?.id || '',
+        practitionerRole: user?.role || 'RECEPTIONIST',
         createdAt: new Date().toISOString()
       };
       const p3 = setDoc(visitDocRef, sanitizeData(visitData));
@@ -1235,13 +1296,15 @@ const Reception: React.FC<ReceptionProps> = ({
           priority: computedPriorityAndAlerts.priority,
           priorityAlerts: computedPriorityAndAlerts.alerts,
           createdAt: new Date().toISOString(),
-          createdBy: user?.name || 'Agent Accueil'
+          createdBy: user?.name || user?.username || 'Agent Accueil',
+          createdById: user?.id || '',
+          practitionerRole: user?.role || 'RECEPTIONIST'
         }));
       }
 
       // Check for duplicate in queue locally (0ms delay) to prevent double clicks creating multiple records
       const initialStatus = effectiveSendToNurseTriage ? 'waiting_triage' : 'waiting';
-      const targetSvcId = isMaternityService ? 'SRV-MATERNITE' : (selectedMotif?.serviceId || '');
+      const targetSvcId = isGynecoRecourse ? 'SRV-CONSULTATION' : (isMaternityService ? 'SRV-MATERNITE' : (selectedMotif?.serviceId || ''));
       const alreadyInQueue = (globalWaitingQueue || []).some(
         q =>
           q.patientId === patientId &&
@@ -1266,14 +1329,27 @@ const Reception: React.FC<ReceptionProps> = ({
           motif: visitMotif,
           motifId: selectedMotif?.id || '',
           motifLabel: selectedMotif?.label || '',
-          speciality: isMaternityService ? 'Obstétrique / CPN' : targetSpeciality,
-          queueName: isMaternityService ? (targetQueue || 'Salle d\'attente Maternité') : targetQueue,
-          service: isMaternityService ? 'Maternité' : targetService,
+          speciality: isGynecoRecourse 
+            ? 'Gynécologie' 
+            : isMaternityService 
+            ? (/accouchement|travail|césarienne|cesar/i.test(selectedMotif?.label || '') ? 'Salle de travail / Accouchement' : 'Consultation Prénatale (CPN)') 
+            : targetSpeciality,
+          queueName: isGynecoRecourse 
+            ? 'Consultation Gynécologique' 
+            : isMaternityService 
+            ? (targetQueue || 'Salle d\'attente CPN') 
+            : targetQueue,
+          service: isGynecoRecourse ? 'Consultation' : isMaternityService ? 'Maternité' : targetService,
           serviceId: targetSvcId,
           status: initialStatus,
           paymentStatus: 'AWAITING_PAYMENT',
           priority: effectiveSendToNurseTriage ? 'normal' : computedPriorityAndAlerts.priority,
           priorityAlerts: effectiveSendToNurseTriage ? [] : computedPriorityAndAlerts.alerts,
+          admittedBy: user?.name || user?.username || 'Agent Accueil',
+          admittedById: user?.id || '',
+          practitionerId: user?.id || '',
+          practitionerName: user?.name || user?.username || 'Agent Accueil',
+          practitionerRole: user?.role || 'RECEPTIONIST',
           vitals: finalPatient.vitals ? {
             temp: finalPatient.vitals?.temp,
             bp: `${finalPatient.vitals?.bpSys}/${finalPatient.vitals?.bpDia}`,

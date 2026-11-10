@@ -367,6 +367,12 @@ export interface PaymentRequestItem {
   quantity: number;
   unitPrice: number;
   totalPrice: number;
+  actId?: string;
+  codeInterne?: string;
+  practitionerId?: string;
+  practitionerName?: string;
+  practitionerRole?: string;
+  performedAt?: string;
 }
 
 export interface PaymentRequest {
@@ -382,6 +388,18 @@ export interface PaymentRequest {
   status: PaymentStatus;
   createdAt: string;
   createdBy: string;
+  createdById?: string;
+  practitionerId?: string;
+  practitionerName?: string;
+  practitionerRole?: string;
+  performedBy?: string;
+  performedById?: string;
+  requestedBy?: string;
+  requestedById?: string;
+  isClotured?: boolean;
+  cloturedAt?: string;
+  cloturedBy?: string;
+  cloturedById?: string;
   targetCashier?: string;
   paymentMethod?: string;
   avoirUtilise?: number;
@@ -753,12 +771,18 @@ export interface ConsultationRecord {
   id: string;
   patientId: string;
   patient?: string;
+  patientName?: string;
   patientIdRaw?: string;
   age?: number;
   gender?: string;
   date: string;
   time: string;
   doctor: string;
+  doctorName?: string;
+  doctorId?: string;
+  practitionerId?: string;
+  practitionerName?: string;
+  practitionerRole?: string;
   doctorEmail?: string;
   motif: string;
   diagnosis: string;
@@ -768,8 +792,10 @@ export interface ConsultationRecord {
   type?: string;
   status: 'draft' | 'cloture' | 'archived';
   isReadOnly?: boolean;
+  isClotured?: boolean;
   cloturedAt?: string;
   cloturedBy?: string;
+  cloturedById?: string;
   exitDisposition?: 'HOME' | 'HOSPITALIZATION' | 'MATERNITY' | 'TRANSFER' | 'FOLLOW_UP';
   addenda?: ConsultationAddendum[];
   createdAt: string;
@@ -1164,6 +1190,11 @@ export interface CPNVisit {
   nextVisitDate: string;
   userId: string;
   userName?: string;
+  practitionerId?: string;
+  practitionerName?: string;
+  practitionerRole?: string;
+  performedBy?: string;
+  performedById?: string;
   createdAt?: string;
 }
 
@@ -1198,7 +1229,12 @@ export interface MaternityAdmission {
   obstetricalHistory?: string;
   bedId?: string;
   midwife?: string;
+  midwifeId?: string;
   doctor?: string;
+  doctorId?: string;
+  practitionerId?: string;
+  practitionerName?: string;
+  practitionerRole?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1216,6 +1252,14 @@ export interface MaternityDelivery {
   deliveryMode: string;
   location: string;
   attendedBy: string;
+  attendedById?: string;
+  midwife?: string;
+  midwifeId?: string;
+  doctor?: string;
+  doctorId?: string;
+  practitionerId?: string;
+  practitionerName?: string;
+  practitionerRole?: string;
   fetalPresentation: string;
   newbornId?: string;
   newbornGender: 'M' | 'F';
@@ -1253,6 +1297,10 @@ export interface NewbornRecord {
   establishment?: string;
   observations?: string;
   status: 'VIVANT' | 'SOUS_SURVEILLANCE' | 'TRANSFERE';
+  deliveredBy?: string;
+  deliveredById?: string;
+  practitionerId?: string;
+  practitionerName?: string;
   createdAt: string;
 }
 
