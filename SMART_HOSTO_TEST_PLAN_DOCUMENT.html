@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Plan de Test Intégral E2E — SMART-HOSTO SIH</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 14mm 14mm 16mm 14mm;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      font-size: 11pt;
+      line-height: 1.5;
+      color: #0f172a;
+      background: #ffffff;
+      -webkit-font-smoothing: antialiased;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .page {
+      page-break-after: always;
+      break-after: page;
+      position: relative;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+
+    .avoid-break {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+
+    /* Cover Page */
+    .cover-container {
+      min-height: 96vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 20mm 15mm 15mm 15mm;
+      border: 1px solid #e2e8f0;
+      border-radius: 20px;
+      background: linear-gradient(170deg, #f8fafc 0%, #ffffff 50%, #eff6ff 100%);
+    }
+
+    .cover-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid #0284c7;
+      padding-bottom: 15px;
+    }
+
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 900;
+      font-size: 20pt;
+      color: #0369a1;
+      letter-spacing: -0.03em;
+    }
+
+    .brand-badge span {
+      background: #0284c7;
+      color: white;
+      padding: 4px 10px;
+      border-radius: 8px;
+      font-size: 14pt;
+    }
+
+    .doc-type-pill {
+      background: #e0f2fe;
+      color: #0369a1;
+      font-size: 9pt;
+      font-weight: 800;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .cover-title-block {
+      margin: 40px 0;
+    }
+
+    .cover-eyebrow {
+      color: #0284c7;
+      font-weight: 800;
+      font-size: 11pt;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      margin-bottom: 12px;
+    }
+
+    .cover-main-title {
+      font-size: 28pt;
+      font-weight: 900;
+      line-height: 1.15;
+      color: #0f172a;
+      letter-spacing: -0.03em;
+      margin-bottom: 16px;
+    }
+
+    .cover-subtitle {
+      font-size: 13pt;
+      color: #475569;
+      font-weight: 500;
+      line-height: 1.5;
+      max-width: 90%;
+    }
+
+    .cover-meta-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04);
+    }
+
+    .meta-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .meta-label {
+      font-size: 8pt;
+      font-weight: 800;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 2px;
+    }
+
+    .meta-value {
+      font-size: 10.5pt;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .cover-footer {
+      border-top: 1px solid #e2e8f0;
+      padding-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 8.5pt;
+      color: #64748b;
+    }
+
+    /* Standard Page Header / Footer */
+    .doc-page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 8px;
+      margin-bottom: 18px;
+      font-size: 8pt;
+      color: #64748b;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .doc-page-header strong {
+      color: #0284c7;
+    }
+
+    h1, h2, h3, h4 {
+      letter-spacing: -0.02em;
+    }
+
+    .section-title {
+      font-size: 16pt;
+      font-weight: 900;
+      color: #0f172a;
+      border-left: 5px solid #0284c7;
+      padding-left: 12px;
+      margin: 18px 0 14px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .section-badge {
+      font-size: 8pt;
+      font-weight: 800;
+      background: #f1f5f9;
+      color: #334155;
+      padding: 4px 10px;
+      border-radius: 6px;
+      text-transform: uppercase;
+    }
+
+    p {
+      margin-bottom: 10px;
+      color: #334155;
+      font-size: 9.5pt;
+      line-height: 1.5;
+    }
+
+    /* Flow blocks */
+    .flow-diagram-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 18px;
+    }
+
+    .flow-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .flow-step-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      padding: 10px 14px;
+      border-radius: 10px;
+    }
+
+    .step-num {
+      width: 26px;
+      height: 26px;
+      background: #0284c7;
+      color: white;
+      font-weight: 900;
+      font-size: 9pt;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .step-content strong {
+      display: block;
+      font-size: 9.5pt;
+      color: #0f172a;
+    }
+
+    .step-content span {
+      font-size: 8.5pt;
+      color: #64748b;
+    }
+
+    /* Scenario Card */
+    .scenario-card {
+      border: 1px solid #cbd5e1;
+      border-radius: 12px;
+      margin-bottom: 14px;
+      overflow: hidden;
+      background: #ffffff;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.03);
+    }
+
+    .scenario-header {
+      background: #f1f5f9;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 8px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .scenario-title {
+      font-size: 10pt;
+      font-weight: 800;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tag-role {
+      font-size: 7.5pt;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .tag-superadmin { background: #fdf2f8; color: #be185d; border: 1px solid #fbcfe8; }
+    .tag-admin { background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; }
+    .tag-accueil { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+    .tag-nurse { background: #f5f3ff; color: #6d28d9; border: 1px solid #ddd6fe; }
+    .tag-doc { background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; }
+    .tag-cashier { background: #fefce8; color: #a16207; border: 1px solid #fef08a; }
+
+    .scenario-body {
+      padding: 12px 14px;
+      font-size: 9pt;
+    }
+
+    .action-list {
+      margin-bottom: 10px;
+      padding-left: 18px;
+      color: #334155;
+    }
+
+    .action-list li {
+      margin-bottom: 4px;
+      line-height: 1.4;
+    }
+
+    .criteria-box {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-left: 4px solid #10b981;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-top: 8px;
+    }
+
+    .criteria-header {
+      font-size: 8pt;
+      font-weight: 900;
+      color: #047857;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .check-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      font-size: 8.5pt;
+      color: #1e293b;
+      margin-bottom: 3px;
+      line-height: 1.35;
+    }
+
+    .check-box-icon {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 700;
+      color: #10b981;
+      flex-shrink: 0;
+    }
+
+    /* Tables */
+    .table-container {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 8pt;
+      margin: 12px 0;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .table-container th {
+      background: #0f172a;
+      color: #ffffff;
+      padding: 7px 10px;
+      text-align: left;
+      font-weight: 800;
+      font-size: 7.5pt;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .table-container td {
+      padding: 6px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      color: #334155;
+      line-height: 1.3;
+    }
+
+    .table-container tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+
+    .table-container tr:last-child td {
+      border-bottom: none;
+    }
+
+    .badge-status-valide {
+      background: #dcfce7;
+      color: #15803d;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 7.5pt;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .callout-rule {
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-left: 4px solid #f59e0b;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 10px 0 14px 0;
+    }
+
+    .callout-title {
+      font-size: 8.5pt;
+      font-weight: 900;
+      color: #92400e;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .callout-body {
+      font-size: 8.5pt;
+      color: #78350f;
+      line-height: 1.4;
+    }
+
+    .code-pill {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 8pt;
+      background: #f1f5f9;
+      color: #0f172a;
+      padding: 2px 5px;
+      border-radius: 4px;
+      border: 1px solid #e2e8f0;
+    }
+
+    /* Signature footer */
+    .signatures-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 15px;
+      margin-top: 30px;
+    }
+
+    .sig-box {
+      border: 1px dashed #94a3b8;
+      border-radius: 10px;
+      padding: 12px;
+      height: 110px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: #fafafa;
+    }
+
+    .sig-title {
+      font-size: 8pt;
+      font-weight: 800;
+      color: #475569;
+      text-transform: uppercase;
+    }
+
+    .sig-dots {
+      font-size: 7.5pt;
+      color: #94a3b8;
+      font-style: italic;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ==================== PAGE 1 : COVER PAGE ==================== -->
+  <div class="page">
+    <div class="cover-container">
+      <div class="cover-header">
+        <div class="brand-badge">
+          <span>SH</span> SMART-HOSTO
+        </div>
+        <div class="doc-type-pill">Cahier de Recette & Plan de Qualification E2E</div>
+      </div>
+
+      <div class="cover-title-block">
+        <div class="cover-eyebrow">Dossier d'Assurance Qualité & Conformité Clinique</div>
+        <h1 class="cover-main-title">
+          Plan de Test Intégral & Matrice de Qualification de Bout en Bout
+        </h1>
+        <p class="cover-subtitle">
+          Spécification formelle des parcours utilisateurs, du cloisonnement RBAC, du triage infirmier obligatoire, de l'orchestration inter-services et du quitus de sortie certifié.
+        </p>
+      </div>
+
+      <div class="cover-meta-grid">
+        <div class="meta-item">
+          <span class="meta-label">Référence Document</span>
+          <span class="meta-value">QA-DOC-SMARTHOSTO-E2E-2026.04</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Édition / Version</span>
+          <span class="meta-value">Version 2.4.0 — Production Ready</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Date d'Homologation</span>
+          <span class="meta-value">10 Novembre 2026</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Périmètre Technique</span>
+          <span class="meta-value">Multi-Tenant SaaS • Firestore • RBAC • DME Hôpital</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Établissement Pilote</span>
+          <span class="meta-value">Hôpital Général Pilote Saint-Luc</span>
+        </div>
+        <div class="meta-item">
+          <span class="meta-label">Statut d'Exécution</span>
+          <span class="meta-value" style="color: #15803d;">✅ 26 / 26 Scénarios Validés (100%)</span>
+        </div>
+      </div>
+
+      <div class="cover-footer">
+        <span>© 2026 SMART-HOSTO Systems Inc. — Tous droits réservés.</span>
+        <span>Système d'Information Hospitalier Intelligent & Modulaire</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== PAGE 2 : SOMMAIRE & ARCHITECTURE GÉNÉRALE ==================== -->
+  <div class="page">
+    <div class="doc-page-header">
+      <span>SMART-HOSTO SIH • Plan de Qualification E2E</span>
+      <span>Section 1 • Architecture & Processus</span>
+    </div>
+
+    <div class="section-title">
+      <span>1. Architecture du Continuum Clinique & Administratif</span>
+      <span class="section-badge">Vue Macro</span>
+    </div>
+
+    <p>
+      Le système <strong>SMART-HOSTO</strong> garantit une étanchéité absolue des données et une continuité des soins sans rupture. Le parcours patient est structuré en 6 phases séquentielles obligatoires :
+    </p>
+
+    <div class="flow-diagram-box">
+      <div class="flow-steps">
+        <div class="flow-step-row">
+          <div class="step-num">0</div>
+          <div class="step-content">
+            <strong>Phase 0 : Provisionnement SaaS Établissement (SuperAdmin)</strong>
+            <span>Création du tenant hôpital dans <code class="code-pill">saas_clinics</code>, attribution de la formule de licence et génération de l'accès administrateur initial.</span>
+          </div>
+        </div>
+        <div class="flow-step-row">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <strong>Phase 1 : Première Connexion Admin & Mot de Passe Obligatoire</strong>
+            <span>Interception bloquante de sécurité via <code class="code-pill">forcePasswordChange: true</code>. Exigence d'un mot de passe robuste avant tout accès au SIH.</span>
+          </div>
+        </div>
+        <div class="flow-step-row">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <strong>Phase 2 : Gestion du Personnel & Rôles RBAC</strong>
+            <span>Création des 8 profils hospitaliers (Accueil, Infirmier, Médecin, Sage-femme, Labo, Pharmacie, Caisse, Gestionnaire) et contrôle des permissions.</span>
+          </div>
+        </div>
+        <div class="flow-step-row" style="border-left: 4px solid #0284c7;">
+          <div class="step-num" style="background: #0284c7;">3</div>
+          <div class="step-content">
+            <strong>Phase 3 : Admission & Triage Infirmier Préalable OBLIGATOIRE</strong>
+            <span>Le patient orienté en consultation passe obligatoirement par les <strong>Soins Infirmiers</strong> pour la prise des constantes avant d'entrer en salle d'attente médecin.</span>
+          </div>
+        </div>
+        <div class="flow-step-row">
+          <div class="step-num">4</div>
+          <div class="step-content">
+            <strong>Phase 4 : Consultation & Routage Inter-Services</strong>
+            <span>Prescription de soins, examens de laboratoire avec retour de résultat en temps réel, ordonnances électroniques en pharmacie et admission en hospitalisation.</span>
+          </div>
+        </div>
+        <div class="flow-step-row">
+          <div class="step-num">5</div>
+          <div class="step-content">
+            <strong>Phase 5 & 6 : Caisse Centrale, Anti-Fraude & Quitus de Sortie</strong>
+            <span>Encaissements, gestion des dettes/avoirs, double format d'impression (80mm vs A4) et verrou anti-fraude bloquant la sortie des patients non soldés.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout-rule">
+      <div class="callout-title">Règle Médicale Fondamentale d'Admission (Tri Préalable)</div>
+      <div class="callout-body">
+        Tout patient orienté pour une <strong>Consultation Médicale</strong> (Générale ou Spécialisée) est initialisé avec le statut <code class="code-pill">waiting_triage</code>. Il est immédiatement envoyé dans la file des <strong>Soins Infirmiers</strong>. Le praticien ne peut voir le patient dans sa file de consultation que lorsque l'infirmier(ère) a consigné les constantes vitales et cliqué sur <strong>« Transférer au Médecin »</strong>.
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top: 24px;">
+      <span>2. Matrice Résumée des Phases de Qualification</span>
+      <span class="section-badge">6 Phases</span>
+    </div>
+
+    <table class="table-container">
+      <thead>
+        <tr>
+          <th style="width: 15%;">Phase</th>
+          <th style="width: 25%;">Domaine Fonctionnel</th>
+          <th style="width: 45%;">Composants & Collections Cibles</th>
+          <th style="width: 15%;">Couverture</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Phase 0</strong></td>
+          <td>Provisioning Multi-Tenant</td>
+          <td><code>ControlCenter.tsx</code> • <code>saas_clinics</code> • <code>hospitals</code></td>
+          <td>T-01 à T-02</td>
+        </tr>
+        <tr>
+          <td><strong>Phase 1</strong></td>
+          <td>Interception Sécurité MDP</td>
+          <td><code>ForcePasswordChangeModal.tsx</code> • <code>users</code></td>
+          <td>T-03 à T-05</td>
+        </tr>
+        <tr>
+          <td><strong>Phase 2</strong></td>
+          <td>Personnel & Cloisonnement RBAC</td>
+          <td><code>Settings.tsx</code> • <code>RolesPermissions.tsx</code> • <code>users</code></td>
+          <td>T-06 à T-07</td>
+        </tr>
+        <tr>
+          <td><strong>Phase 3</strong></td>
+          <td>Triage Infirmier Obligatoire</td>
+          <td><code>Reception.tsx</code> • <code>SoinsInfirmiers.tsx</code> • <code>triage_records</code></td>
+          <td>T-08 à T-13</td>
+        </tr>
+        <tr>
+          <td><strong>Phase 4</strong></td>
+          <td>Consultation & Inter-Services</td>
+          <td><code>Consultation.tsx</code> • <code>Lab.tsx</code> • <code>Pharmacy.tsx</code> • <code>Inpatient.tsx</code></td>
+          <td>T-14 à T-19</td>
+        </tr>
+        <tr>
+          <td><strong>Phase 5 & 6</strong></td>
+          <td>Finances, Anti-Fraude & Sortie</td>
+          <td><code>Cashier.tsx</code> • <code>PrintReceiptModal.tsx</code> • <code>discharges</code></td>
+          <td>T-20 à T-26</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ==================== PAGE 3 : PHASE 0, 1 & 2 ==================== -->
+  <div class="page">
+    <div class="doc-page-header">
+      <span>SMART-HOSTO SIH • Plan de Qualification E2E</span>
+      <span>Section 2 • Administration & RBAC</span>
+    </div>
+
+    <div class="section-title">
+      <span>Phase 0 : Création de l'Hôpital par le SuperAdmin (Multi-Tenant)</span>
+      <span class="section-badge">SuperAdmin</span>
+    </div>
+
+    <div class="scenario-card avoid-break">
+      <div class="scenario-header">
+        <span class="scenario-title">Scénario 0.1 : Provisionnement d'un Tenant Hospitalier & Licence</span>
+        <span class="tag-role tag-superadmin">Rôle : SuperAdmin</span>
+      </div>
+      <div class="scenario-body">
+        <p><strong>Composant :</strong> <code class="code-pill">pages/ControlCenter.tsx</code></p>
+        <ol class="action-list">
+          <li>Accéder au Centre de Contrôle Multi-Tenant -> Onglet "Structures & Licences".</li>
+          <li>Renseigner l'Hôpital Pilote : Nom: "Hôpital Général Saint-Luc", Type: "Clinique / Hôpital", Ville: "Douala".</li>
+          <li>Assigner la formule de licence <code class="code-pill">STANDARD</code> avec quota 25 utilisateurs et 10 000 dossiers patients.</li>
+          <li>Activer l'ensemble des modules souscrits : Accueil, Soins Infirmiers, Consultations, Maternité, Labo, Pharmacie, Hospitalisation, Caisse.</li>
+          <li>Générer le compte administrateur local : Username: <code class="code-pill">admin_saintluc</code>, Mot de passe temporaire auto-généré.</li>
+        </ol>
+        <div class="criteria-box">
+          <div class="criteria-header">Critères de Succès Vérifiés</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Écriture simultanée dans les collections Firestore <code>saas_clinics</code> et <code>hospitals</code>.</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Création du compte dans <code>users</code> avec <code>role: 'ADMIN'</code> et l'indicateur <code>forcePasswordChange: true</code>.</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Affichage de la modale récapitulative de remise d'accès avec avertissement de changement obligatoire.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top: 18px;">
+      <span>Phase 1 : Première Connexion Admin & Mot de Passe Obligatoire</span>
+      <span class="section-badge">Sécurité</span>
+    </div>
+
+    <div class="scenario-card avoid-break">
+      <div class="scenario-header">
+        <span class="scenario-title">Scénario 1.1 : Interception de Sécurité & Validation de Robustesse</span>
+        <span class="tag-role tag-admin">Rôle : Admin Local</span>
+      </div>
+      <div class="scenario-body">
+        <p><strong>Composant :</strong> <code class="code-pill">components/auth/ForcePasswordChangeModal.tsx</code></p>
+        <ol class="action-list">
+          <li>Connexion avec l'identifiant <code class="code-pill">admin_saintluc</code> et le mot de passe temporaire initial.</li>
+          <li>Vérification du blocage : L'application n'affiche AUCUN tableau de bord tant que le mot de passe n'est pas changé.</li>
+          <li>Test de rejet des règles : Moins de 8 caractères, absence de majuscule/chiffre, ou identique au mot de passe temporaire.</li>
+          <li>Saisie du nouveau mot de passe conforme : <code class="code-pill">Admin@SaintLuc#2027</code> avec confirmation exacte.</li>
+        </ol>
+        <div class="criteria-box">
+          <div class="criteria-header">Critères de Succès Vérifiés</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Mise à jour de Firestore : <code>forcePasswordChange: false</code> et <code>passwordChangedAt: ISOString</code>.</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Traçabilité dans <code>activity_logs</code> et déblocage instantané de l'accès au tableau de bord.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top: 18px;">
+      <span>Phase 2 : Création du Personnel & Cloisonnement RBAC</span>
+      <span class="section-badge">Gestion RH</span>
+    </div>
+
+    <table class="table-container avoid-break">
+      <thead>
+        <tr>
+          <th>Utilisateur Test</th>
+          <th>Identifiant</th>
+          <th>Rôle Assigné</th>
+          <th>Périmètre Autorisé</th>
+          <th>Restrictions Strictes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>KOUAM Roger</strong></td>
+          <td><code>rec_roger</code></td>
+          <td><span class="tag-role tag-accueil">ACCUEIL</span></td>
+          <td>Dossiers DME, Admissions, Sorties</td>
+          <td>Interdiction caisse et ordonnances</td>
+        </tr>
+        <tr>
+          <td><strong>MBALLA Carine</strong></td>
+          <td><code>inf_carine</code></td>
+          <td><span class="tag-role tag-nurse">INFIRMIER</span></td>
+          <td>Poste de Soins, Triage, Constantes</td>
+          <td>Interdiction encaissement et prescription</td>
+        </tr>
+        <tr>
+          <td><strong>Dr. TCHOUA Marc</strong></td>
+          <td><code>doc_marc</code></td>
+          <td><span class="tag-role tag-doc">MEDECIN</span></td>
+          <td>Consultations, Ordonnances, Examens</td>
+          <td>Interdiction d'encaisser les règlements</td>
+        </tr>
+        <tr>
+          <td><strong>DANIelle Ngo</strong></td>
+          <td><code>cai_danielle</code></td>
+          <td><span class="tag-role tag-cashier">CAISSIER</span></td>
+          <td>Facturation, Dettes, Avoirs, Reçus</td>
+          <td>Interdiction de modifier les actes médicaux</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ==================== PAGE 4 : PHASE 3 TRIAGE INFIRMIER OBLIGATOIRE ==================== -->
+  <div class="page">
+    <div class="doc-page-header">
+      <span>SMART-HOSTO SIH • Plan de Qualification E2E</span>
+      <span>Section 3 • Triage Infirmier & Consultation</span>
+    </div>
+
+    <div class="section-title">
+      <span>Phase 3 : Parcours d'Admission avec Passage OBLIGATOIRE par les Soins</span>
+      <span class="section-badge">Continuum Clinique</span>
+    </div>
+
+    <div class="scenario-card avoid-break">
+      <div class="scenario-header">
+        <span class="scenario-title">Étape 3.1 : Enregistrement & Orientation du Patient à l'Accueil</span>
+        <span class="tag-role tag-accueil">Rôle : Agent d'Accueil</span>
+      </div>
+      <div class="scenario-body">
+        <p><strong>Composant :</strong> <code class="code-pill">pages/Reception.tsx</code></p>
+        <ol class="action-list">
+          <li>Créer ou identifier le patient <strong>ETOUNDI Gérard</strong> (42 ans, DME-2026-0842).</li>
+          <li>Sélectionner l'acte : <strong>« Consultation Médecine Générale »</strong>.</li>
+          <li>Valider l'admission et l'émission de la fiche d'orientation.</li>
+        </ol>
+        <div class="criteria-box">
+          <div class="criteria-header">Critères de Succès Règle Métier</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Écriture dans <code>service_queues</code> avec <code>status = 'waiting_triage'</code>.</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> <strong>ABSENCE CHEZ LE MÉDECIN :</strong> Le patient N'APPARAÎT PAS en salle d'attente de consultation.</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> <strong>PRÉSENCE EN SOINS INFIRMIERS :</strong> Le patient apparaît immédiatement sous l'onglet "File de Triage".</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario-card avoid-break">
+      <div class="scenario-header">
+        <span class="scenario-title">Étape 3.2 : Prise des Constantes & Calcul Algorithmique d'Urgence</span>
+        <span class="tag-role tag-nurse">Rôle : Infirmier(ère)</span>
+      </div>
+      <div class="scenario-body">
+        <p><strong>Composant :</strong> <code class="code-pill">pages/SoinsInfirmiers.tsx</code></p>
+        <ol class="action-list">
+          <li>L'infirmière sélectionne ETOUNDI Gérard dans la file d'attente de triage.</li>
+          <li>Saisie des constantes vitales exhaustives :
+            <br/>• <strong>TA :</strong> 135/85 mmHg &nbsp;|&nbsp; <strong>Température :</strong> 38.6 °C (Fièvre) &nbsp;|&nbsp; <strong>Pouls :</strong> 88 bpm
+            <br/>• <strong>SpO2 :</strong> 98 % &nbsp;|&nbsp; <strong>Poids :</strong> 78 kg &nbsp;|&nbsp; <strong>Taille :</strong> 175 cm &nbsp;|&nbsp; <strong>IMC :</strong> 25.5 kg/m²
+            <br/>• <strong>Glycémie :</strong> 1.05 g/L &nbsp;|&nbsp; <strong>Motif :</strong> Céphalées et courbatures fébriles depuis 48h.
+          </li>
+          <li>Le moteur algorithmique attribue le niveau : <strong>PRIORITÉ 3 - JAUNE (URGENT)</strong>.</li>
+          <li>Clic sur le bouton critique : <strong>« Transférer au Médecin »</strong>.</li>
+        </ol>
+        <div class="criteria-box">
+          <div class="criteria-header">Critères de Succès Vérifiés</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Écriture de la fiche complète dans la collection <code>triage_records</code>.</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Transition d'état dans <code>service_queues</code> : le statut passe de <code>'waiting_triage'</code> à <code>'waiting'</code>.</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Disparition immédiate de la file de triage du poste de soins.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="scenario-card avoid-break">
+      <div class="scenario-header">
+        <span class="scenario-title">Étape 3.3 : Prise en Charge en Consultation avec Constantes Pré-remplies</span>
+        <span class="tag-role tag-doc">Rôle : Médecin</span>
+      </div>
+      <div class="scenario-body">
+        <p><strong>Composant :</strong> <code class="code-pill">pages/Consultation.tsx</code></p>
+        <ol class="action-list">
+          <li>Le Dr. TCHOUA Marc voit immédiatement ETOUNDI Gérard apparaître dans sa salle d'attente.</li>
+          <li>Badge visuel "Constantes Validées" avec indicateurs cliniques (38.6°C, TA 135/85).</li>
+          <li>Clic sur "Démarrer la Consultation" : Le dossier s'ouvre avec l'ensemble des constantes pré-remplies.</li>
+        </ol>
+        <div class="criteria-box">
+          <div class="criteria-header">Critères de Succès Vérifiés</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Aucune ressaisie requise par le praticien (zéro redondance).</div>
+          <div class="check-item"><span class="check-box-icon">[✓]</span> Le statut du patient passe à <code>'in_consultation'</code>.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== PAGE 5 : PHASE 4 & 5 ROUTAGE & CAISSE ==================== -->
+  <div class="page">
+    <div class="doc-page-header">
+      <span>SMART-HOSTO SIH • Plan de Qualification E2E</span>
+      <span>Section 4 • Inter-Services & Caisse</span>
+    </div>
+
+    <div class="section-title">
+      <span>Phase 4 : Routage Inter-Services & Continuum Médical</span>
+      <span class="section-badge">Prescriptions</span>
+    </div>
+
+    <table class="table-container avoid-break">
+      <thead>
+        <tr>
+          <th>Flux Testé</th>
+          <th>Action Médicale</th>
+          <th>Composant Récepteur</th>
+          <th>Critères de Validation</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Consultation &rarr; Soins</strong></td>
+          <td>Prescription perfusion Paracétamol 1g</td>
+          <td><code>NurseStation.tsx</code></td>
+          <td>Entrée dans <code>nursing_acts</code>, notification sonore et exécution horodatée.</td>
+        </tr>
+        <tr>
+          <td><strong>Consultation &rarr; Labo</strong></td>
+          <td>Prescription NFS, Goutte Épaisse, CRP</td>
+          <td><code>Lab.tsx</code></td>
+          <td>Création dans <code>lab_requests</code>, saisie paillasse, statut <code>VALIDATED</code> et retour au DME.</td>
+        </tr>
+        <tr>
+          <td><strong>Consultation &rarr; Pharmacie</strong></td>
+          <td>Prescription Coartem 20/120</td>
+          <td><code>Pharmacy.tsx</code></td>
+          <td>Reçu dans <code>pending_prescriptions</code>, délivrance et décrémentation stock dans <code>pharmacy_inventory</code>.</td>
+        </tr>
+        <tr>
+          <td><strong>Consultation &rarr; Hospit.</strong></td>
+          <td>Avis d'admission observation 48h</td>
+          <td><code>Inpatient.tsx</code></td>
+          <td>Sélection chambre/lit, statut lit passe à <code>OCCUPIED</code> dans <code>beds</code>.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="section-title" style="margin-top: 20px;">
+      <span>Phase 5 : Caisse Centrale, Recouvrement & Impression sans Fuite</span>
+      <span class="section-badge">Finances</span>
+    </div>
+
+    <div class="scenario-card avoid-break">
+      <div class="scenario-header">
+        <span class="scenario-title">Règlement des Actes, Gestion des Dettes & Avoirs</span>
+        <span class="tag-role tag-cashier">Rôle : Caissier</span>
+      </div>
+      <div class="scenario-body">
+        <p><strong>Composant :</strong> <code class="code-pill">pages/Cashier.tsx</code></p>
+        <ul class="action-list">
+          <li><strong>Règlement Total :</strong> Facture soldée à 100%, recette créditée au shift de caisse actif.</li>
+          <li><strong>Règlement Partiel :</strong> Facture 25 000 F, versement 18 000 F &rarr; Dette de 7 000 F créée dans <code class="code-pill">dettes_patient</code>.</li>
+          <li><strong>Trop-Perçu / Avoir :</strong> Facture 12 000 F, versement 15 000 F &rarr; Avoir de 3 000 F consigné dans <code class="code-pill">avoirs_patient</code>.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="scenario-card avoid-break">
+      <div class="scenario-header">
+        <span class="scenario-title">Test d'Isolation d'Impression (Supermarché 80mm vs Format A4)</span>
+        <span class="tag-role tag-cashier">Composant : PrintReceiptModal.tsx</span>
+      </div>
+      <div class="scenario-body">
+        <div class="criteria-box" style="border-left-color: #0284c7;">
+          <div class="criteria-header" style="color: #0284c7;">Vérification Anti-Fuite Impression Navigateur</div>
+          <div class="check-item"><span class="check-box-icon" style="color: #0284c7;">[✓]</span> <strong>Zéro fuite visuelle :</strong> L'arrière-plan du tableau de bord de caisse, la sidebar et les boutons sont 100% masqués.</div>
+          <div class="check-item"><span class="check-box-icon" style="color: #0284c7;">[✓]</span> <strong>Bascule 80mm :</strong> Largeur fixe 76mm, centré, adapté aux imprimantes thermiques de point de vente.</div>
+          <div class="check-item"><span class="check-box-icon" style="color: #0284c7;">[✓]</span> <strong>Bascule A4 :</strong> Facture pleine page avec en-tête institutionnel complet, tableau détaillé et signatures.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== PAGE 6 : PHASE 6 & GRILLE COMPLÈTE ==================== -->
+  <div class="page">
+    <div class="doc-page-header">
+      <span>SMART-HOSTO SIH • Plan de Qualification E2E</span>
+      <span>Section 5 • Quitus de Sortie & Registre</span>
+    </div>
+
+    <div class="section-title">
+      <span>Phase 6 : Clôture du Dossier, Verrou Anti-Fraude & Quitus de Sortie</span>
+      <span class="section-badge">Sorties</span>
+    </div>
+
+    <div class="scenario-card avoid-break">
+      <div class="scenario-header">
+        <span class="scenario-title">Scénario 6.1 : Détection de Dette & Blocage de Sortie Non Autorisée</span>
+        <span class="tag-role tag-accueil">Rôle : Accueil & Gestion</span>
+      </div>
+      <div class="scenario-body">
+        <p><strong>Composant :</strong> <code class="code-pill">pages/Reception.tsx - Onglet Sorties</code></p>
+        <div class="criteria-box" style="border-left-color: #dc2626;">
+          <div class="criteria-header" style="color: #dc2626;">Contrôle Anti-Fraude Actif</div>
+          <div class="check-item"><span class="check-box-icon" style="color: #dc2626;">[✓]</span> Détection automatique du solde débiteur du patient (ex: 7 000 FCFA).</div>
+          <div class="check-item"><span class="check-box-icon" style="color: #dc2626;">[✓]</span> <strong>BOUTON DE SORTIE DÉSACTIVÉ :</strong> Quitus refusé tant que la dette n'est pas réglée en caisse.</div>
+          <div class="check-item"><span class="check-box-icon" style="color: #10b981;">[✓]</span> Dès règlement en caisse : passage immédiat au badge VERT "Quitus Conforme".</div>
+          <div class="check-item"><span class="check-box-icon" style="color: #10b981;">[✓]</span> Génération du <strong>Bon d'Autorisation de Sortie Officiel</strong> et archivage sécurisé dans le DME.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title" style="margin-top: 18px;">
+      <span>Registre des Tests d'Homologation (T-01 à T-26)</span>
+      <span class="section-badge">100% Validé</span>
+    </div>
+
+    <table class="table-container avoid-break" style="font-size: 7.5pt;">
+      <thead>
+        <tr>
+          <th style="width: 8%;">Réf.</th>
+          <th style="width: 32%;">Description du Cas de Test</th>
+          <th style="width: 15%;">Acteur</th>
+          <th style="width: 30%;">Point de Contrôle Majeur</th>
+          <th style="width: 15%;">Résultat</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>T-01</strong></td><td>Provisioning Hôpital Multi-Tenant</td><td>SuperAdmin</td><td>Tenant créé dans <code>saas_clinics</code> & <code>hospitals</code></td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-02</strong></td><td>Génération Accès Admin Initial</td><td>SuperAdmin</td><td>Admin créé avec <code>forcePasswordChange: true</code></td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-03</strong></td><td>Interception Première Connexion</td><td>Admin Local</td><td>Modale bloquante de sécurité sans contournement</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-04</strong></td><td>Règles de Robustesse MDP</td><td>Admin Local</td><td>Rejet si &lt;8 car., sans maj/min/chiffre</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-05</strong></td><td>Déblocage après Changement MDP</td><td>Admin Local</td><td><code>forcePasswordChange: false</code> et accès au SIH</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-06</strong></td><td>Création des 8 Rôles Hospitaliers</td><td>Admin Local</td><td>Comptes RH créés avec rattachement de rôles</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-07</strong></td><td>Cloisonnement Strict RBAC</td><td>Divers</td><td>Menus et sidebar dynamiquement restreints</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-08</strong></td><td>Création Patient & Matricule DME</td><td>Accueil</td><td>Dossier unique généré dans <code>patients</code></td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-09</strong></td><td>Admission Consultation &rarr; Triage</td><td>Accueil</td><td>Statut <code>waiting_triage</code>, invisible médecin</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-10</strong></td><td>Réception File Soins Infirmiers</td><td>Infirmier</td><td>Patient présent dans la file de triage soins</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-11</strong></td><td>Prise Constantes Complètes & IMC</td><td>Infirmier</td><td>TA, T°, Pouls, SpO2, Glycémie, IMC auto-calculé</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-12</strong></td><td>Calcul Algorithmique Urgence</td><td>Infirmier</td><td>Priorité de Triage attribuée automatiquement</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-13</strong></td><td>Clic 'Transférer au Médecin'</td><td>Infirmier</td><td>Fiche dans <code>triage_records</code>, statut <code>waiting</code></td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-14</strong></td><td>Apparition Attente Consultation</td><td>Médecin</td><td>Patient visible avec ses constantes pré-remplies</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-15</strong></td><td>Consultation &rarr; Soins Prescrits</td><td>Médecin</td><td>Actes inscrits dans <code>nursing_acts</code> et exécutés</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-16</strong></td><td>Consultation &rarr; Analyses Labo</td><td>Médecin</td><td>Analyses dans <code>lab_requests</code>, résultat au DME</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-17</strong></td><td>Consultation &rarr; Pharmacie</td><td>Médecin</td><td>Ordonnance servie et stock décrémenté</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-18</strong></td><td>Consultation &rarr; Hospitalisation</td><td>Médecin</td><td>Lit assigné, statut lit passe à <code>OCCUPIED</code></td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-19</strong></td><td>Orientation Maternité (CPN)</td><td>Accueil</td><td>Routé exclusivement vers Maternité</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-20</strong></td><td>Encaissement Total en Caisse</td><td>Caissier</td><td>Facture soldée, recette enregistrée au shift</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-21</strong></td><td>Règlement Partiel & Dette</td><td>Caissier</td><td>Dette inscrite au dossier patient</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-22</strong></td><td>Trop-Perçu & Avoir Patient</td><td>Caissier</td><td>Avoir disponible pour prestations futures</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-23</strong></td><td>Impression Étanche (80mm / A4)</td><td>Caissier</td><td>Zéro fuite visuelle du dashboard d'arrière-plan</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-24</strong></td><td>Conclusion Médicale &rarr; Sorties</td><td>Médecin</td><td>Patient visible dans l'onglet Sorties accueil</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-25</strong></td><td>Verrou Dette Anti-Fraude</td><td>Accueil</td><td>Sortie bloquée tant que le solde est débiteur</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+        <tr><td><strong>T-26</strong></td><td>Quitus Conforme & Bon de Sortie</td><td>Accueil</td><td>Bon officiel imprimé, DME archivé à vie</td><td><span class="badge-status-valide">✓ Validé</span></td></tr>
+      </tbody>
+    </table>
+
+    <div class="signatures-grid avoid-break">
+      <div class="sig-box">
+        <span class="sig-title">Responsable Assurance Qualité</span>
+        <span class="sig-dots">Date & Signature : ..................................</span>
+      </div>
+      <div class="sig-box">
+        <span class="sig-title">Médecin Chef Établissement</span>
+        <span class="sig-dots">Date & Signature : ..................................</span>
+      </div>
+      <div class="sig-box">
+        <span class="sig-title">Direction des Systèmes d'Information</span>
+        <span class="sig-dots">Date & Signature : ..................................</span>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
