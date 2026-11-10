@@ -506,36 +506,42 @@ async function generateClientSideAgentReply(
   const apiKey = (config.geminiApiKey || (process.env as any).GEMINI_API_KEY || '').trim();
 
   if (apiKey) {
-    try {
-      const model = (config.geminiModel || 'gemini-2.5-flash').trim();
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [
-              {
-                text: `${config.systemPrompt || DEFAULT_SYSTEM_PROMPT}\n\nCONTEXTE TEMPS RÉEL DE L'HÔPITAL ET DU MEMBRE DU PERSONNEL CONNECTÉ (JSON) :\n${JSON.stringify(ctx, null, 2)}`
-              }
-            ]
-          },
-          contents: [{ role: 'user', parts: [{ text: messageText }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 700 }
-        })
-      });
+    const primaryModel = (config.geminiModel || 'gemini-2.5-pro').trim();
+    const modelsToTry = primaryModel === 'gemini-2.5-pro'
+      ? ['gemini-2.5-pro', 'gemini-2.5-flash']
+      : [primaryModel, 'gemini-2.5-flash'];
 
-      if (resp.ok) {
-        const data = await safeParseJson(resp);
-        const candidateText = data?.candidates?.[0]?.content?.parts
-          ?.map((p: any) => p.text || '')
-          .join('')
-          .trim();
-        if (candidateText) {
-          return { reply: candidateText, modelUsed: model };
+    for (const model of modelsToTry) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: {
+              parts: [
+                {
+                  text: `${config.systemPrompt || DEFAULT_SYSTEM_PROMPT}\n\nCONTEXTE TEMPS RÉEL DE L'HÔPITAL ET DU MEMBRE DU PERSONNEL CONNECTÉ (JSON) :\n${JSON.stringify(ctx, null, 2)}`
+                }
+              ]
+            },
+            contents: [{ role: 'user', parts: [{ text: messageText }] }],
+            generationConfig: { temperature: 0.25, maxOutputTokens: 2048 }
+          })
+        });
+
+        if (resp.ok) {
+          const data = await safeParseJson(resp);
+          const candidateText = data?.candidates?.[0]?.content?.parts
+            ?.map((p: any) => p.text || '')
+            .join('')
+            .trim();
+          if (candidateText) {
+            return { reply: candidateText, modelUsed: model };
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
   }
 
   return {
@@ -561,7 +567,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
     accessToken: '',
     verifyToken: 'smarthosto_meta_verify_2026',
     geminiApiKey: '',
-    geminiModel: 'gemini-2.5-flash',
+    geminiModel: 'gemini-2.5-pro',
     allowUnregisteredPreview: true,
     systemPrompt: DEFAULT_SYSTEM_PROMPT
   });
@@ -587,7 +593,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
         `• 💊 Le *stock de médicaments* en pharmacie\n` +
         `• 💰 Le *catalogue des tarifs* hospitaliers`,
       timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-      modelUsed: 'gemini-2.5-flash'
+      modelUsed: 'gemini-2.5-pro'
     }
   ]);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -1358,8 +1364,8 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
                   onChange={e => setConfig({ ...config, geminiModel: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-xs font-bold"
                 >
-                  <option value="gemini-2.5-flash">gemini-2.5-flash (Recommandé • Ultra rapide)</option>
-                  <option value="gemini-2.5-pro">gemini-2.5-pro (Raisonnement avancé)</option>
+                  <option value="gemini-2.5-pro">gemini-2.5-pro (Flagship • Raisonnement & Synthèse Maximale)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash (Ultra rapide • Équilibré)</option>
                   <option value="gemini-2.0-flash">gemini-2.0-flash</option>
                 </select>
               </div>

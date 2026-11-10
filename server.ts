@@ -2766,73 +2766,78 @@ async function generateStaffAgentReply(
   const apiKey = (config.geminiApiKey || process.env.GEMINI_API_KEY || '').trim();
 
   if (apiKey) {
-    try {
-      const model = (config.geminiModel || 'gemini-2.5-flash').trim();
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const primaryModel = (config.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-pro').trim();
+    const modelsToTry = primaryModel === 'gemini-2.5-pro'
+      ? ['gemini-2.5-pro', 'gemini-2.5-flash']
+      : [primaryModel, 'gemini-2.5-flash'];
 
-      // Build multi-turn conversational history for continuous contextual memory
-      const historyTurns = await getRecentConversationHistory(staffDoc?.phone || staffDoc?.id || '', 8);
-      const contentsPayload: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+    // Build multi-turn conversational history for continuous contextual memory
+    const historyTurns = await getRecentConversationHistory(staffDoc?.phone || staffDoc?.id || '', 8);
+    const contentsPayload: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
 
-      historyTurns.forEach(turn => {
-        contentsPayload.push({
-          role: turn.role,
-          parts: [{ text: turn.text }]
-        });
-      });
-
-      // Append the current user message turn
+    historyTurns.forEach(turn => {
       contentsPayload.push({
-        role: 'user',
-        parts: [{ text: messageText }]
+        role: turn.role,
+        parts: [{ text: turn.text }]
       });
+    });
 
-      const promptPayload = {
-        system_instruction: {
-          parts: [
-            {
-              text: `${config.systemPrompt || DEFAULT_WHATSAPP_SYSTEM_PROMPT}\n\nCONTEXTE TEMPS RÉEL DE L'HÔPITAL ET DU MEMBRE DU PERSONNEL CONNECTÉ (JSON) :\n${JSON.stringify(ctx, null, 2)}`
-            }
-          ]
-        },
-        contents: contentsPayload,
-        generationConfig: {
-          temperature: 0.25,
-          maxOutputTokens: 2048
-        }
-      };
+    // Append the current user message turn
+    contentsPayload.push({
+      role: 'user',
+      parts: [{ text: messageText }]
+    });
 
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(promptPayload)
-      });
-
-      if (resp.ok) {
-        const data: any = await resp.json();
-        const candidateText = data?.candidates?.[0]?.content?.parts
-          ?.map((p: any) => p.text || '')
-          .join('')
-          .trim();
-        if (candidateText) {
-          return {
-            reply: candidateText,
-            modelUsed: model,
-            contextSummary: {
-              staffName: ctx.staff.name,
-              staffRole: ctx.staff.role,
-              totalActs: ctx.personalFinanceAndActs.totalActs,
-              totalCommissionsEarnedFCFA: ctx.personalFinanceAndActs.totalCommissionsEarnedFCFA,
-              waitingPatients: ctx.waitingQueueToday.totalWaiting
-            }
-          };
-        }
-      } else {
-        const errText = await resp.text().catch(() => '');
-        console.warn(`Gemini API returned ${resp.status}:`, errText);
+    const promptPayload = {
+      system_instruction: {
+        parts: [
+          {
+            text: `${config.systemPrompt || DEFAULT_WHATSAPP_SYSTEM_PROMPT}\n\nCONTEXTE TEMPS RÉEL DE L'HÔPITAL ET DU MEMBRE DU PERSONNEL CONNECTÉ (JSON) :\n${JSON.stringify(ctx, null, 2)}`
+          }
+        ]
+      },
+      contents: contentsPayload,
+      generationConfig: {
+        temperature: 0.25,
+        maxOutputTokens: 2048
       }
-    } catch (err) {
-      console.warn('Gemini generation error, falling back to smart local responder:', err);
+    };
+
+    for (const model of modelsToTry) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(promptPayload)
+        });
+
+        if (resp.ok) {
+          const data: any = await resp.json();
+          const candidateText = data?.candidates?.[0]?.content?.parts
+            ?.map((p: any) => p.text || '')
+            .join('')
+            .trim();
+          if (candidateText) {
+            return {
+              reply: candidateText,
+              modelUsed: model,
+              contextSummary: {
+                staffName: ctx.staff.name,
+                staffRole: ctx.staff.role,
+                totalActs: ctx.personalFinanceAndActs.totalActs,
+                totalCommissionsEarnedFCFA: ctx.personalFinanceAndActs.totalCommissionsEarnedFCFA,
+                waitingPatients: ctx.waitingQueueToday.totalWaiting
+              }
+            };
+          }
+        } else {
+          const errText = await resp.text().catch(() => '');
+          console.warn(`Gemini model ${model} returned ${resp.status}:`, errText);
+        }
+      } catch (mErr) {
+        console.warn(`Gemini model ${model} attempt failed:`, mErr);
+      }
     }
   }
 
