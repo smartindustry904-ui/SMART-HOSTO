@@ -1213,7 +1213,11 @@ DIRECTIVES DE STYLE & MISE EN FORME (MARKDOWN NATUREL, ÉLÉGANT ET AÉRÉ) :
 5. RÈGLES MÉTIER :
    - Rédige des réponses fluides, complètes et conclues proprement. Ne coupe jamais tes phrases en plein milieu.
    - Devise obligatoire : FCFA.
-   - Confidentialité : les praticiens ne voient que leurs propres honoraires/commissions ; seuls les ADMIN ont accès aux caisses globales de l'établissement.`;
+   - Confidentialité : les praticiens ne voient que leurs propres honoraires/commissions ; seuls les ADMIN ont accès aux caisses globales de l'établissement.
+
+6. FLUX CONVERSATIONNEL & MÉMOIRE CONTEXTUELLE :
+   - Tu disposes de l'historique récent des échanges.
+   - Si l'utilisateur fait référence à une requête précédente (ex: "same like before", "la même chose en pdf", "et pour les urgences ?", "recommence avec...", "détaille ce chiffre"), analyse le fil de discussion pour assurer une continuité parfaite sans lui demander de répéter.`;
 
 // In-memory cache & fallback logs so the agent works seamlessly even during brief Firestore latency
 let cachedWhatsAppConfig: WhatsAppAgentConfig | null = null;
@@ -1316,6 +1320,81 @@ async function findStaffByPhoneOrId(phone?: string, staffId?: string): Promise<a
     }
   } catch {}
   return null;
+}
+
+async function getRecentConversationHistory(
+  phone: string,
+  limitCount = 8
+): Promise<Array<{ role: 'user' | 'model'; text: string }>> {
+  const clean = normalizePhone(phone);
+  if (!clean) return [];
+
+  // 1. Gather candidates from memory cache
+  let candidates: Array<{ direction: string; message: string; createdAt: string }> = memoryWhatsAppLogs
+    .filter(l => l.phone && phonesMatch(l.phone, clean))
+    .slice(0, 20);
+
+  // 2. If memory is thin (e.g. after restart), fetch recent logs from Firestore
+  if (candidates.length < 4) {
+    try {
+      const snap = await withFastTimeout(getDocs(query(collection(db, 'whatsapp_logs'), limit(40))), 1500);
+      const fsLogs = snap.docs
+        .map(d => d.data() as any)
+        .filter(d => d && d.phone && phonesMatch(d.phone, clean));
+      candidates = [...candidates, ...fsLogs];
+    } catch {}
+  }
+
+  // Deduplicate entries by timestamp & message text
+  const seen = new Set<string>();
+  const unique = candidates.filter(c => {
+    const key = `${c.direction}_${c.createdAt}_${c.message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // Sort chronologically (oldest to newest)
+  unique.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+
+  // Filter out internal system logs
+  const filtered = unique.filter(c => {
+    if (!c.message || typeof c.message !== 'string') return false;
+    const trimmed = c.message.trim();
+    if (trimmed.startsWith('[DOCUMENT ENVOYÉ]')) return false;
+    if (trimmed.startsWith('[DOCUMENT ENVOYE]')) return false;
+    if (trimmed.startsWith('🔒 *Accès Restreint')) return false;
+    return true;
+  });
+
+  // Keep the most recent window of exchanges
+  const recent = filtered.slice(-limitCount);
+
+  // Group into strictly alternating turns for Gemini: user -> model -> user -> model
+  const turns: Array<{ role: 'user' | 'model'; text: string }> = [];
+
+  for (const item of recent) {
+    const role: 'user' | 'model' = item.direction === 'INBOUND' ? 'user' : 'model';
+    if (turns.length === 0) {
+      if (role === 'user') {
+        turns.push({ role, text: item.message });
+      }
+    } else {
+      const lastRole = turns[turns.length - 1].role;
+      if (lastRole === role) {
+        turns[turns.length - 1].text += '\n\n' + item.message;
+      } else {
+        turns.push({ role, text: item.message });
+      }
+    }
+  }
+
+  // If the last turn in history is user, drop it so that appending the incoming user message alternates properly
+  if (turns.length > 0 && turns[turns.length - 1].role === 'user') {
+    turns.pop();
+  }
+
+  return turns;
 }
 
 async function buildStaffHospitalContext(staffDoc: any) {
@@ -2686,6 +2765,23 @@ async function generateStaffAgentReply(
       const model = (config.geminiModel || 'gemini-2.5-flash').trim();
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
+      // Build multi-turn conversational history for continuous contextual memory
+      const historyTurns = await getRecentConversationHistory(staffDoc?.phone || staffDoc?.id || '', 8);
+      const contentsPayload: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [];
+
+      historyTurns.forEach(turn => {
+        contentsPayload.push({
+          role: turn.role,
+          parts: [{ text: turn.text }]
+        });
+      });
+
+      // Append the current user message turn
+      contentsPayload.push({
+        role: 'user',
+        parts: [{ text: messageText }]
+      });
+
       const promptPayload = {
         system_instruction: {
           parts: [
@@ -2694,12 +2790,7 @@ async function generateStaffAgentReply(
             }
           ]
         },
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: messageText }]
-          }
-        ],
+        contents: contentsPayload,
         generationConfig: {
           temperature: 0.25,
           maxOutputTokens: 2048
