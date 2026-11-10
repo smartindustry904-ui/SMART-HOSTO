@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Guide de Test Facile & Sans Jargon — SMART-HOSTO</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800;900&family=Bricolage+Grotesque:opsz,wght@12..96,700;800&display=swap" rel="stylesheet">
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 12mm 14mm 14mm 14mm;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.55;
+      color: #1e293b;
+      background: #ffffff;
+      -webkit-font-smoothing: antialiased;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    .page {
+      page-break-after: always;
+      break-after: page;
+      position: relative;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+
+    .avoid-break {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+
+    /* Page de garde accessible et moderne */
+    .cover {
+      min-height: 96vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 24mm 18mm 18mm 18mm;
+      border: 2px solid #e2e8f0;
+      border-radius: 24px;
+      background: radial-gradient(circle at top left, #f0fdf4 0%, #ffffff 60%, #eff6ff 100%);
+    }
+
+    .badge-top {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 10pt;
+      font-weight: 800;
+      background: #0284c7;
+      color: white;
+      padding: 6px 16px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      align-self: flex-start;
+    }
+
+    .cover-title-group {
+      margin: 35px 0;
+    }
+
+    .cover-kicker {
+      font-size: 12pt;
+      font-weight: 800;
+      color: #0284c7;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 12px;
+    }
+
+    .cover-h1 {
+      font-family: 'Bricolage Grotesque', sans-serif;
+      font-size: 30pt;
+      font-weight: 800;
+      color: #0f172a;
+      line-height: 1.15;
+      letter-spacing: -0.03em;
+      margin-bottom: 16px;
+    }
+
+    .cover-p {
+      font-size: 13pt;
+      color: #475569;
+      font-weight: 500;
+      line-height: 1.5;
+      max-width: 90%;
+    }
+
+    .guide-card-intro {
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 16px;
+      padding: 20px;
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.04);
+      margin-bottom: 25px;
+    }
+
+    .intro-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+
+    .intro-box strong {
+      display: block;
+      font-size: 8.5pt;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 2px;
+    }
+
+    .intro-box span {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #0f172a;
+    }
+
+    .cover-foot {
+      border-top: 1px solid #e2e8f0;
+      padding-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 8.5pt;
+      color: #64748b;
+    }
+
+    /* En-tête des pages suivantes */
+    .page-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 8px;
+      margin-bottom: 16px;
+      font-size: 8.5pt;
+      font-weight: 700;
+      color: #64748b;
+    }
+
+    .page-header strong {
+      color: #0284c7;
+    }
+
+    .section-banner {
+      background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%);
+      color: #ffffff;
+      padding: 10px 14px;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .section-banner h2 {
+      font-size: 13pt;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+    }
+
+    .section-banner span {
+      font-size: 8pt;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    /* Carte de Test Facile */
+    .test-card {
+      border: 1px solid #cbd5e1;
+      border-radius: 14px;
+      margin-bottom: 16px;
+      background: #ffffff;
+      overflow: hidden;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+    }
+
+    .test-card-top {
+      background: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .test-card-title {
+      font-size: 11pt;
+      font-weight: 800;
+      color: #0f172a;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .pill-role {
+      font-size: 7.5pt;
+      font-weight: 800;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .pill-superadmin { background: #fdf2f8; color: #9d174d; border: 1px solid #fbcfe8; }
+    .pill-admin { background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe; }
+    .pill-accueil { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; }
+    .pill-infirmier { background: #f5f3ff; color: #5b21b6; border: 1px solid #ddd6fe; }
+    .pill-medecin { background: #e0f2fe; color: #075985; border: 1px solid #bae6fd; }
+    .pill-caisse { background: #fefce8; color: #854d0e; border: 1px solid #fef08a; }
+
+    .test-card-content {
+      padding: 14px;
+    }
+
+    .block-action {
+      background: #f1f5f9;
+      border-left: 4px solid #0284c7;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .block-action strong {
+      display: block;
+      font-size: 9pt;
+      color: #0369a1;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .block-action p {
+      font-size: 9.5pt;
+      color: #334155;
+      margin: 0;
+      line-height: 1.45;
+    }
+
+    .block-see {
+      background: #eff6ff;
+      border-left: 4px solid #3b82f6;
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+
+    .block-see strong {
+      display: block;
+      font-size: 9pt;
+      color: #1d4ed8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .block-see ul {
+      padding-left: 18px;
+      font-size: 9.5pt;
+      color: #1e3a8a;
+      line-height: 1.45;
+    }
+
+    .block-success {
+      background: #f0fdf4;
+      border-left: 4px solid #16a34a;
+      padding: 10px 12px;
+      border-radius: 8px;
+    }
+
+    .block-success strong {
+      display: block;
+      font-size: 9pt;
+      color: #15803d;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .success-checklist {
+      list-style: none;
+    }
+
+    .success-checklist li {
+      font-size: 9pt;
+      color: #14532d;
+      font-weight: 600;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    .success-checklist li::before {
+      content: "✅";
+      font-size: 9pt;
+    }
+
+    /* Encadré Alerte Règle */
+    .rule-callout {
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-left: 5px solid #dc2626;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 16px;
+    }
+
+    .rule-callout strong {
+      display: block;
+      font-size: 9.5pt;
+      color: #991b1b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+
+    .rule-callout p {
+      font-size: 9.5pt;
+      color: #7f1d1d;
+      margin: 0;
+      line-height: 1.45;
+    }
+
+    /* Tableau récapitulatif ultra-simple */
+    .easy-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 8.5pt;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .easy-table th {
+      background: #0f172a;
+      color: white;
+      text-align: left;
+      padding: 8px 10px;
+      font-size: 8pt;
+      text-transform: uppercase;
+    }
+
+    .easy-table td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      color: #334155;
+    }
+
+    .easy-table tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+
+    .badge-ok {
+      background: #dcfce7;
+      color: #15803d;
+      font-weight: 800;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-size: 7.5pt;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ==================== PAGE 1 : COUVERTURE ==================== -->
+  <div class="page">
+    <div class="cover">
+      <div class="badge-top">
+        🏥 SMART-HOSTO • Guide Pratique Utilisateur
+      </div>
+
+      <div class="cover-title-group">
+        <div class="cover-kicker">Guide de Test Facile & Sans Jargon Technique</div>
+        <h1 class="cover-h1">
+          Comment Tester Tout Votre Hôpital de A à Z
+        </h1>
+        <p class="cover-p">
+          Ce document est fait pour tout utilisateur (directeur, infirmier, médecin, secrétaire ou caissier). Il vous explique <strong>simplement ce que vous devez faire</strong>, <strong>ce que vous devez voir sur votre écran</strong>, et <strong>comment être certain que le test a réussi</strong>.
+        </p>
+      </div>
+
+      <div class="guide-card-intro">
+        <div class="intro-grid">
+          <div class="intro-box">
+            <strong>Hôpital Utilisé pour le Test</strong>
+            <span>Hôpital Général Saint-Luc</span>
+          </div>
+          <div class="intro-box">
+            <strong>Nombre d'Étapes Simples</strong>
+            <span>7 Étapes Clés (Du début à la fin)</span>
+          </div>
+          <div class="intro-box">
+            <strong>Niveau Requis</strong>
+            <span>Grand Public (Zéro code / Zéro technique)</span>
+          </div>
+          <div class="intro-box">
+            <strong>Temps Estimé pour Tout Tester</strong>
+            <span>15 à 20 Minutes (Avec 2 fenêtres)</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="cover-foot">
+        <span>SMART-HOSTO SIH • Guide de Validation Pratique</span>
+        <span>Version 2026 • Simple, Rapide et Fiable</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== PAGE 2 : ÉTAPES 1 & 2 ==================== -->
+  <div class="page">
+    <div class="page-header">
+      <span>SMART-HOSTO • Guide de Test Facile</span>
+      <span>Étape 1 & 2 • Démarrage & Sécurité</span>
+    </div>
+
+    <!-- ÉTAPE 1 -->
+    <div class="section-banner">
+      <h2>Étape 1 : Le Grand Patron (SuperAdmin) crée la Clinique</h2>
+      <span>Avant de commencer</span>
+    </div>
+
+    <div class="test-card avoid-break">
+      <div class="test-card-top">
+        <span class="test-card-title">Test 1 : Créer l'Hôpital et donner les accès au Directeur</span>
+        <span class="pill-role pill-superadmin">Vous êtes : SuperAdmin</span>
+      </div>
+      <div class="test-card-content">
+        <div class="block-action">
+          <strong>Ce que vous faites :</strong>
+          <p>Vous ouvrez le Centre de Contrôle, vous cliquez sur <em>« Ajouter une Clinique »</em>, vous écrivez le nom <strong>« Hôpital Général Saint-Luc »</strong>, vous cochez les services que l'hôpital a le droit d'utiliser, et vous créez le compte du directeur : <strong>admin_saintluc</strong> avec un mot de passe temporaire.</p>
+        </div>
+        <div class="block-see">
+          <strong>Ce que vous devez voir sur l'écran :</strong>
+          <ul>
+            <li>Une belle fenêtre s'affiche avec le nom du directeur et son mot de passe secret provisoire.</li>
+            <li>Un bouton vert vous permet de copier ces informations en un seul clic.</li>
+            <li>L'hôpital apparaît fièrement dans la liste des hôpitaux actifs.</li>
+          </ul>
+        </div>
+        <div class="block-success">
+          <strong>Comment savoir que le test est RÉUSSI :</strong>
+          <ul class="success-checklist">
+            <li>L'hôpital existe et ses accès sont créés sans aucune erreur.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ÉTAPE 2 -->
+    <div class="section-banner" style="margin-top: 20px;">
+      <h2>Étape 2 : Le Directeur se connecte et change son mot de passe</h2>
+      <span>Sécurité Obligatoire</span>
+    </div>
+
+    <div class="test-card avoid-break">
+      <div class="test-card-top">
+        <span class="test-card-title">Test 2 : Le système OBLIGE le directeur à choisir son propre mot de passe</span>
+        <span class="pill-role pill-admin">Vous êtes : Directeur (Admin)</span>
+      </div>
+      <div class="test-card-content">
+        <div class="block-action">
+          <strong>Ce que vous faites :</strong>
+          <p>Vous vous connectez avec l'identifiant <strong>admin_saintluc</strong> et le mot de passe temporaire.</p>
+        </div>
+        <div class="block-see">
+          <strong>Ce que vous devez voir sur l'écran (IMPORTANT) :</strong>
+          <ul>
+            <li>Une fenêtre de sécurité bloque TOUT l'écran. <strong>Impossible d'accéder aux dossiers des malades !</strong></li>
+            <li>Si vous tapez un mot de passe trop court ou trop facile (ex: <em>1234</em>), l'écran refuse et affiche : <em>« Mot de passe trop court (8 lettres minimum) »</em>.</li>
+            <li>Dès que vous choisissez un vrai mot de passe avec majuscules et chiffres (ex: <code>Admin@SaintLuc#2027</code>), le cadenas se déverrouille !</li>
+          </ul>
+        </div>
+        <div class="block-success">
+          <strong>Comment savoir que le test est RÉUSSI :</strong>
+          <ul class="success-checklist">
+            <li>Le directeur a été forcé de sécuriser son compte avant de pouvoir travailler.</li>
+            <li>La fenêtre se ferme et le tableau de bord de l'hôpital s'ouvre enfin en grand.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== PAGE 3 : ÉTAPE 3 & 4 (LE COEUR DU TRIAGE !) ==================== -->
+  <div class="page">
+    <div class="page-header">
+      <span>SMART-HOSTO • Guide de Test Facile</span>
+      <span>Étape 3 & 4 • Équipe & Triage Infirmier</span>
+    </div>
+
+    <!-- ÉTAPE 3 -->
+    <div class="section-banner">
+      <h2>Étape 3 : Créer les comptes pour l'équipe médicale</h2>
+      <span>Chacun son rôle</span>
+    </div>
+
+    <div class="test-card avoid-break">
+      <div class="test-card-top">
+        <span class="test-card-title">Test 3 : Vérifier que chaque employé ne voit QUE son travail</span>
+        <span class="pill-role pill-admin">Vous êtes : Directeur (Admin)</span>
+      </div>
+      <div class="test-card-content">
+        <div class="block-action">
+          <strong>Ce que vous faites :</strong>
+          <p>Dans <em>Paramètres &rarr; Utilisateurs</em>, vous créez l'agent d'accueil (<strong>Roger</strong>), l'infirmière (<strong>Carine</strong>), le médecin (<strong>Dr. Marc</strong>) et la caissière (<strong>Danielle</strong>).</p>
+        </div>
+        <div class="block-success">
+          <strong>Comment savoir que le test est RÉUSSI :</strong>
+          <ul class="success-checklist">
+            <li>Quand la caissière se connecte, elle voit la caisse, mais ne peut pas ouvrir les consultations du médecin.</li>
+            <li>Quand l'infirmière se connecte, elle voit son poste de soins, mais ne peut pas encaisser l'argent.</li>
+            <li>Chaque personne a un menu personnalisé selon son vrai métier.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ÉTAPE 4 : LA RÈGLE CLINIQUE MAJEURE -->
+    <div class="section-banner" style="margin-top: 18px; background: linear-gradient(90deg, #0284c7 0%, #0369a1 100%);">
+      <h2>Étape 4 : L'Arrivée du Malade — Le passage OBLIGATOIRE chez l'Infirmière !</h2>
+      <span>Règle Médicale Fondamentale</span>
+    </div>
+
+    <div class="rule-callout avoid-break">
+      <strong>⚠️ ATTENTION TRÈS IMPORTANTE — CE QU'IL FAUT ABSOLUMENT VÉRIFIER :</strong>
+      <p>Dans un vrai hôpital sérieux, un malade ne rentre jamais chez le docteur sans avoir fait prendre sa tension et sa température d'abord ! SMART-HOSTO respecte rigoureusement cette règle : quand la secrétaire admet un patient pour consultation, <strong>il n'apparaît PAS ENCORE chez le docteur</strong>. Il va d'abord chez l'infirmière !</p>
+    </div>
+
+    <div class="test-card avoid-break">
+      <div class="test-card-top">
+        <span class="test-card-title">Test 4 : Le circuit Accueil &rarr; Infirmière (Triage) &rarr; Médecin</span>
+        <span class="pill-role pill-accueil">Accueil</span> &rarr; <span class="pill-role pill-infirmier">Infirmière</span> &rarr; <span class="pill-role pill-medecin">Docteur</span>
+      </div>
+      <div class="test-card-content">
+        <div class="block-action">
+          <strong>1. À l'Accueil (Roger) :</strong>
+          <p>Vous enregistrez le patient <strong>ETOUNDI Gérard</strong> (42 ans). Vous choisissez <em>« Consultation Médecine Générale »</em> et vous validez.</p>
+        </div>
+        <div class="block-see">
+          <strong>Ce que vous observez :</strong>
+          <ul>
+            <li>Chez le Docteur Marc : <strong>La salle d'attente est VIDE !</strong> M. ETOUNDI n'apparaît pas encore.</li>
+            <li>Chez l'Infirmière Carine : M. ETOUNDI apparaît tout de suite avec le badge orange <em>« En attente de constantes »</em> !</li>
+          </ul>
+        </div>
+        <div class="block-action" style="border-left-color: #7c3aed; background: #faf5ff;">
+          <strong style="color: #6d28d9;">2. Chez l'Infirmière (Carine) :</strong>
+          <p>Elle clique sur M. ETOUNDI et tape ses chiffres : Tension <strong>13/8</strong>, Température <strong>38.6°C</strong>, Pouls <strong>88</strong>, Poids <strong>78 kg</strong>. Puis elle clique sur le gros bouton bleu : <strong>« Transférer au Médecin »</strong>.</p>
+        </div>
+        <div class="block-see">
+          <strong>Ce qui se passe immédiatement :</strong>
+          <ul>
+            <li>M. ETOUNDI quitte l'ordinateur de l'infirmière.</li>
+            <li>Sur l'écran du Docteur Marc : <strong>BIP !</strong> M. ETOUNDI apparaît enfin dans sa salle d'attente avec une étiquette verte <em>« Constantes faites (38.6°C - Fièvre) »</em> !</li>
+            <li>Quand le docteur clique pour le recevoir : sa tension et sa température sont <strong>DÉJÀ ÉCRITES</strong> dans le dossier médical. Le docteur n'a rien besoin de retaper !</li>
+          </ul>
+        </div>
+        <div class="block-success">
+          <strong>Comment savoir que le test est RÉUSSI :</strong>
+          <ul class="success-checklist">
+            <li>Le malade est obligatoirement passé par l'infirmière avant de pouvoir voir le docteur.</li>
+            <li>Zéro perte de temps : toutes les mesures prises par l'infirmière sont automatiquement dans le dossier du docteur.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== PAGE 4 : ÉTAPES 5, 6 & 7 ==================== -->
+  <div class="page">
+    <div class="page-header">
+      <span>SMART-HOSTO • Guide de Test Facile</span>
+      <span>Étapes 5, 6 & 7 • Soins, Caisse & Sortie</span>
+    </div>
+
+    <!-- ÉTAPE 5 -->
+    <div class="section-banner">
+      <h2>Étape 5 : Le Médecin prescrit et le reste de l'hôpital réagit</h2>
+      <span>Le travail en équipe</span>
+    </div>
+
+    <div class="test-card avoid-break">
+      <div class="test-card-top">
+        <span class="test-card-title">Test 5 : Envoyer le malade au Laboratoire, à la Pharmacie et au Lit</span>
+        <span class="pill-role pill-medecin">Docteur</span>
+      </div>
+      <div class="test-card-content">
+        <div class="block-see">
+          <strong>Ce que vous testez et ce que vous devez voir :</strong>
+          <ul>
+            <li><strong>Au Laboratoire :</strong> Le docteur coche <em>« Test Paludisme (Goutte Épaisse) »</em>. Le laborantin le voit instantanément sur son écran, fait le test, tape <em>« Positif »</em> et valide. Le docteur voit la réponse verte <em>« Positif »</em> arriver directement dans son dossier !</li>
+            <li><strong>À la Pharmacie :</strong> Le docteur prescrit une boîte de <em>Coartem</em>. Le pharmacien voit l'ordonnance, clique sur <em>« Délivrer »</em>. Le stock de la pharmacie diminue automatiquement d'une boîte.</li>
+            <li><strong>À l'Hospitalisation :</strong> Si le docteur veut garder le malade pour la nuit, il choisit la Chambre 3, Lit A. Le lit devient rouge <em>« Occupé »</em>. Personne d'autre ne peut le prendre !</li>
+          </ul>
+        </div>
+        <div class="block-success">
+          <strong>Comment savoir que le test est RÉUSSI :</strong>
+          <ul class="success-checklist">
+            <li>Toutes les prescriptions du docteur arrivent au bon endroit sans aucun papier perdu.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ÉTAPE 6 -->
+    <div class="section-banner" style="margin-top: 16px;">
+      <h2>Étape 6 : Le Passage à la Caisse & Le Test d'Impression</h2>
+      <span>Les Sous de la Clinique</span>
+    </div>
+
+    <div class="test-card avoid-break">
+      <div class="test-card-top">
+        <span class="test-card-title">Test 6 : Paiements, Dettes, Avances et Ticket Propre</span>
+        <span class="pill-role pill-caisse">Caissière</span>
+      </div>
+      <div class="test-card-content">
+        <div class="block-see">
+          <strong>Les 3 cas d'argent à tester :</strong>
+          <ul>
+            <li><strong>Cas 1 (Il paie tout) :</strong> La facture est de 10 000 F. Il donne 10 000 F &rarr; C'est réglé.</li>
+            <li><strong>Cas 2 (Il n'a pas tout l'argent) :</strong> La facture est de 15 000 F. Il donne 10 000 F &rarr; Le système note automatiquement une <strong>Dette de 5 000 F</strong> sur son compte.</li>
+            <li><strong>Cas 3 (Il donne trop) :</strong> La facture est de 8 000 F. Il donne 10 000 F &rarr; La caissière peut lui rendre 2 000 F ou mettre les 2 000 F en <strong>Avance (Avoir)</strong> pour sa prochaine visite.</li>
+          </ul>
+        </div>
+        <div class="block-action" style="margin-top: 10px;">
+          <strong>Le Test de l'Impression Propre :</strong>
+          <p>Cliquez sur l'imprimante pour sortir le reçu. Regardez la page d'impression : <strong>elle doit être 100% blanche avec uniquement le ticket au milieu</strong>. Aucun bouton, aucun tableau de fond ne doit baver dessus ! Vous pouvez basculer entre le petit ticket de supermarché (80mm) et la grande feuille de facture A4.</p>
+        </div>
+        <div class="block-success">
+          <strong>Comment savoir que le test est RÉUSSI :</strong>
+          <ul class="success-checklist">
+            <li>L'argent de la caisse tombe pile-poil avec les reçus.</li>
+            <li>Le ticket de caisse imprimé est propre et élégant sans fuite d'écran.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- ÉTAPE 7 -->
+    <div class="section-banner" style="margin-top: 16px;">
+      <h2>Étape 7 : La Sortie du Patient et le Blocage Anti-Fraude</h2>
+      <span>Sortie Officielle</span>
+    </div>
+
+    <div class="test-card avoid-break">
+      <div class="test-card-top">
+        <span class="test-card-title">Test 7 : Empêcher un patient qui n'a pas payé de s'enfuir !</span>
+        <span class="pill-role pill-accueil">Accueil & Sorties</span>
+      </div>
+      <div class="test-card-content">
+        <div class="block-see">
+          <strong>Ce que vous testez (Très important) :</strong>
+          <ul>
+            <li>Le docteur termine la consultation et clique sur <em>« Fin de prise en charge »</em>.</li>
+            <li>Le patient arrive à l'accueil pour demander son Bon de Sortie.</li>
+            <li><strong>TEST DU BLOCAGE :</strong> Si le patient a une dette impayée à la caisse (ex: 5 000 F), l'accueil voit un <strong>GROS SIGNAL ROUGE</strong> : <em>« Dette en cours : 5 000 F »</em>. Le bouton <em>« Autoriser la sortie »</em> est <strong>GRISÉ ET BLOQUÉ</strong> ! Impossible de tricher.</li>
+            <li><strong>TEST DE VALIDATION :</strong> Dès que le patient passe à la caisse solder ses 5 000 F, le voyant passe au <strong>VERT</strong>. La secrétaire clique sur <em>« Autoriser la sortie »</em> et imprime le <strong>Bon de Sortie Officiel</strong>. Le dossier est rangé en sécurité dans l'historique !</li>
+          </ul>
+        </div>
+        <div class="block-success">
+          <strong>Comment savoir que le test est RÉUSSI :</strong>
+          <ul class="success-checklist">
+            <li>Aucun malade ne peut sortir de l'hôpital sans que ses frais soient entièrement clarifiés.</li>
+            <li>Le Bon de Sortie officiel est imprimé et le dossier du patient est archivé pour toujours.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== PAGE 5 : TABLEAU CHECKLIST SIMPLE ==================== -->
+  <div class="page">
+    <div class="page-header">
+      <span>SMART-HOSTO • Guide de Test Facile</span>
+      <span>Fiche de Contrôle Pratique</span>
+    </div>
+
+    <div class="section-banner">
+      <h2>Votre Fiche de Contrôle Simple à Cocher (1 Page)</h2>
+      <span>Prêt à l'emploi</span>
+    </div>
+
+    <p style="font-size: 9.5pt; color: #475569; margin-bottom: 12px;">
+      Imprimez cette page et cochez les cases au fur et à mesure que vous essayez l'application sur votre ordinateur :
+    </p>
+
+    <table class="easy-table avoid-break">
+      <thead>
+        <tr>
+          <th style="width: 10%;">Étape</th>
+          <th style="width: 25%;">Qui fait le test ?</th>
+          <th style="width: 45%;">Ce qu'il faut regarder avec ses yeux</th>
+          <th style="width: 20%;">Résultat</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>1</strong></td>
+          <td>Le Grand Patron (SuperAdmin)</td>
+          <td>L'hôpital est créé et les mots de passe du directeur s'affichent clairement.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>2</strong></td>
+          <td>Le Directeur de l'Hôpital</td>
+          <td>Une fenêtre bloque l'accès et force à choisir un nouveau mot de passe secret.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>3</strong></td>
+          <td>Le Directeur</td>
+          <td>Les comptes de l'infirmière, de la caissière et du docteur sont créés.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>4.A</strong></td>
+          <td>La Secrétaire d'Accueil</td>
+          <td>Elle admet M. ETOUNDI en consultation générale.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>4.B</strong></td>
+          <td>Le Docteur Marc</td>
+          <td><strong>Vérification clé :</strong> Le malade N'EST PAS chez le docteur !</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>4.C</strong></td>
+          <td>L'Infirmière Carine</td>
+          <td>Le malade est chez elle ! Elle prend sa tension (13/8) et sa température (38.6°C).</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>4.D</strong></td>
+          <td>L'Infirmière</td>
+          <td>Elle clique sur « Transférer au Médecin ». Le malade quitte son écran.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>4.E</strong></td>
+          <td>Le Docteur Marc</td>
+          <td>Bip ! Le malade arrive chez le docteur avec sa tension déjà notée sans rien retaper.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>5.A</strong></td>
+          <td>Le Docteur & Le Laborantin</td>
+          <td>Le test de paludisme demandé par le docteur arrive au labo et la réponse revient.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>5.B</strong></td>
+          <td>Le Docteur & La Pharmacie</td>
+          <td>L'ordonnance arrive à la pharmacie et le stock de boîtes baisse quand on sert.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>6.A</strong></td>
+          <td>La Caissière Danielle</td>
+          <td>Elle encaisse l'argent, calcule les dettes si le malade n'a pas tout payé.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>6.B</strong></td>
+          <td>La Caissière</td>
+          <td>Elle clique sur Imprimer : Le ticket sort tout propre sans rien qui bave.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>7.A</strong></td>
+          <td>La Secrétaire aux Sorties</td>
+          <td>Le malade a une dette : Le bouton de sortie est ROUGE ET BLOQUÉ.</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+        <tr>
+          <td><strong>7.B</strong></td>
+          <td>La Secrétaire aux Sorties</td>
+          <td>Le malade a tout payé : Le bouton devient VERT et imprime le Bon de Sortie !</td>
+          <td><span class="badge-ok">☐ Ça marche</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top: 25px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px;" class="avoid-break">
+      <strong style="display: block; font-size: 9.5pt; color: #0f172a; margin-bottom: 4px;">🎉 Félicitations !</strong>
+      <p style="font-size: 9pt; color: #475569; margin: 0;">
+        Si vous avez coché toutes les cases ci-dessus, votre hôpital <strong>SMART-HOSTO</strong> fonctionne parfaitement : aucun malade n'échappe à la prise de tension, aucun médicament ne sort sans être compté, aucun centime n'est perdu à la caisse, et personne ne peut s'enfuir sans son quitus !
+      </p>
+    </div>
+  </div>
+
+</body>
+</html>
