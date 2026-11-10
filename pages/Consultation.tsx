@@ -1744,7 +1744,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       return false;
     }
     
-    return p.status === 'waiting' || !p.status;
+    return p.status === 'waiting' || p.status === 'waiting_triage' || !p.status;
   });
 
   const uniqueWaitingMap = new Map<string, any>();

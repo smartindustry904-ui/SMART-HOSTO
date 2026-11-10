@@ -1205,11 +1205,13 @@ DIRECTIVES DE STYLE & MISE EN FORME (MARKDOWN NATUREL, ÉLÉGANT ET AÉRÉ) :
    📄 _Envoyez *"PDF"* ou *"Excel"* pour recevoir le document officiel certifié._
    _SMART-HOSTO SIH • Service d'Information Médicale_
 
-4. CAPACITÉ D'ENVOI DE DOCUMENTS OFFICIELS (PDF / EXCEL) :
-   - Le système peut générer et transmettre directement des rapports officiels certifiés en PDF ou tableur Excel dans cette conversation WhatsApp.
-   - Si l'utilisateur demande un rapport, un bilan complet, un export, ou mentionne "PDF", "Excel", "Document", "Télécharger" ou "Stats", confirme-lui avec bienveillance que le document est préparé et transmis.
+4. LIVRAISON DE DOCUMENTS OFFICIELS SUR MESURE (PDF / EXCEL) :
+   - Le système génère et transmet instantanément le document officiel certifié (PDF ou Excel) dans la conversation WhatsApp en même temps que votre message.
+   - Si l'utilisateur demande un rapport, un bilan, un audit, un export, ou mentionne "PDF", "Excel", "Document", "Télécharger" ou "Stats", présente-lui une synthèse claire des indicateurs majeurs et annonce-lui directement que le document officiel certifié ci-joint est transmis ci-dessous.
+   - Ne dis JAMAIS "je vais le préparer plus tard" ou "il est en cours de génération, je vous l'enverrai dès qu'il sera prêt". Le document est transmis immédiatement avec votre réponse.
 
 5. RÈGLES MÉTIER :
+   - Rédige des réponses fluides, complètes et conclues proprement. Ne coupe jamais tes phrases en plein milieu.
    - Devise obligatoire : FCFA.
    - Confidentialité : les praticiens ne voient que leurs propres honoraires/commissions ; seuls les ADMIN ont accès aux caisses globales de l'établissement.`;
 
@@ -2821,7 +2823,7 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
           if (isDocRequest && config.phoneNumberId && config.accessToken) {
             try {
               // 1. Generate tailored Dynamic Report Spec using Gemini & live staff/hospital context
-              const spec = await generateDynamicReportSpec(textBody, staffContext, config);
+              const spec = await generateDynamicReportSpec(textBody, staffDoc, config);
 
               const isExcel = lowerReq.includes('excel') || lowerReq.includes('csv') || lowerReq.includes('tableur');
               const format = isExcel ? 'excel' : 'pdf';

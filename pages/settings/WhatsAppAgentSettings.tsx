@@ -78,56 +78,17 @@ DIRECTIVES DE STYLE & MISE EN FORME (MARKDOWN NATUREL, ÉLÉGANT ET AÉRÉ) :
    📄 _Envoyez *"PDF"* ou *"Excel"* pour recevoir le document officiel certifié._
    _SMART-HOSTO SIH • Service d'Information Médicale_
 
-4. CAPACITÉ D'ENVOI DE DOCUMENTS OFFICIELS (PDF / EXCEL) :
-   - Le système peut générer et transmettre directement des rapports officiels certifiés en PDF ou tableur Excel dans cette conversation WhatsApp.
-   - Si l'utilisateur demande un rapport, un bilan complet, un export, ou mentionne "PDF", "Excel", "Document", "Télécharger" ou "Stats", confirme-lui avec bienveillance que le document est préparé et transmis.
+4. LIVRAISON DE DOCUMENTS OFFICIELS SUR MESURE (PDF / EXCEL) :
+   - Le système génère et transmet instantanément le document officiel certifié (PDF ou Excel) dans la conversation WhatsApp en même temps que votre message.
+   - Si l'utilisateur demande un rapport, un bilan, un audit, un export, ou mentionne "PDF", "Excel", "Document", "Télécharger" ou "Stats", présente-lui une synthèse claire des indicateurs majeurs et annonce-lui directement que le document officiel certifié ci-joint est transmis ci-dessous.
+   - Ne dis JAMAIS "je vais le préparer plus tard" ou "il est en cours de génération, je vous l'enverrai dès qu'il sera prêt". Le document est transmis immédiatement avec votre réponse.
 
 5. RÈGLES MÉTIER :
+   - Rédige des réponses fluides, complètes et conclues proprement. Ne coupe jamais tes phrases en plein milieu.
    - Devise obligatoire : FCFA.
    - Confidentialité : les praticiens ne voient que leurs propres honoraires/commissions ; seuls les ADMIN ont accès aux caisses globales de l'établissement.`;
 
-const OLD_UNUSED_PROMPT = "" ? `
-     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-3. TABLEAUX & GRILLES ALIGNÉES EN MONOSPACE (Triple Backticks \`\`\`) :
-   - WhatsApp prend parfaitement en charge les blocs de texte monospace grâce aux triples apostrophes inverses (\`\`\`).
-   - Pour TOUTE liste de 2 éléments ou plus (patients, lits, factures, tarifs, stocks), utilise OBLIGATOIREMENT un bloc monospace pour afficher un tableau à colonnes alignées :
-   Exemple pour les patients / hospitalisations :
-   \`\`\`
-   PATIENT          LIT       DATE ADM.   STATUT
-   ───────────────────────────────────────────
-   DERAIN DJOFANG   Lit 1    17/07/2026  Attente
-   nkounadji DJOF.  Lit 3    17/07/2026  Attente
-   DERA DJOFANG     Lit 2    04/08/2026  Attente
-   \`\`\`
-   Exemple pour les commissions et actes :
-   \`\`\`
-   DATE     ACTE            HONORAIRES  STATUT
-   ───────────────────────────────────────────
-   09/11    Consultation      +750 F    Attente
-   06/11    Consultation      +750 F    Attente
-   \`\`\`
-   Exemple pour la pharmacie :
-   \`\`\`
-   ARTICLE             STOCK  SEUIL  STATUT
-   ───────────────────────────────────────────
-   Doliprane 1000mg       2     10   CRITIQUE
-   Amoxicilline 500mg    45     15   Normal
-   \`\`\`
-
-4. ENCADRÉS KPI & CHIFFRES CLÉS :
-   - Présente les métriques financières ou capacitaires sous forme de fiches synthétiques encadrées :
-   ┌────────────────────────────────────────┐
-   │ COMMISSIONS EN ATTENTE : 1 500 FCFA    │
-   │ DOSSIERS CLÔTURÉS      : 3             │
-   └────────────────────────────────────────┘
-
-5. RÈGLES MÉTIER :
-   - Devise obligatoire : FCFA.
-   - Respect absolu de la confidentialité et du rôle : seul le profil ADMIN a accès aux agrégats de caisse et finances globales de l'établissement.
-   - Signature en pied de page :
-     ─────────────────────────────
-     _SMART-HOSTO SIH • Données certifiées en temps réel_` : '';
 
 // Helper to parse JSON safely without throwing "Unexpected end of JSON input"
 async function safeParseJson(res: Response): Promise<any | null> {

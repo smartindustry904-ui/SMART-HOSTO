@@ -1053,7 +1053,7 @@ const Reception: React.FC<ReceptionProps> = ({
         dmeId = seqIds.dmeId;
       }
 
-      const finalVitals = (!sendToNurseTriage && currentPatient.vitals) ? {
+      const finalVitals = currentPatient.vitals ? {
         ...currentPatient.vitals,
         bmi: computedBMI
       } : undefined;
@@ -2392,8 +2392,7 @@ const Reception: React.FC<ReceptionProps> = ({
                       <button 
                         disabled={isSaving}
                         onClick={() => {
-                          const isMat = selectedMotif?.category === 'MATERNITE' || selectedMotif?.serviceId === 'SRV-MATERNITE' || visitMotif === 'MATERNITE';
-                          finalizeAdmission(isMat ? false : (selectedMotif?.category === 'CONSULTATIONS' || selectedMotif?.category === 'URGENCES' || selectedMotif?.category === 'HOSPITALISATION'));
+                          finalizeAdmission(false);
                         }}
                         className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-md disabled:opacity-50 cursor-pointer shrink-0"
                       >
