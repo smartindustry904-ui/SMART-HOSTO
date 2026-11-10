@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Printer, Landmark, CheckCircle, ShieldCheck, User, Calendar, DollarSign, Smartphone, CreditCard, Wallet, AlertCircle } from 'lucide-react';
 import { CashierSession } from '../../types';
+import { printElementDirectly } from '../../src/utils/print';
 
 interface ShiftClosingSlipModalProps {
   session: CashierSession;
@@ -14,7 +15,10 @@ export const ShiftClosingSlipModal: React.FC<ShiftClosingSlipModalProps> = ({
   onClose
 }) => {
   const handlePrint = () => {
-    window.print();
+    printElementDirectly('shift-closing-slip-printable', {
+      format: 'A4',
+      title: `Bordereau-Cloture-${session.id || 'Caisse'}`
+    });
   };
 
   const openedAt = session.openedAt ? new Date(session.openedAt).toLocaleString('fr-FR') : '-';
@@ -24,9 +28,18 @@ export const ShiftClosingSlipModal: React.FC<ShiftClosingSlipModalProps> = ({
   const isBalanced = Math.abs(diff) < 1;
 
   return (
-    <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-hidden shift-slip-backdrop">
+    <div className="fixed inset-0 bg-slate-955/75 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-hidden shift-slip-backdrop">
       <style>{`
         @media print {
+          body > #root > div > aside,
+          body > #root > div > header,
+          body > #root > div > nav,
+          body > #root > div > footer,
+          body > #root > div > [role="navigation"],
+          body main > *:not(:has(.shift-slip-container)),
+          .no-print {
+            display: none !important;
+          }
           .shift-slip-backdrop {
             position: static !important;
             background: none !important;
@@ -50,12 +63,9 @@ export const ShiftClosingSlipModal: React.FC<ShiftClosingSlipModalProps> = ({
             overflow: visible !important;
             padding: 0 !important;
           }
-          .no-print {
-            display: none !important;
-          }
           @page {
             size: A4 portrait;
-            margin: 12mm;
+            margin: 10mm;
           }
         }
       `}</style>
@@ -91,7 +101,7 @@ export const ShiftClosingSlipModal: React.FC<ShiftClosingSlipModalProps> = ({
         </div>
 
         {/* Scrollable Printable Content */}
-        <div className="p-5 sm:p-6 md:p-8 space-y-6 text-slate-900 printable-slip flex-1 overflow-y-auto custom-scrollbar shift-slip-content">
+        <div id="shift-closing-slip-printable" className="p-5 sm:p-6 md:p-8 space-y-6 text-slate-900 printable-slip flex-1 overflow-y-auto custom-scrollbar shift-slip-content bg-white">
           
           {/* Slip Header */}
           <div className="border-b border-slate-200 pb-5 flex justify-between items-start">

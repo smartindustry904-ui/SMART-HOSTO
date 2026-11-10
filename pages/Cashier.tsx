@@ -13,6 +13,8 @@ import { Avatar } from '../components/common/Avatar';
 
 import { useSettings } from '../hooks/useSettings';
 import { PrintReceiptModal, PrintableReceiptData } from '../components/common/PrintReceiptModal';
+import { printElementDirectly } from '../src/utils/print';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface CashierProps {
   user: any;
@@ -84,6 +86,8 @@ const Cashier: React.FC<CashierProps> = ({
   theme = 'light'
 }) => {
   const { establishment } = useSettings();
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
   const [paymentAmount, setPaymentAmount] = useState<string>('');
@@ -108,12 +112,13 @@ const Cashier: React.FC<CashierProps> = ({
   const [patientsList, setPatientsList] = useState<Patient[]>([]);
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'patients'), snapshot => {
-      setPatientsList(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Patient)));
+      const allPatients = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Patient));
+      setPatientsList(allPatients.filter(p => belongsToTenant(p, activeTenantId)));
     }, err => {
       console.warn("Could not sync patients in Cashier:", err);
     });
     return () => unsub();
-  }, []);
+  }, [activeTenantId]);
 
   const patientsMap = useMemo(() => {
     const map = new Map<string, Patient>();
@@ -172,9 +177,10 @@ const Cashier: React.FC<CashierProps> = ({
 
       const sRef1 = doc(db, 'cashier_sessions', newSession.id);
       const sRef2 = doc(db, 'caisse_sessions', newSession.id);
+      const stampedSession = stampTenantData(newSession, user, establishment);
       Promise.all([
-        setDoc(sRef1, sanitizeData(newSession)),
-        setDoc(sRef2, sanitizeData(newSession))
+        setDoc(sRef1, sanitizeData(stampedSession)),
+        setDoc(sRef2, sanitizeData(stampedSession))
       ]).catch(err => {
         console.warn("Background session open sync warning:", err);
       });
@@ -324,9 +330,10 @@ const Cashier: React.FC<CashierProps> = ({
 
       const sRef1 = doc(db, 'cashier_sessions', activeSession.id);
       const sRef2 = doc(db, 'caisse_sessions', activeSession.id);
+      const stampedClosedSession = stampTenantData(closedSession, user, establishment);
       Promise.all([
-        setDoc(sRef1, sanitizeData(closedSession), { merge: true }),
-        setDoc(sRef2, sanitizeData(closedSession), { merge: true })
+        setDoc(sRef1, sanitizeData(stampedClosedSession), { merge: true }),
+        setDoc(sRef2, sanitizeData(stampedClosedSession), { merge: true })
       ]).catch(err => {
         console.warn("Background session close sync warning:", err);
       });
@@ -558,7 +565,7 @@ const Cashier: React.FC<CashierProps> = ({
 
       // 2. Save Transaction in Firebase
       const txRef = doc(db, 'cashier_transactions', newTransaction.id);
-      batch.set(txRef, sanitizeData(newTransaction));
+      batch.set(txRef, sanitizeData(stampTenantData(newTransaction, user, establishment)));
 
       // 3. Handle Avoir Usage
       if (montantAvoirApplique > 0) {
@@ -591,7 +598,7 @@ const Cashier: React.FC<CashierProps> = ({
           status: 'AVAILABLE'
         };
         const newAvoirRef = doc(db, 'avoirs_patient', newAvoir.id);
-        batch.set(newAvoirRef, sanitizeData(newAvoir));
+        batch.set(newAvoirRef, sanitizeData(stampTenantData(newAvoir, user, establishment)));
       }
 
       // 5. Handle Debt inclusion settlement & New Debt
@@ -619,7 +626,7 @@ const Cashier: React.FC<CashierProps> = ({
           status: 'PENDING'
         };
         const newDetteRef = doc(db, 'dettes_patient', newDette.id);
-        batch.set(newDetteRef, sanitizeData(newDette));
+        batch.set(newDetteRef, sanitizeData(stampTenantData(newDette, user, establishment)));
       }
 
       // Optimistically update local states immediately (0ms delay)
@@ -2011,7 +2018,7 @@ const Cashier: React.FC<CashierProps> = ({
       {/* Modal 3: Printable Shift Report */}
       {closedSessionReport && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[160] flex items-center justify-center p-4">
-          <div className="bg-white rounded-[32px] max-w-xl w-full p-8 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95">
+          <div id="closed-session-report-printable" className="bg-white rounded-[32px] max-w-xl w-full p-8 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95">
             <div className="flex justify-between items-center pb-6 border-b border-slate-100">
               <div className="flex items-center gap-3">
                 <div className="p-3 bg-emerald-50 text-emerald-600 rounded-2xl">
@@ -2022,7 +2029,7 @@ const Cashier: React.FC<CashierProps> = ({
                   <p className="text-xs text-slate-500 font-medium">Bilan imprimable de fin de shift</p>
                 </div>
               </div>
-              <button onClick={() => setClosedSessionReport(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400">
+              <button onClick={() => setClosedSessionReport(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400 no-print">
                 <X size={20} />
               </button>
             </div>
@@ -2073,18 +2080,18 @@ const Cashier: React.FC<CashierProps> = ({
               </div>
             </div>
 
-            <div className="flex gap-4 pt-4">
+            <div className="flex gap-4 pt-4 no-print">
               <button
                 type="button"
                 onClick={() => setClosedSessionReport(null)}
-                className="flex-1 py-4 font-bold text-slate-600 hover:bg-slate-100 rounded-2xl transition-colors"
+                className="flex-1 py-4 font-bold text-slate-600 hover:bg-slate-100 rounded-2xl transition-colors cursor-pointer"
               >
                 Fermer
               </button>
               <button
                 type="button"
-                onClick={() => window.print()}
-                className="flex-1 py-4 bg-slate-900 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2"
+                onClick={() => printElementDirectly('closed-session-report-printable', { format: 'A4', title: 'Bilan Cloture Caisse' })}
+                className="flex-1 py-4 bg-slate-900 hover:bg-emerald-600 text-white font-black rounded-2xl shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Printer size={18} />
                 Imprimer le Rapport

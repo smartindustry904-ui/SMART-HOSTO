@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Pill, 
   Search, 
@@ -43,6 +43,7 @@ import { PharmacyHistoryTable } from '../components/pharmacy/PharmacyHistoryTabl
 import { PharmacyCatalog } from '../components/pharmacy/PharmacyCatalog';
 import { PharmacyCheckoutPanel } from '../components/pharmacy/PharmacyCheckoutPanel';
 import { PrescriptionCheckoutModal } from '../components/pharmacy/PrescriptionCheckoutModal';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface PharmacyProps {
   paymentRequests?: PaymentRequest[];
@@ -64,6 +65,7 @@ const Pharmacy: React.FC<PharmacyProps> = ({
   theme = 'light'
 }) => {
   const { establishment } = useSettings();
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const [pendingPrescriptions, setPendingPrescriptions] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
   const [patientSearch, setPatientSearch] = useState('');
@@ -112,7 +114,8 @@ const Pharmacy: React.FC<PharmacyProps> = ({
   useEffect(() => {
     // 1. Listen to Pharmacy Caisse Sessions
     const unsubSessions = onSnapshot(collection(db, 'pharmacy_sessions'), (snapshot) => {
-      const sessions = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as CashierSession[];
+      const allSessions = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as CashierSession[];
+      const sessions = allSessions.filter(s => belongsToTenant(s, activeTenantId));
       setPharmacySessions(sessions);
       const currentOpen = sessions.find(s => s.status === 'OPEN');
       setActiveSession(currentOpen || null);
@@ -120,26 +123,30 @@ const Pharmacy: React.FC<PharmacyProps> = ({
 
     // 2. Listen to Inventory
     const unsubInventory = onSnapshot(collection(db, 'pharmacy_inventory'), (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const allItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const items = allItems.filter(i => belongsToTenant(i, activeTenantId));
       setInventory(items);
       setIsLoadingInventory(false);
     });
 
     // 3. Listen to Patients
     const unsubPatients = onSnapshot(collection(db, 'patients'), (snapshot) => {
-      const pts = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Patient[];
+      const allPts = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as Patient[];
+      const pts = allPts.filter(p => belongsToTenant(p, activeTenantId));
       setPatients(pts);
     });
 
     // 4. Listen to Avoirs Patient
     const unsubAvoirs = onSnapshot(collection(db, 'avoirs_patient'), (snapshot) => {
-      const avs = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as AvoirPatient[];
+      const allAvs = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as AvoirPatient[];
+      const avs = allAvs.filter(a => belongsToTenant(a, activeTenantId));
       setAvoirsPatient(avs);
     });
 
     // 5. Listen to Dettes Patient
     const unsubDettes = onSnapshot(collection(db, 'dettes_patient'), (snapshot) => {
-      const dts = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as DettePatient[];
+      const allDts = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as DettePatient[];
+      const dts = allDts.filter(d => belongsToTenant(d, activeTenantId));
       setDettesPatient(dts);
     });
 
@@ -151,7 +158,7 @@ const Pharmacy: React.FC<PharmacyProps> = ({
         const list = snapshot.docs.map(docSnap => ({
           firebaseId: docSnap.id,
           ...docSnap.data()
-        }));
+        })).filter(docData => belongsToTenant(docData, activeTenantId));
 
         const mapped = list.map((item: any) => ({
           id: item.id || item.firebaseId,
@@ -181,7 +188,7 @@ const Pharmacy: React.FC<PharmacyProps> = ({
       unsubAvoirs();
       unsubDettes();
     };
-  }, []);
+  }, [activeTenantId]);
 
   // ----------------------------------------------------
   // DEDICATED PHARMACY CAISSE SHIFT MANAGEMENT
@@ -204,10 +211,11 @@ const Pharmacy: React.FC<PharmacyProps> = ({
     };
 
     try {
+      const stampedSession = stampTenantData(newSession, user, establishment);
       await Promise.all([
-        setDoc(doc(db, 'pharmacy_sessions', newSession.id), sanitizeData(newSession)),
+        setDoc(doc(db, 'pharmacy_sessions', newSession.id), sanitizeData(stampedSession)),
         setDoc(doc(db, 'caisse_sessions', newSession.id), sanitizeData({
-          ...newSession,
+          ...stampedSession,
           sourceModule: 'Pharmacie'
         }))
       ]);
@@ -271,10 +279,11 @@ const Pharmacy: React.FC<PharmacyProps> = ({
     };
 
     try {
+      const stampedClosed = stampTenantData(closedSession, user, establishment);
       await Promise.all([
-        setDoc(doc(db, 'pharmacy_sessions', activeSession.id), sanitizeData(closedSession)),
+        setDoc(doc(db, 'pharmacy_sessions', activeSession.id), sanitizeData(stampedClosed)),
         setDoc(doc(db, 'caisse_sessions', activeSession.id), sanitizeData({
-          ...closedSession,
+          ...stampedClosed,
           sourceModule: 'Pharmacie'
         }))
       ]);

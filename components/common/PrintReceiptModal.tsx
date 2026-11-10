@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Printer, X, Receipt, FileText, CheckCircle2, Building2, Phone, Mail, MapPin, User, ShieldCheck } from 'lucide-react';
 import { EstablishmentConfig } from '../../types';
+import { printElementDirectly } from '../../src/utils/print';
 
 export interface ReceiptItem {
   id?: string;
@@ -63,21 +64,36 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
 
   useEffect(() => {
     document.body.classList.add('has-print-modal');
+
+    // Intercept keyboard shortcut Ctrl+P / Cmd+P to invoke isolated receipt printing
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        handlePrint();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
     return () => {
       document.body.classList.remove('has-print-modal');
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [selectedFormat]);
 
   const formatMoney = (val?: number) => {
     return (val || 0).toLocaleString('fr-FR');
   };
 
   const handlePrint = () => {
-    window.print();
+    const targetElementId = selectedFormat === 'THERMAL_80MM' ? 'thermal-receipt' : 'a4-receipt';
+    printElementDirectly(targetElementId, {
+      format: selectedFormat,
+      title: receipt.title || (selectedFormat === 'THERMAL_80MM' ? `Ticket-${receipt.id}` : `Facture-${receipt.id}`)
+    });
   };
 
   return (
-    <div className={`fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto ${
+    <div className={`ticket-modal-backdrop fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto ${
       selectedFormat === 'THERMAL_80MM' ? 'print-format-thermal' : 'print-format-a4'
     }`}>
       {/* Dynamic Airtight Print CSS Isolation: hides dashboard background, sidebar & chrome entirely */}
@@ -93,20 +109,23 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             overflow: visible !important;
           }
 
-          /* Hide all elements on page */
-          body * {
-            visibility: hidden !important;
+          /* Hide all application chrome behind the modal */
+          body > #root > div > aside,
+          body > #root > div > header,
+          body > #root > div > nav,
+          body > #root > div > footer,
+          body > #root > div > [role="navigation"],
+          body main > *:not(:has(.ticket-print-wrapper)),
+          .no-print,
+          .no-print *,
+          .ticket-actions-bar,
+          .ticket-actions-bar *,
+          button {
+            display: none !important;
           }
 
-          /* Reveal ONLY the active ticket-print-wrapper and its subcomponents */
-          .ticket-print-wrapper,
-          .ticket-print-wrapper * {
-            visibility: visible !important;
-          }
-
-          /* Eliminate fixed modal backdrop and position ticket at top of printed page */
-          .fixed.inset-0,
-          [class*="fixed"] {
+          /* Modal backdrop and container reset for pristine page flow */
+          .ticket-modal-backdrop {
             position: static !important;
             background: transparent !important;
             backdrop-filter: none !important;
@@ -114,13 +133,12 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             padding: 0 !important;
             margin: 0 !important;
             overflow: visible !important;
+            display: block !important;
+            width: 100% !important;
           }
 
           .ticket-print-wrapper {
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            right: 0 !important;
+            position: static !important;
             margin: 0 auto !important;
             padding: 0 !important;
             border: none !important;
@@ -133,7 +151,6 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             overflow: visible !important;
             display: block !important;
             width: 100% !important;
-            z-index: 9999999 !important;
           }
 
           .ticket-scroll-area {
@@ -144,19 +161,6 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             margin: 0 !important;
             background: transparent !important;
             display: block !important;
-          }
-
-          /* Hide controls, buttons, toolbars from print preview */
-          .no-print,
-          .no-print *,
-          .ticket-actions-bar,
-          .ticket-actions-bar *,
-          button,
-          nav,
-          aside,
-          header {
-            display: none !important;
-            visibility: hidden !important;
           }
 
           tr, .avoid-break {

@@ -14,6 +14,7 @@ import ModuleDashboard from '../components/ModuleDashboard';
 import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { MicroHeader } from '../components/common/MicroHeader';
 import { isStatusEnAttente, isStatusPrelevementFait, isStatusTermine } from '../src/utils/labStatus';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface LabProps {
   paymentRequests: PaymentRequest[];
@@ -35,6 +36,7 @@ const Lab: React.FC<LabProps> = ({
   theme = 'light'
 }) => {
   const { establishment, updateEstablishment } = useSettings();
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const [labRequests, setLabRequests] = useState<LabExamRequest[]>([]);
   const [resultats, setResultats] = useState<ResultatLaboratoire[]>([]);
   const [rapports, setRapports] = useState<RapportLaboratoirePDF[]>([]);
@@ -54,7 +56,7 @@ const Lab: React.FC<LabProps> = ({
         });
 
         const uniqueReqMap = new Map<string, LabExamRequest>();
-        rawRequests.forEach(r => {
+        rawRequests.filter(r => belongsToTenant(r, activeTenantId)).forEach(r => {
           const key = r.id || (r as any).docId;
           if (key && !uniqueReqMap.has(key)) {
             uniqueReqMap.set(key, r);
@@ -85,7 +87,7 @@ const Lab: React.FC<LabProps> = ({
         });
 
         const uniqueResMap = new Map<string, ResultatLaboratoire>();
-        rawResults.forEach(r => {
+        rawResults.filter(r => belongsToTenant(r, activeTenantId)).forEach(r => {
           const key = r.id;
           if (key && !uniqueResMap.has(key)) {
             uniqueResMap.set(key, r);
@@ -115,7 +117,7 @@ const Lab: React.FC<LabProps> = ({
         });
 
         const uniqueReportsMap = new Map<string, RapportLaboratoirePDF>();
-        rawReports.forEach(r => {
+        rawReports.filter(r => belongsToTenant(r, activeTenantId)).forEach(r => {
           const key = r.id;
           if (key && !uniqueReportsMap.has(key)) {
             uniqueReportsMap.set(key, r);
@@ -152,13 +154,13 @@ const Lab: React.FC<LabProps> = ({
       unsubscribeAuth();
       unsubs.forEach(unsub => unsub());
     };
-  }, []);
+  }, [activeTenantId]);
 
   const saveRequests = async (newRequests: LabExamRequest[]) => {
     try {
       for (const req of newRequests) {
         const docRef = doc(db, 'lab_requests', req.id);
-        await setDoc(docRef, sanitizeData(req), { merge: true });
+        await setDoc(docRef, sanitizeData(stampTenantData(req, user, establishment)), { merge: true });
       }
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'lab_requests');
@@ -181,7 +183,7 @@ const Lab: React.FC<LabProps> = ({
           practitionerRole: user?.role || 'LABORANTIN'
         };
         const docRef = doc(db, 'lab_results', res.id);
-        await setDoc(docRef, sanitizeData(enriched), { merge: true });
+        await setDoc(docRef, sanitizeData(stampTenantData(enriched, user, establishment)), { merge: true });
       }
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'lab_results');
@@ -202,7 +204,7 @@ const Lab: React.FC<LabProps> = ({
           practitionerRole: user?.role || 'LABORANTIN'
         };
         const docRef = doc(db, 'lab_reports', rep.id);
-        await setDoc(docRef, sanitizeData(enriched), { merge: true });
+        await setDoc(docRef, sanitizeData(stampTenantData(enriched, user, establishment)), { merge: true });
       }
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, 'lab_reports');

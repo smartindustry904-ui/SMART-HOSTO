@@ -39,6 +39,7 @@ import HistoriquePatient from './reception/HistoriquePatient';
 import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { MedicalStatusBadge } from '../components/common/MedicalStatusBadge';
 import { MicroHeader } from '../components/common/MicroHeader';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface ReceptionProps {
   user?: UserType;
@@ -417,6 +418,7 @@ const Reception: React.FC<ReceptionProps> = ({
   const { services: hospitalServices } = useHospitalServices();
   const { acts: medicalActs } = useMedicalActs();
   const currency = establishment?.currency || 'CFA';
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const [step, setStep] = useState<'search' | 'register' | 'triage' | 'payment' | 'summary'>('search');
   const [duplicateModalData, setDuplicateModalData] = useState<{ isDuplicate: boolean; matchedPatient: Patient | null; reason: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -650,10 +652,11 @@ const Reception: React.FC<ReceptionProps> = ({
     let unsubs: (() => void)[] = [];
 
     const setupListeners = () => {
-      // 1. Synchronize Patients with Firestore & auto-seed if empty
+      // 1. Synchronize Patients with Firestore (Strict Multi-Tenant Isolation)
       const unsubPatients = onSnapshot(collection(db, 'patients'), (snapshot) => {
         if (!snapshot.empty) {
-          const list = snapshot.docs.map(doc => doc.data() as Patient);
+          const rawList = snapshot.docs.map(doc => doc.data() as Patient);
+          const list = rawList.filter(p => belongsToTenant(p, activeTenantId));
           setPatients(list);
         } else {
           setPatients([]);
@@ -667,7 +670,8 @@ const Reception: React.FC<ReceptionProps> = ({
       // 2. Synchronize PatientsToDischarge list with Firestore (discharges_waiting)
       const unsubDischarges = onSnapshot(collection(db, 'discharges_waiting'), (snapshot) => {
         if (!snapshot.empty) {
-          const list = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, docId: doc.id }));
+          const rawList = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, docId: doc.id }));
+          const list = rawList.filter(d => belongsToTenant(d, activeTenantId));
           setPatientsToDischarge(list);
         } else {
           setPatientsToDischarge([]);
@@ -679,7 +683,8 @@ const Reception: React.FC<ReceptionProps> = ({
       });
 
       const unsubApps = onSnapshot(collection(db, 'appointments'), (snapshot) => {
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const rawList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const list = rawList.filter(a => belongsToTenant(a, activeTenantId));
         setAppointments(list);
       });
 
@@ -1336,7 +1341,8 @@ const Reception: React.FC<ReceptionProps> = ({
         requestedById: user?.id || ''
       };
       reqIdForLog = createdRequest.id;
-      p5 = setDoc(doc(db, 'payment_requests', createdRequest.id), sanitizeData(createdRequest));
+      const tenantStampedRequest = stampTenantData(createdRequest, user, establishment);
+      p5 = setDoc(doc(db, 'payment_requests', createdRequest.id), sanitizeData(tenantStampedRequest));
 
       // Calculate Routing Destination Service Name and Queue
       let targetQueue = 'Médecine Générale';
@@ -1409,10 +1415,11 @@ const Reception: React.FC<ReceptionProps> = ({
 
       const effectiveSendToNurseTriage = isMaternityService ? false : sendToNurseTriage;
 
-      // Write database actions in parallel!
-      const p1 = setDoc(doc(db, 'patients', finalPatient.id), sanitizeData(finalPatient));
+      // Write database actions in parallel! (Stamped with active hospital structure)
+      const tenantStampedPatient = stampTenantData(finalPatient, user, establishment);
+      const p1 = setDoc(doc(db, 'patients', finalPatient.id), sanitizeData(tenantStampedPatient));
 
-      const p2 = setDoc(doc(db, 'medical_records', dmeId), sanitizeData({
+      const p2 = setDoc(doc(db, 'medical_records', dmeId), sanitizeData(stampTenantData({
         id: dmeId,
         patientId: patientId,
         createdAt: new Date().toISOString(),
@@ -1433,10 +1440,10 @@ const Reception: React.FC<ReceptionProps> = ({
             time: timeStr
           }
         ]
-      }));
+      }, user, establishment)));
 
       const visitDocRef = doc(collection(db, 'reception_visits'));
-      const visitData = {
+      const visitData = stampTenantData({
         id: visitDocRef.id,
         patientId: patientId,
         patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
@@ -1450,13 +1457,13 @@ const Reception: React.FC<ReceptionProps> = ({
         userId: user?.id || '',
         practitionerRole: user?.role || 'RECEPTIONIST',
         createdAt: new Date().toISOString()
-      };
+      }, user, establishment);
       const p3 = setDoc(visitDocRef, sanitizeData(visitData));
 
       let p4 = Promise.resolve();
       if (!effectiveSendToNurseTriage && finalPatient.vitals) {
         const triageDocRef = doc(collection(db, 'triage_records'));
-        p4 = setDoc(triageDocRef, sanitizeData({
+        p4 = setDoc(triageDocRef, sanitizeData(stampTenantData({
           id: triageDocRef.id,
           patientId: patientId,
           visitId: visitDocRef.id,
@@ -1467,7 +1474,7 @@ const Reception: React.FC<ReceptionProps> = ({
           createdBy: user?.name || user?.username || 'Agent Accueil',
           createdById: user?.id || '',
           practitionerRole: user?.role || 'RECEPTIONIST'
-        }));
+        }, user, establishment)));
       }
 
       // Check for duplicate in queue locally (0ms delay) to prevent double clicks creating multiple records
@@ -1484,7 +1491,7 @@ const Reception: React.FC<ReceptionProps> = ({
       let queueEntry: any = null;
       if (!alreadyInQueue) {
         const queueDocRef = doc(collection(db, 'service_queues'));
-        queueEntry = {
+        queueEntry = stampTenantData({
           id: queueDocRef.id,
           patientId: patientId,
           dmeId: dmeId,
@@ -1528,14 +1535,14 @@ const Reception: React.FC<ReceptionProps> = ({
             bmi: finalPatient.vitals?.bmi
           } : null,
           createdAt: new Date().toISOString()
-        };
+        }, user, establishment);
         p6 = setDoc(queueDocRef, sanitizeData(queueEntry));
       }
 
       let p7 = Promise.resolve();
       if (selectedMotif?.category === 'HOSPITALISATION') {
         const hospDocRef = doc(collection(db, 'hospitalisation_requests'));
-        p7 = setDoc(hospDocRef, sanitizeData({
+        p7 = setDoc(hospDocRef, sanitizeData(stampTenantData({
           id: hospDocRef.id,
           patientId: patientId,
           patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
@@ -1545,13 +1552,13 @@ const Reception: React.FC<ReceptionProps> = ({
           status: 'pending',
           createdAt: new Date().toISOString(),
           requestedBy: user?.name || 'Agent Accueil'
-        }));
+        }, user, establishment)));
       }
 
       let p8 = Promise.resolve();
       if (selectedMotif?.category === 'URGENCES' || visitMotif === 'URGENCE' || targetService === 'Urgences' || targetQueue === 'Urgences') {
         const erDocRef = doc(collection(db, 'emergency_patients'));
-        p8 = setDoc(erDocRef, sanitizeData({
+        p8 = setDoc(erDocRef, sanitizeData(stampTenantData({
           id: erDocRef.id,
           patientId: patientId,
           patientDme: dmeId,
@@ -1583,7 +1590,7 @@ const Reception: React.FC<ReceptionProps> = ({
           cares: [],
           followUps: [],
           voiceNotes: []
-        }));
+        }, user, establishment)));
       }
 
       // Optimistically update local states immediately (0ms delay)
@@ -1706,7 +1713,7 @@ const Reception: React.FC<ReceptionProps> = ({
 
       // 1. Create entrance inside 'discharges' collection
       const dischargeDocRef = doc(collection(db, 'discharges'));
-      const dischargeData = {
+      const dischargeData = stampTenantData({
         id: dischargeDocRef.id,
         patientId: patient.id,
         patientName: patient.name,
@@ -1717,20 +1724,20 @@ const Reception: React.FC<ReceptionProps> = ({
         user: user?.name || 'Agent d\'accueil',
         status: 'completed',
         createdAt: new Date().toISOString()
-      };
+      }, user, establishment);
 
       const notifDocRef = doc(collection(db, 'notifications'));
 
       // Save database actions in parallel
       const p1 = setDoc(dischargeDocRef, sanitizeData(dischargeData));
       const p2 = deleteDoc(doc(db, 'discharges_waiting', patient.docId || patient.id));
-      const p3 = setDoc(notifDocRef, sanitizeData({
+      const p3 = setDoc(notifDocRef, sanitizeData(stampTenantData({
         id: notifDocRef.id,
         message: `Sortie administrative validée pour ${patient.name} (${patient.id})`,
         module: 'Reception',
         targetModules: ['Cashier', 'Dashboard', 'Doctor'],
         createdAt: new Date().toISOString()
-      }));
+      }, user, establishment)));
       const p4 = logAudit(`Sortie administrative validée`, { patientId: patient.id, patientName: patient.name });
 
       await Promise.all([p1, p2, p3, p4]);

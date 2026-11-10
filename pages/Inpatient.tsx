@@ -18,6 +18,8 @@ import { AdmissionRequestsTab } from './inpatient/AdmissionRequestsTab';
 import { StayHistoryTab } from './inpatient/StayHistoryTab';
 import { BedAdmissionModal } from './inpatient/BedAdmissionModal';
 import { BedDischargeModal } from './inpatient/BedDischargeModal';
+import { useSettings } from '../hooks/useSettings';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface InpatientProps {
   user?: UserType;
@@ -59,6 +61,9 @@ const Inpatient: React.FC<InpatientProps> = ({
     }
   };
 
+  const { establishment } = useSettings();
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+
   // Firestore Collections
   const [beds, setBeds] = useState<Bed[]>([]);
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -79,7 +84,8 @@ const Inpatient: React.FC<InpatientProps> = ({
   // Listen to Beds
   useEffect(() => {
     const unsubBeds = onSnapshot(collection(db, 'beds'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Bed));
+      const allBeds = snap.docs.map(d => ({ id: d.id, ...d.data() } as Bed));
+      const list = allBeds.filter(b => belongsToTenant(b, activeTenantId));
       setBeds(list);
 
       // Keep active workspace bed in sync
@@ -96,24 +102,26 @@ const Inpatient: React.FC<InpatientProps> = ({
     });
 
     return () => unsubBeds();
-  }, [activeBedForWorkspace?.id]);
+  }, [activeBedForWorkspace?.id, activeTenantId]);
 
   // Listen to Rooms
   useEffect(() => {
     const unsubRooms = onSnapshot(collection(db, 'rooms'), (snap) => {
-      setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() } as Room)));
+      const allRooms = snap.docs.map(d => ({ id: d.id, ...d.data() } as Room));
+      setRooms(allRooms.filter(r => belongsToTenant(r, activeTenantId)));
     });
     return () => unsubRooms();
-  }, []);
+  }, [activeTenantId]);
 
   // Listen to Doctors / Staff
   useEffect(() => {
     const q = query(collection(db, 'hospital_users'));
     const unsubDocs = onSnapshot(q, (snap) => {
-      setDoctors(snap.docs.map(d => ({ id: d.id, ...d.data() } as UserType)));
+      const allDocs = snap.docs.map(d => ({ id: d.id, ...d.data() } as UserType));
+      setDoctors(allDocs.filter(d => belongsToTenant(d, activeTenantId)));
     });
     return () => unsubDocs();
-  }, []);
+  }, [activeTenantId]);
 
   // Listen to pending requests count
   useEffect(() => {
@@ -122,10 +130,11 @@ const Inpatient: React.FC<InpatientProps> = ({
       where('status', '==', 'pending')
     );
     const unsubReqs = onSnapshot(q, (snap) => {
-      setHospRequestsCount(snap.docs.length);
+      const filtered = snap.docs.filter(d => belongsToTenant(d.data(), activeTenantId));
+      setHospRequestsCount(filtered.length);
     });
     return () => unsubReqs();
-  }, []);
+  }, [activeTenantId]);
 
   // Hospital Beds (excluding maternity delivery beds if categorized)
   const hospitalBeds = useMemo(() => {

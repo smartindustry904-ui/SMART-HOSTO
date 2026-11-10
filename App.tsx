@@ -31,6 +31,7 @@ import { auth, db } from './src/firebase';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { collection, query, onSnapshot, orderBy, doc, getDoc } from 'firebase/firestore';
 import { applyTheme } from './constants/themes';
+import { getActiveTenantId, belongsToTenant } from './src/utils/tenant';
 
 const ModuleLoadingFallback: React.FC<{ theme: 'light' | 'dark' }> = ({ theme }) => (
   <div className={`min-h-[60vh] flex flex-col items-center justify-center p-8 transition-colors ${theme === 'dark' ? 'text-zinc-300' : 'text-slate-700'}`}>
@@ -89,10 +90,17 @@ const App: React.FC = () => {
   const [activePharmacyTab, setActivePharmacyTab] = useState<PharmacySubMenu>('dashboard');
   const [activeAccountingTab, setActiveAccountingTab] = useState<AccountingSubMenu>('dashboard');
   const [notifications, setNotifications] = useState<{id: number, message: string, type: 'success' | 'error' | 'info'}[]>([]);
-  const { establishment, cashierSettings: cashierSettingsGlobal } = useSettings();
+  const { establishment, cashierSettings: cashierSettingsGlobal, updateEstablishment } = useSettings();
   const { services: hospitalServicesList, loading: hospitalServicesLoading } = useHospitalServices();
   const hospitalServicesRef = React.useRef(hospitalServicesList);
   hospitalServicesRef.current = hospitalServicesList;
+
+  const activeTenantId = React.useMemo(() => {
+    if (inspectingTenant && isUserSuperAdmin(user)) {
+      return inspectingTenant.id;
+    }
+    return getActiveTenantId(user, establishment);
+  }, [user, establishment, inspectingTenant]);
 
   const isUserSuperAdmin = (u: any): boolean => {
     if (!u) return false;
@@ -259,7 +267,7 @@ const App: React.FC = () => {
   // État global de la file d'attente partagée entre l'accueil et les médecins
   const [globalWaitingQueue, setGlobalWaitingQueue] = useState<any[]>([]);
 
-  // Real-time synchronization of the service queues from Firestore
+  // Real-time synchronization of the service queues from Firestore (Strict Tenant Isolation)
   useEffect(() => {
     try {
       const today = new Date().toISOString().split('T')[0];
@@ -272,12 +280,17 @@ const App: React.FC = () => {
         const queueMap = new Map<string, any>();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
+          // STRICT MULTI-TENANT ISOLATION: Exclude queues of other hospital structures
+          if (!belongsToTenant(data, activeTenantId)) return;
+
           // Only show today's patients and those with relevant statuses
           const isToday = data.createdAt?.startsWith(today);
           if (isToday && (data.status === 'waiting' || data.status === 'waiting_triage' || data.status === 'in_consultation' || data.status === 'ready_for_discharge' || data.status === 'called')) {
             queueMap.set(docSnap.id, {
               id: data.patientId || docSnap.id,
               queueDocId: docSnap.id,
+              clinicId: data.clinicId,
+              hospital_id: data.hospital_id,
               dmeId: data.dmeId || data.patientId,
               firstName: data.firstName,
               lastName: data.lastName,
@@ -308,9 +321,9 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Error setting up service_queues snapshot:", e);
     }
-  }, []);
+  }, [activeTenantId]);
 
-  // Global state for financial flow
+  // Global state for financial flow (Strict Tenant Isolation)
   const [paymentRequests, setPaymentRequests] = useState<any[]>([]);
 
   useEffect(() => {
@@ -319,7 +332,9 @@ const App: React.FC = () => {
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const reqsMap = new Map<string, any>();
         snapshot.docs.forEach((docSnap) => {
-          reqsMap.set(docSnap.id, { ...docSnap.data(), id: docSnap.id });
+          const data = docSnap.data();
+          if (!belongsToTenant(data, activeTenantId)) return;
+          reqsMap.set(docSnap.id, { ...data, id: docSnap.id });
         });
         setPaymentRequests(Array.from(reqsMap.values()));
       }, (err) => {
@@ -329,7 +344,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Error setting up payment_requests snapshot:", e);
     }
-  }, []);
+  }, [activeTenantId]);
 
   const [cashierTransactions, setCashierTransactions] = useState<any[]>([]);
   const [transactionsFacturation, setTransactionsFacturation] = useState<any[]>([]);
@@ -375,7 +390,8 @@ const App: React.FC = () => {
       const q = query(collection(db, 'parametres_caisse'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         if (!snapshot.empty) {
-          const data = snapshot.docs[0].data();
+          const matched = snapshot.docs.find(d => belongsToTenant(d.data(), activeTenantId));
+          const data = matched ? matched.data() : snapshot.docs[0].data();
           setParametresCaisse(data);
         }
       }, (err) => {
@@ -385,14 +401,17 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Error setting up parametres_caisse snapshot:", e);
     }
-  }, []);
+  }, [activeTenantId]);
+
   useEffect(() => {
     try {
       const q = query(collection(db, 'cashier_transactions'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const txsMap = new Map<string, any>();
         snapshot.docs.forEach((docSnap) => {
-          txsMap.set(docSnap.id, { ...docSnap.data(), id: docSnap.id });
+          const data = docSnap.data();
+          if (!belongsToTenant(data, activeTenantId)) return;
+          txsMap.set(docSnap.id, { ...data, id: docSnap.id });
         });
         setCashierTransactions(Array.from(txsMap.values()));
       }, (err) => {
@@ -402,7 +421,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Error setting up cashier_transactions snapshot:", e);
     }
-  }, []);
+  }, [activeTenantId]);
 
   useEffect(() => {
     try {
@@ -410,7 +429,9 @@ const App: React.FC = () => {
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const txsMap = new Map<string, any>();
         snapshot.docs.forEach((docSnap) => {
-          txsMap.set(docSnap.id, { ...docSnap.data(), id: docSnap.id });
+          const data = docSnap.data();
+          if (!belongsToTenant(data, activeTenantId)) return;
+          txsMap.set(docSnap.id, { ...data, id: docSnap.id });
         });
         setTransactionsFacturation(Array.from(txsMap.values()));
       }, (err) => {
@@ -420,7 +441,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Error setting up transactions_facturation snapshot:", e);
     }
-  }, []);
+  }, [activeTenantId]);
 
   useEffect(() => {
     try {
@@ -428,7 +449,9 @@ const App: React.FC = () => {
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const itemsMap = new Map<string, any>();
         snapshot.docs.forEach((docSnap) => {
-          itemsMap.set(docSnap.id, { ...docSnap.data(), id: docSnap.id });
+          const data = docSnap.data();
+          if (!belongsToTenant(data, activeTenantId)) return;
+          itemsMap.set(docSnap.id, { ...data, id: docSnap.id });
         });
         setAvoirsPatient(Array.from(itemsMap.values()));
       }, (err) => {
@@ -438,7 +461,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Error setting up avoirs_patient snapshot:", e);
     }
-  }, []);
+  }, [activeTenantId]);
 
   useEffect(() => {
     try {
@@ -446,7 +469,9 @@ const App: React.FC = () => {
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const itemsMap = new Map<string, any>();
         snapshot.docs.forEach((docSnap) => {
-          itemsMap.set(docSnap.id, { ...docSnap.data(), id: docSnap.id });
+          const data = docSnap.data();
+          if (!belongsToTenant(data, activeTenantId)) return;
+          itemsMap.set(docSnap.id, { ...data, id: docSnap.id });
         });
         setDettesPatient(Array.from(itemsMap.values()));
       }, (err) => {
@@ -456,7 +481,46 @@ const App: React.FC = () => {
     } catch (e) {
       console.error("Error setting up dettes_patient snapshot:", e);
     }
-  }, []);
+  }, [activeTenantId]);
+
+  // Auto-synchronize establishment information with the active hospital structure
+  useEffect(() => {
+    if (!activeTenantId || activeTenantId === 'ALL' || activeTenantId === 'default_hospital') {
+      return;
+    }
+    const clinicRef = doc(db, 'saas_clinics', activeTenantId);
+    getDoc(clinicRef).then(snap => {
+      if (snap.exists()) {
+        const cData = snap.data();
+        if (cData.name && cData.name !== establishment.name) {
+          updateEstablishment({
+            name: cData.name,
+            address: cData.address || establishment.address,
+            phone: cData.phone || establishment.phone,
+            city: cData.city || establishment.city,
+            country: cData.country || establishment.country,
+            email: cData.email || establishment.email
+          });
+        }
+      } else {
+        getDoc(doc(db, 'hospitals', activeTenantId)).then(hSnap => {
+          if (hSnap.exists()) {
+            const hData = hSnap.data();
+            if (hData.name && hData.name !== establishment.name) {
+              updateEstablishment({
+                name: hData.name,
+                address: hData.address || establishment.address,
+                phone: hData.phone || establishment.phone,
+                city: hData.city || establishment.city,
+                country: hData.country || establishment.country,
+                email: hData.email || establishment.email
+              });
+            }
+          }
+        }).catch(() => {});
+      }
+    }).catch(() => {});
+  }, [activeTenantId]);
 
   // Vérification de la session au démarrage
   useEffect(() => {

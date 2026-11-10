@@ -10,6 +10,8 @@ import { collection, doc, setDoc, updateDoc, getDoc, getDocs, query, where, onSn
 import { Patient, User as UserType, NurseSubMenu, PaymentRequest } from '../types';
 import Inpatient from './Inpatient';
 import { MicroHeader } from '../components/common/MicroHeader';
+import { useSettings } from '../hooks/useSettings';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface SoinsInfirmiersProps {
   user?: UserType;
@@ -34,6 +36,9 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
   onBackToDashboard,
   theme = 'light'
 }) => {
+  const { establishment } = useSettings();
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+
   const [searchFilter, setSearchFilter] = useState('');
   const [activePatient, setActivePatient] = useState<any | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -78,7 +83,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
       );
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setTriageHistory(records);
+        setTriageHistory(records.filter(r => belongsToTenant(r, activeTenantId)));
       }, (err) => {
         console.warn("Error listening to triage_records:", err);
       });
@@ -86,7 +91,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
     } catch (e) {
       console.error("Error setting up triage_records listener:", e);
     }
-  }, []);
+  }, [activeTenantId]);
 
   // Listen to nursing care acts from Firestore
   useEffect(() => {
@@ -98,7 +103,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
       );
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const acts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setNursingActs(acts);
+        setNursingActs(acts.filter(a => belongsToTenant(a, activeTenantId)));
       }, (err) => {
         console.warn("Error listening to nursing_acts:", err);
       });
@@ -106,7 +111,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
     } catch (e) {
       console.error("Error setting up nursing_acts listener:", e);
     }
-  }, []);
+  }, [activeTenantId]);
 
   // Filter only patients waiting for triage
   const waitingTriageList = useMemo(() => {
@@ -334,9 +339,9 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
 
       // 2. Background Firestore persistence via local IndexedDB cache
       if (directQueueDocId) {
-        setDoc(doc(db, 'service_queues', directQueueDocId), queuePayload, { merge: true }).catch(() => {});
+        setDoc(doc(db, 'service_queues', directQueueDocId), sanitizeData(stampTenantData(queuePayload, user, establishment)), { merge: true }).catch(() => {});
       } else {
-        setDoc(doc(db, 'service_queues', fallbackDocId), sanitizeData({
+        setDoc(doc(db, 'service_queues', fallbackDocId), sanitizeData(stampTenantData({
           ...activePatient,
           patientId: pId,
           dmeId: activePatient.dmeId || pId,
@@ -348,7 +353,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
           service: activePatient.service || 'Médecine Générale',
           ...queuePayload,
           createdAt: activePatient.createdAt || today.toISOString()
-        }), { merge: true }).catch(() => {});
+        }, user, establishment)), { merge: true }).catch(() => {});
       }
 
       if (pId) {
@@ -360,7 +365,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
       }
 
       const triageDocRef = doc(collection(db, 'triage_records'));
-      setDoc(triageDocRef, sanitizeData({
+      setDoc(triageDocRef, sanitizeData(stampTenantData({
         id: triageDocRef.id,
         patientId: pId,
         patientName: `${activePatient.lastName} ${activePatient.firstName}`,
@@ -376,7 +381,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
         isClotured: true,
         cloturedAt: today.toISOString(),
         createdAt: today.toISOString()
-      })).catch(() => {});
+      }, user, establishment))).catch(() => {});
 
       setDoc(doc(collection(db, 'audit_logs')), {
         user: nurseName,
@@ -448,18 +453,18 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
       }));
 
       // 2. Background Firestore persistence via local IndexedDB cache
-      setDoc(actRef, sanitizeData(completedActPayload), { merge: true }).catch(() => {});
+      setDoc(actRef, sanitizeData(stampTenantData(completedActPayload, user, establishment)), { merge: true }).catch(() => {});
 
       // Also assign any related payment request for this soin to the nurse who executed it
       if (act.paymentRequestId) {
-        setDoc(doc(db, 'payment_requests', act.paymentRequestId), sanitizeData({
+        setDoc(doc(db, 'payment_requests', act.paymentRequestId), sanitizeData(stampTenantData({
           practitionerId: nurseId,
           practitionerName: nurseName,
           practitionerRole: user?.role || 'INFIRMIER',
           isClotured: true,
           cloturedAt: isoNow,
           cloturedBy: nurseName
-        }), { merge: true }).catch(() => {});
+        }, user, establishment)), { merge: true }).catch(() => {});
       }
     } catch (err: any) {
       console.error("Error marking nursing act as done:", err);

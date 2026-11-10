@@ -48,6 +48,7 @@ import { WaitingRoomTab } from './maternity/WaitingRoomTab';
 import { CpnTab } from './maternity/CpnTab';
 import { DeliveryRoomTab } from './maternity/DeliveryRoomTab';
 import { ObstetricalHistoryTab } from './maternity/ObstetricalHistoryTab';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface MaternityProps {
   user: User;
@@ -73,6 +74,7 @@ const Maternity: React.FC<MaternityProps> = ({
   theme = 'light'
 }) => {
   const { establishment } = useSettings();
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
 
   // Selected patient passed between tabs (e.g. from waiting room to CPN or Delivery)
   const [selectedPatient, setSelectedPatient] = useState<any | null>(null);
@@ -102,53 +104,59 @@ const Maternity: React.FC<MaternityProps> = ({
   useEffect(() => {
     const q = query(collection(db, 'maternity_admissions'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, (snapshot) => {
-      setAdmissions(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaternityAdmission)));
+      const allAdmissions = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaternityAdmission));
+      setAdmissions(allAdmissions.filter(d => belongsToTenant(d, activeTenantId)));
     });
     return () => unsub();
-  }, []);
+  }, [activeTenantId]);
 
   // Subscribe to Deliveries
   useEffect(() => {
     const q = query(collection(db, 'maternity_deliveries'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, (snapshot) => {
-      setDeliveries(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaternityDelivery)));
+      const allDeliveries = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as MaternityDelivery));
+      setDeliveries(allDeliveries.filter(d => belongsToTenant(d, activeTenantId)));
     });
     return () => unsub();
-  }, []);
+  }, [activeTenantId]);
 
   // Subscribe to Pregnancies
   useEffect(() => {
     const q = query(collection(db, 'pregnancy_dossiers'), orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, (snapshot) => {
-      setPregnancies(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PregnancyDossier)));
+      const allPregnancies = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PregnancyDossier));
+      setPregnancies(allPregnancies.filter(d => belongsToTenant(d, activeTenantId)));
     });
     return () => unsub();
-  }, []);
+  }, [activeTenantId]);
 
   // Subscribe to CPN Visits for Dashboard Metrics
   useEffect(() => {
     const q = query(collection(db, 'cpn_visits'), orderBy('date', 'desc'));
     const unsub = onSnapshot(q, (snapshot) => {
-      setCpnVisits(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CPNVisit)));
+      const allVisits = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CPNVisit));
+      setCpnVisits(allVisits.filter(d => belongsToTenant(d, activeTenantId)));
     }, (err) => {
       console.warn('Error loading CPN visits in Maternity dashboard:', err);
     });
     return () => unsub();
-  }, []);
+  }, [activeTenantId]);
 
   // Subscribe to Beds & Rooms
   useEffect(() => {
     const unsubBeds = onSnapshot(collection(db, 'beds'), (snapshot) => {
-      setBeds(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bed)));
+      const allBeds = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bed));
+      setBeds(allBeds.filter(b => belongsToTenant(b, activeTenantId)));
     });
     const unsubRooms = onSnapshot(collection(db, 'rooms'), (snapshot) => {
-      setRooms(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room)));
+      const allRooms = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Room));
+      setRooms(allRooms.filter(r => belongsToTenant(r, activeTenantId)));
     });
     return () => {
       unsubBeds();
       unsubRooms();
     };
-  }, []);
+  }, [activeTenantId]);
 
   // Filter beds for Maternity
   const maternityBeds = useMemo(() => {
