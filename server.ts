@@ -1831,10 +1831,131 @@ function buildFallbackReportSpec(queryOrType: string, ctx: any): DynamicReportSp
   };
 }
 
+function extractJsonFromText(text: string): any {
+  if (!text) return null;
+  const trimmed = text.trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch {}
+
+  const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch) {
+    try {
+      return JSON.parse(codeBlockMatch[1].trim());
+    } catch {}
+  }
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(trimmed.substring(firstBrace, lastBrace + 1));
+    } catch {}
+  }
+
+  return null;
+}
+
+function buildDynamicReportFromAiReply(aiReplyText: string, userPrompt: string, ctx: any): DynamicReportSpec {
+  const staff = ctx.staff || {};
+  const lines = (aiReplyText || '').split('\n').map(l => l.trim()).filter(Boolean);
+
+  let title = 'RAPPORT D\'ANALYSE HOSPITALIÈRE OFFICIEL';
+  let subtitle = `Édité le ${ctx.currentDate || new Date().toLocaleDateString('fr-FR')}`;
+  let category = 'AUDIT & GESTION HOSPITALIÈRE';
+
+  const titleLine = lines.find(l => l.startsWith('*') && (l.includes('🏥') || l.includes('📊') || l.includes('🛏️') || l.includes('💊') || l.includes('💼') || l.includes('📄')));
+  if (titleLine) {
+    title = titleLine.replace(/[*_#🏥📊🛏️💊💼📄•]/g, '').trim().toUpperCase();
+  } else if (lines.length > 0 && lines[0].startsWith('*')) {
+    title = lines[0].replace(/[*_#•]/g, '').trim().toUpperCase();
+  }
+
+  const subLine = lines.find(l => l.startsWith('_') && l.endsWith('_') && !l.includes('Tapez') && !l.includes('Envoyez') && !l.includes('SMART-HOSTO'));
+  if (subLine) {
+    subtitle = subLine.replace(/[_*]/g, '').trim();
+  }
+
+  const kpis: DynamicReportKpi[] = [];
+  const kpiLines = lines.filter(l => (l.startsWith('•') || l.startsWith('-')) && l.includes(':') && (l.includes('FCFA') || /\d/.test(l)));
+  kpiLines.slice(0, 4).forEach(l => {
+    const raw = l.replace(/^[-•]\s*/, '');
+    const parts = raw.split(':');
+    if (parts.length >= 2) {
+      const label = parts[0].replace(/[*_]/g, '').trim();
+      const value = parts.slice(1).join(':').replace(/[*_]/g, '').trim();
+      if (label && value && !label.toLowerCase().includes('tapez') && !label.toLowerCase().includes('envoyez')) {
+        kpis.push({ label, value });
+      }
+    }
+  });
+
+  const detailLines = lines.filter(l => 
+    (l.startsWith('-') || l.startsWith('•')) && 
+    !l.includes('Tapez') && 
+    !l.includes('Envoyez') && 
+    !l.includes('SMART-HOSTO') &&
+    !kpiLines.includes(l)
+  );
+
+  const tableRows: string[][] = [];
+  detailLines.forEach(b => {
+    const clean = b.replace(/^[-•]\s*/, '');
+    if (clean.includes('→')) {
+      const [col1, col2] = clean.split('→').map(s => s.replace(/[*_]/g, '').trim());
+      tableRows.push([col1 || '-', col2 || '-']);
+    } else if (clean.includes(':')) {
+      const [col1, col2] = clean.split(':').map(s => s.replace(/[*_]/g, '').trim());
+      tableRows.push([col1 || '-', col2 || '-']);
+    }
+  });
+
+  const narrativeLines = lines.filter(l => 
+    !l.startsWith('*') && !l.startsWith('•') && !l.startsWith('-') && !l.startsWith('_') && !l.startsWith('📄')
+  );
+  const executiveSummary = narrativeLines.join(' ').trim() || `Ce rapport présente l'analyse décisionnelle complète en réponse à la requête : "${userPrompt}". Les indicateurs et données ci-après sont certifiés conformes au SIH SMART-HOSTO.`;
+
+  const recLines = lines.filter(l => /^\d+\.\s+/.test(l) || (l.toLowerCase().includes('recommand') && l.includes(':')));
+  const recommendations = recLines.length > 0
+    ? recLines.map(r => r.replace(/^\d+\.\s*/, '').replace(/[*_]/g, '').trim())
+    : [
+        'Valider les données et finaliser la saisie des dossiers concernés dans SMART-HOSTO.',
+        'Assurer le suivi administratif et financier auprès des services compétents.',
+        'Effectuer un contrôle périodique de conformité selon les protocoles internes.'
+      ];
+
+  return {
+    title,
+    subtitle,
+    category,
+    dateStr: ctx.currentDate || new Date().toLocaleString('fr-FR'),
+    requesterName: staff.name || 'Personnel Soignant',
+    requesterRole: staff.profession || staff.role || 'Praticien',
+    executiveSummary,
+    kpis: kpis.length > 0 ? kpis : undefined,
+    sections: [
+      {
+        title: '1. Synthèse des Données Observées',
+        narrative: executiveSummary,
+        bulletPoints: detailLines.map(b => b.replace(/^[-•]\s*/, '').replace(/[*_]/g, '').trim()).slice(0, 8),
+        ...(tableRows.length > 0 ? {
+          table: {
+            headers: ['Élément / Référence', 'Détail / Montant / Statut'],
+            rows: tableRows
+          }
+        } : {})
+      }
+    ],
+    recommendations,
+    conclusion: 'Document certifié conforme, validé par le système décisionnel hospitalier SMART-HOSTO.'
+  };
+}
+
 async function generateDynamicReportSpec(
   userPrompt: string,
   ctx: any,
-  config: WhatsAppAgentConfig
+  config: WhatsAppAgentConfig,
+  aiReplyText?: string
 ): Promise<DynamicReportSpec> {
   const apiKey = (config.geminiApiKey || process.env.GEMINI_API_KEY || '').trim();
   const staff = ctx.staff || {};
@@ -1844,36 +1965,37 @@ async function generateDynamicReportSpec(
       const model = (config.geminiModel || 'gemini-2.5-flash').trim();
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-      const prompt = `Tu es l'analyste en chef et auditeur médical du Système d'Information Hospitalier SMART-HOSTO.
-Un membre du personnel hospitalier (${staff.name}, Rôle: ${staff.role}, Profession: ${staff.profession}) formule la demande suivante : "${userPrompt}".
+      const systemInstruction = `Tu es l'analyste en chef et auditeur médical du Système d'Information Hospitalier SMART-HOSTO.
+Ta mission est de concevoir la spécification d'un rapport certifié officiel SUR-MESURE (JSON).
+Le rapport DOIT REFLÉTER EXACTEMENT l'analyse médicale et financière formulée dans la réponse textuelle et s'appuyer sur les données réelles de l'établissement (JSON).
+Ne génère JAMAIS un rapport générique ou passe-partout. Chaque titre, chaque indicateur (KPI), chaque colonne de tableau et chaque recommandation doivent être taillés sur mesure pour la requête exacte de l'utilisateur.
+Tu dois répondre STRICTEMENT par un objet JSON valide, sans balises markdown ni texte en dehors de l'objet JSON.`;
 
-Voici l'ensemble des données réelles de l'établissement en temps réel (JSON) :
+      const prompt = `DEMANDE DE L'UTILISATEUR :
+"${userPrompt}"
+
+RÉPONSE VALIDÉE ET CHIFFRÉE DE L'ASSISTANT (À REPRENDRE ET APPROFONDIR DANS LE RAPPORT) :
+"""
+${aiReplyText || 'Aucune réponse préalable.'}
+"""
+
+DONNÉES EN TEMPS RÉEL DU SIH SMART-HOSTO (JSON) :
 ${JSON.stringify(ctx, null, 2)}
 
-MISSION :
-Génère une spécification de rapport ULTRA-PERSONNALISÉE et STRICTEMENT ADAPTÉE à la requête exacte de l'utilisateur.
-- Si la demande porte sur les créances, les impayés, les caisses, analyse précisément les impayés et la balance de trésorerie avec des recommandations financières.
-- Si la demande porte sur les sorties, les lits, les admissions, analyse le flux des lits, liste les patients hospitalisés et les prévisions de décharge.
-- Si la demande porte sur la pharmacie, les stocks, analyse les risques de rupture et les seuils d'alerte.
-- Si la demande porte sur les honoraires, les commissions, le bilan d'activité du praticien, analyse ses actes et ses quotes-parts.
-- Si la demande est une analyse comparative ou stratégique, structure des sections d'analyse comparative avec données chiffrées réelles tirées du JSON.
-
-CONSIGNE FORMAT :
-Réponds UNIQUEMENT par un objet JSON valide suivant exactement le schéma ci-dessous, sans balises de code Markdown (\`\`\`json), sans texte avant ou après.
-
-SCHÉMA JSON :
+INSTRUCTIONS :
+Conçois un rapport décisionnel officiel complet sous forme d'objet JSON respectant impérativement ce schéma :
 {
-  "title": "Titre clair et officiel en majuscules (ex: AUDIT COMPARATIF DES ADMISSIONS & SORTIES)",
-  "subtitle": "Sous-titre descriptif et période concernée",
+  "title": "Titre officiel précis en majuscules adapté à la requête exacte (ex: AUDIT COMPARATIF DES ADMISSIONS & SORTIES)",
+  "subtitle": "Sous-titre descriptif et période",
   "category": "Catégorie en majuscules (ex: AUDIT STRATÉGIQUE / CONTRÔLE DE GESTION / SOINS & PARCOURS / FINANCES)",
-  "executiveSummary": "Synthèse exécutive rigoureuse de 3 à 5 phrases avec constats majeurs et chiffres réels.",
+  "executiveSummary": "Synthèse exécutive rigoureuse de 3 à 5 phrases avec les chiffres réels clés de la réponse.",
   "kpis": [
     { "label": "Nom de l'indicateur", "value": "Valeur chiffrée (ex: 450 000 FCFA)", "subtext": "Précision courte" }
   ],
   "sections": [
     {
       "title": "1. Titre de la section d'analyse",
-      "narrative": "Paragraphe d'analyse explicatif approfondi...",
+      "narrative": "Paragraphe d'explications et d'analyse chiffrée...",
       "bulletPoints": ["Point d'attention 1", "Point d'attention 2"],
       "table": {
         "headers": ["Colonne 1", "Colonne 2", "Colonne 3", "Colonne 4"],
@@ -1884,8 +2006,8 @@ SCHÉMA JSON :
     }
   ],
   "recommendations": [
-    "Recommandation concrète et opérationnelle 1",
-    "Recommandation opérationnelle 2"
+    "Recommandation concrète 1",
+    "Recommandation concrète 2"
   ],
   "conclusion": "Conclusion formelle d'homologation."
 }`;
@@ -1894,52 +2016,59 @@ SCHÉMA JSON :
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          system_instruction: {
+            parts: [{ text: systemInstruction }]
+          },
           contents: [{ role: 'user', parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 2048
+            temperature: 0.1,
+            maxOutputTokens: 2500,
+            responseMimeType: 'application/json'
           }
         })
       });
 
       if (resp.ok) {
         const data: any = await resp.json();
-        let rawText = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('').trim() || '';
-        if (rawText.startsWith('```')) {
-          rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        const rawText = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('').trim() || '';
+        const parsed = extractJsonFromText(rawText);
+        if (parsed && parsed.title && Array.isArray(parsed.sections)) {
+          return {
+            title: String(parsed.title || 'RAPPORT OFFICIEL SMART-HOSTO'),
+            subtitle: String(parsed.subtitle || `Édité le ${ctx.currentDate || new Date().toLocaleDateString('fr-FR')}`),
+            category: String(parsed.category || 'RAPPORT HOSPITALIER OFFICIEL'),
+            dateStr: ctx.currentDate || new Date().toLocaleString('fr-FR'),
+            requesterName: staff.name || 'Personnel Soignant',
+            requesterRole: staff.profession || staff.role || 'Praticien',
+            executiveSummary: String(parsed.executiveSummary || ''),
+            kpis: Array.isArray(parsed.kpis) ? parsed.kpis : [],
+            sections: parsed.sections.map((sec: any) => ({
+              title: String(sec.title || 'Section'),
+              narrative: sec.narrative ? String(sec.narrative) : undefined,
+              bulletPoints: Array.isArray(sec.bulletPoints) ? sec.bulletPoints.map(String) : undefined,
+              table: sec.table && Array.isArray(sec.table.headers) && Array.isArray(sec.table.rows)
+                ? {
+                    headers: sec.table.headers.map(String),
+                    rows: sec.table.rows.map((row: any) => Array.isArray(row) ? row.map(String) : [String(row)])
+                  }
+                : undefined
+            })),
+            recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String) : undefined,
+            conclusion: parsed.conclusion ? String(parsed.conclusion) : undefined
+          };
         }
-        if (rawText) {
-          const parsed = JSON.parse(rawText);
-          if (parsed && parsed.title && Array.isArray(parsed.sections)) {
-            return {
-              title: String(parsed.title || 'RAPPORT OFFICIEL SMART-HOSTO'),
-              subtitle: String(parsed.subtitle || `Édité le ${ctx.currentDate || new Date().toLocaleDateString('fr-FR')}`),
-              category: String(parsed.category || 'RAPPORT HOSPITALIER OFFICIEL'),
-              dateStr: ctx.currentDate || new Date().toLocaleString('fr-FR'),
-              requesterName: staff.name || 'Personnel Soignant',
-              requesterRole: staff.profession || staff.role || 'Praticien',
-              executiveSummary: String(parsed.executiveSummary || ''),
-              kpis: Array.isArray(parsed.kpis) ? parsed.kpis : [],
-              sections: parsed.sections.map((sec: any) => ({
-                title: String(sec.title || 'Section'),
-                narrative: sec.narrative ? String(sec.narrative) : undefined,
-                bulletPoints: Array.isArray(sec.bulletPoints) ? sec.bulletPoints.map(String) : undefined,
-                table: sec.table && Array.isArray(sec.table.headers) && Array.isArray(sec.table.rows)
-                  ? {
-                      headers: sec.table.headers.map(String),
-                      rows: sec.table.rows.map((row: any) => Array.isArray(row) ? row.map(String) : [String(row)])
-                    }
-                  : undefined
-              })),
-              recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String) : undefined,
-              conclusion: parsed.conclusion ? String(parsed.conclusion) : undefined
-            };
-          }
-        }
+      } else {
+        const errBody = await resp.text().catch(() => '');
+        console.warn('Gemini report JSON generation API returned error:', resp.status, errBody);
       }
     } catch (aiErr) {
-      console.warn('Gemini report JSON generation failed, fallback to dynamic rule-based spec:', aiErr);
+      console.warn('Gemini report JSON generation failed, using intelligent dynamic fallback from AI reply:', aiErr);
     }
+  }
+
+  // If AI reply text is available, build dynamic report directly from the accurate reply!
+  if (aiReplyText && aiReplyText.trim().length > 30) {
+    return buildDynamicReportFromAiReply(aiReplyText, userPrompt, ctx);
   }
 
   return buildFallbackReportSpec(userPrompt, ctx);
@@ -2810,13 +2939,10 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
 
           if (isDocRequest && config.phoneNumberId && config.accessToken) {
             try {
-              // Generate conversational summary and dynamic report spec simultaneously in parallel
-              const [agentReply, reportSpec] = await Promise.all([
-                generateStaffAgentReply(textBody, staffDoc, config, staffContext),
-                generateDynamicReportSpec(textBody, staffContext, config)
-              ]);
+              // 1. Generate accurate conversational summary first using live context
+              const agentReply = await generateStaffAgentReply(textBody, staffDoc, config, staffContext);
 
-              // Send conversational summary first
+              // 2. Send conversational summary immediately so the user gets instant feedback
               const sendRes = await sendMetaWhatsAppMessage(fromPhone, agentReply.reply, config);
               await logWhatsAppMessage({
                 direction: 'OUTBOUND',
@@ -2829,6 +2955,9 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
                 aiModel: agentReply.modelUsed,
                 metaMessageId: sendRes.metaMessageId
               });
+
+              // 3. Generate tailored Dynamic Report Spec grounded directly in the accurate agentReply.reply
+              const reportSpec = await generateDynamicReportSpec(textBody, staffContext, config, agentReply.reply);
 
               // Prepare & dispatch document immediately right after
               const isExcel = lowerReq.includes('excel') || lowerReq.includes('csv') || lowerReq.includes('tableur');
