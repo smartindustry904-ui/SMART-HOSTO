@@ -332,25 +332,53 @@ const Consultation: React.FC<ConsultationProps> = ({
       const today = new Date();
       const dateStr = today.toLocaleDateString('fr-FR');
       const timeStr = today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const targetPid = patient.patientId || patient.id;
+      const targetDmeId = patient.dmeId || targetPid;
+      const isPaid = checkPatientIsPaid(patient);
 
       // 1. Mark status as 'consulted' in service_queues so they leave the doctor's queue entirely
-      const q = query(collection(db, 'service_queues'), where('patientId', '==', patient.id));
-      const snaps = await getDocs(q);
-      for (const dSnap of snaps.docs) {
-        await updateDoc(doc(db, 'service_queues', dSnap.id), { status: 'consulted' });
+      const targetIds = [patient.id, patient.patientId, patient.dmeId].filter(Boolean);
+      for (const pid of targetIds) {
+        const q = query(collection(db, 'service_queues'), where('patientId', '==', pid));
+        const snaps = await getDocs(q);
+        for (const dSnap of snaps.docs) {
+          await updateDoc(doc(db, 'service_queues', dSnap.id), { 
+            status: 'consulted',
+            isClotured: true,
+            consultedAt: today.toISOString()
+          });
+        }
+      }
+      if (patient.queueDocId) {
+        try {
+          await updateDoc(doc(db, 'service_queues', patient.queueDocId), { 
+            status: 'consulted',
+            isClotured: true,
+            consultedAt: today.toISOString()
+          });
+        } catch (_) {}
       }
 
       // 2. Put into discharges_waiting so Reception can finalize their physical exit paper
-      const dischargeId = `DIS-${Math.floor(Math.random() * 1000000)}`;
-      await setDoc(doc(db, 'discharges_waiting', dischargeId), {
+      const dischargeId = `DIS-${targetPid}`;
+      await setDoc(doc(db, 'discharges_waiting', dischargeId), sanitizeData({
         id: dischargeId,
-        patientId: patient.id,
-        name: `${patient.lastName || ''} ${patient.firstName || ''}`,
-        admissionDate: dateStr,
-        department: 'Médecine Générale',
+        docId: dischargeId,
+        patientId: targetPid,
+        dmeId: targetDmeId,
+        name: `${patient.lastName || ''} ${patient.firstName || ''}`.trim(),
+        patientName: `${patient.lastName || ''} ${patient.firstName || ''}`.trim(),
+        admissionDate: patient.date || dateStr,
+        department: patient.service || patient.queueName || 'Médecine Générale',
         status: 'READY_FOR_DISCHARGE',
-        dischargedAt: today.toISOString()
-      });
+        medicalClearance: true,
+        hospitalizationClosed: true,
+        financialClearance: isPaid,
+        doctorName: user?.name || user?.username || 'Docteur',
+        source: 'CONSULTATION',
+        dischargedAt: today.toISOString(),
+        createdAt: today.toISOString()
+      }), { merge: true });
 
       // 3. Trace in audit logs
       await setDoc(doc(collection(db, 'audit_logs')), {
@@ -360,13 +388,13 @@ const Consultation: React.FC<ConsultationProps> = ({
         time: timeStr,
         timestamp: today.toISOString(),
         action: `Libération du patient (Sortie directe domicile) - Patient : ${patient.lastName || ''} ${patient.firstName || ''}`,
-        details: { patientId: patient.id, dischargeId },
+        details: { patientId: targetPid, dischargeId },
         module: 'Consultation'
       });
 
       // 4. Update the local patients list
       if (setWaitingQueue) {
-        setWaitingQueue(prev => prev.filter(p => p.id !== patient.id));
+        setWaitingQueue(prev => prev.filter(p => p.id !== patient.id && p.patientId !== targetPid && p.queueDocId !== patient.queueDocId));
       }
 
       // 5. Clean active patient state and return
@@ -522,31 +550,116 @@ const Consultation: React.FC<ConsultationProps> = ({
       if(isEndingSession) return;
       setIsEndingSession(true);
       try {
-        const q = query(collection(db, 'service_queues'), where('patientId', '==', activePatient.id));
-        const snaps = await getDocs(q);
-        for (const dSnap of snaps.docs) {
-          const currentStatus = dSnap.data().status;
-          if (currentStatus === 'in_consultation') {
-            await updateDoc(doc(db, 'service_queues', dSnap.id), { status: 'consulted' });
+        const today = new Date();
+        const dateStr = today.toLocaleDateString('fr-FR');
+        const timeStr = today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+        const targetPid = activePatient.patientId || activePatient.id;
+        const targetDmeId = activePatient.dmeId || targetPid;
+        const practitionerName = user?.name || user?.username || 'Docteur';
+        const practitionerId = user?.id || '';
+        const isPaid = checkPatientIsPaid(activePatient);
+
+        // 1. Mark status as 'consulted' in service_queues across all aliases
+        const targetIds = [activePatient.id, activePatient.patientId, activePatient.dmeId].filter(Boolean);
+        for (const pid of targetIds) {
+          const q = query(collection(db, 'service_queues'), where('patientId', '==', pid));
+          const snaps = await getDocs(q);
+          for (const dSnap of snaps.docs) {
+            await updateDoc(doc(db, 'service_queues', dSnap.id), { 
+              status: 'consulted',
+              isClotured: true,
+              practitionerId,
+              practitionerName,
+              consultedAt: today.toISOString()
+            });
           }
         }
+        if ((activePatient as any).queueDocId) {
+          try {
+            await updateDoc(doc(db, 'service_queues', (activePatient as any).queueDocId), {
+              status: 'consulted',
+              isClotured: true,
+              practitionerId,
+              practitionerName,
+              consultedAt: today.toISOString()
+            });
+          } catch (_) {}
+        }
         
-        // Push to discharges_waiting if not already ready_for_discharge or hospitalized
-        if (activePatient.status !== 'ready_for_discharge' && activePatient.status !== 'hospitalized') {
-          const dischargeId = `DIS-${Math.floor(Math.random() * 1000000)}`;
-          const dateStr = new Date().toLocaleDateString('fr-FR');
-          await setDoc(doc(db, 'discharges_waiting', dischargeId), {
+        // 2. Push/Update discharges_waiting for Reception so patient appears in Sorties Administratives
+        if (activePatient.status !== 'hospitalized') {
+          const dischargeId = `DIS-${targetPid}`;
+          await setDoc(doc(db, 'discharges_waiting', dischargeId), sanitizeData({
             id: dischargeId,
-            patientId: activePatient.id,
-            name: `${activePatient.lastName || ''} ${activePatient.firstName || ''}`,
-            admissionDate: dateStr,
-            dischargeDate: new Date().toISOString(),
+            docId: dischargeId,
+            patientId: targetPid,
+            dmeId: targetDmeId,
+            name: `${activePatient.lastName || ''} ${activePatient.firstName || ''}`.trim(),
+            patientName: `${activePatient.lastName || ''} ${activePatient.firstName || ''}`.trim(),
+            admissionDate: activePatient.date || dateStr,
+            dischargeDate: today.toISOString(),
             status: 'waiting',
             medicalClearance: true,
-            financialClearance: false,
+            financialClearance: isPaid,
             hospitalizationClosed: true,
-            doctorName: user?.name || 'Docteur'
-          });
+            doctorName: practitionerName,
+            source: 'CONSULTATION',
+            department: activePatient.service || activePatient.queueName || 'Consultation',
+            createdAt: today.toISOString()
+          }), { merge: true });
+        }
+
+        // 3. Ensure a consultation record exists in 'consultations' and 'patient_history'
+        const consultationId = activePatient.consultationId || `CONS-${Math.floor(Math.random() * 1000000)}`;
+        const consRef = doc(db, 'consultations', consultationId);
+        const consSnap = await getDoc(consRef);
+        if (!consSnap.exists()) {
+          const nowIso = today.toISOString();
+          const consPayload = {
+            id: consultationId,
+            patientId: targetPid,
+            patientName: `${activePatient.lastName || ''} ${activePatient.firstName || ''}`.trim(),
+            patient: `${activePatient.lastName || ''} ${activePatient.firstName || ''}`.trim(),
+            dmeId: targetDmeId,
+            age: activePatient.age,
+            gender: activePatient.gender,
+            date: dateStr,
+            time: timeStr,
+            doctor: practitionerName,
+            doctorName: practitionerName,
+            doctorId: practitionerId,
+            practitionerId,
+            practitionerName,
+            practitionerRole: user?.role || 'MEDECIN',
+            motif: activePatient.motif || 'Consultation clinique',
+            diagnosis: 'Consultation conclue',
+            observation: 'Session terminée par le praticien',
+            type: 'Consultation Générale',
+            status: 'cloture',
+            isClotured: true,
+            cloturedAt: nowIso,
+            createdAt: nowIso
+          };
+          await setDoc(consRef, sanitizeData(consPayload));
+
+          const historyId = `HIST-${targetPid}-${consultationId}`;
+          await setDoc(doc(db, 'patient_history', historyId), sanitizeData({
+            id: historyId,
+            patientId: targetPid,
+            consultationId: consultationId,
+            dmeId: targetDmeId,
+            date: dateStr,
+            time: timeStr,
+            doctor: practitionerName,
+            doctorId: practitionerId,
+            practitionerId,
+            practitionerName,
+            motif: activePatient.motif || 'Consultation',
+            diagnosis: 'Consultation conclue',
+            status: 'cloture',
+            isClotured: true,
+            createdAt: nowIso
+          }));
         }
 
         window.dispatchEvent(new CustomEvent('app-notification', {
@@ -559,10 +672,13 @@ const Consultation: React.FC<ConsultationProps> = ({
       }
     }
     if (setWaitingQueue && activePatient) {
+      const pId = activePatient.id;
+      const ptId = activePatient.patientId;
+      const qDocId = (activePatient as any).queueDocId;
       setWaitingQueue(prev => prev.filter(p => 
-        p.id !== activePatient.id && 
-        p.patientId !== activePatient.id && 
-        p.queueDocId !== (activePatient as any).queueDocId
+        p.id !== pId && 
+        p.patientId !== ptId && 
+        (!qDocId || p.queueDocId !== qDocId)
       ));
     }
     setActivePatient(null);
@@ -925,13 +1041,16 @@ const Consultation: React.FC<ConsultationProps> = ({
       // 1. Write the Clinical Observation document into 'consultations' as clotured & assigned to this practitioner
       const practitionerName = user?.name || user?.username || 'Médecin';
       const practitionerId = user?.id || '';
+      const targetPid = activePatient.patientId || activePatient.id;
+      const targetDmeId = activePatient.dmeId || targetPid;
       const consDocRef = doc(db, 'consultations', consultationId);
       const consultationPayload = {
         id: consultationId,
-        patientId: activePatient.id,
+        patientId: targetPid,
         patientName: `${activePatient.lastName} ${activePatient.firstName}`,
         patient: `${activePatient.lastName} ${activePatient.firstName}`,
-        patientIdRaw: activePatient.id,
+        patientIdRaw: targetPid,
+        dmeId: targetDmeId,
         age: activePatient.age,
         gender: activePatient.gender,
         date: dateStr,
@@ -959,11 +1078,12 @@ const Consultation: React.FC<ConsultationProps> = ({
       batch.set(consDocRef, sanitizeData(consultationPayload));
 
       // Write to patient_history collection with status 'cloture'
-      const historyId = `HIST-${activePatient.id}-${consultationId}`;
+      const historyId = `HIST-${targetPid}-${consultationId}`;
       batch.set(doc(db, 'patient_history', historyId), sanitizeData({
         id: historyId,
-        patientId: activePatient.id,
+        patientId: targetPid,
         consultationId: consultationId,
+        dmeId: targetDmeId,
         date: dateStr,
         time: timeStr,
         doctor: practitionerName,
@@ -1203,7 +1323,31 @@ const Consultation: React.FC<ConsultationProps> = ({
         module: 'Consultation'
       }));
 
-      // 7. Optimistic Offline-First UI Update (0ms delay)
+      // 7. Route patient to Reception's Sorties Administratives (discharges_waiting)
+      const dischargeId = `DIS-${targetPid}`;
+      const isPatientPaid = checkPatientIsPaid(activePatient);
+      const dischargeDocRef = doc(db, 'discharges_waiting', dischargeId);
+      batch.set(dischargeDocRef, sanitizeData({
+        id: dischargeId,
+        docId: dischargeId,
+        patientId: targetPid,
+        dmeId: targetDmeId,
+        name: `${activePatient.lastName || ''} ${activePatient.firstName || ''}`.trim(),
+        patientName: `${activePatient.lastName || ''} ${activePatient.firstName || ''}`.trim(),
+        department: activePatient.service || activePatient.queueName || 'Consultation',
+        admissionDate: activePatient.date || dateStr,
+        dischargeDate: today.toISOString(),
+        status: 'waiting',
+        medicalClearance: true,
+        hospitalizationClosed: true,
+        financialClearance: isPatientPaid,
+        doctorName: practitionerName,
+        source: 'CONSULTATION',
+        consultationId: consultationId,
+        createdAt: today.toISOString()
+      }), { merge: true });
+
+      // 8. Optimistic Offline-First UI Update (0ms delay)
       const targetPatientId = activePatient.id;
       const targetQueueDocId = (activePatient as any).queueDocId;
       if (targetQueueDocId) {

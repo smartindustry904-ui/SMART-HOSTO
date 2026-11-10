@@ -1271,7 +1271,7 @@ async function getWhatsAppConfig(): Promise<WhatsAppAgentConfig> {
       accessToken: stored.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
       verifyToken: stored.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || 'smarthosto_meta_verify_2026',
       geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || '',
-      geminiModel: stored.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-flash',
+      geminiModel: stored.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-pro',
       allowUnregisteredPreview: stored.allowUnregisteredPreview ?? true,
       systemPrompt,
       updatedAt: stored.updatedAt
@@ -2129,17 +2129,18 @@ async function generateDynamicReportSpec(
   const staff = ctx.staff || {};
 
   if (apiKey) {
-    try {
-      const model = (config.geminiModel || 'gemini-2.5-flash').trim();
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const primaryModel = (config.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-pro').trim();
+    const modelsToTry = primaryModel === 'gemini-2.5-pro'
+      ? ['gemini-2.5-pro', 'gemini-2.5-flash']
+      : [primaryModel, 'gemini-2.5-flash'];
 
-      const systemInstruction = `Tu es l'analyste en chef et auditeur médical du Système d'Information Hospitalier SMART-HOSTO.
+    const systemInstruction = `Tu es l'analyste en chef et auditeur médical du Système d'Information Hospitalier SMART-HOSTO.
 Ta mission est de concevoir la spécification d'un rapport certifié officiel SUR-MESURE (JSON).
 Le rapport DOIT REFLÉTER EXACTEMENT l'analyse médicale et financière formulée dans la réponse textuelle et s'appuyer sur les données réelles de l'établissement (JSON).
 Ne génère JAMAIS un rapport générique ou passe-partout. Chaque titre, chaque indicateur (KPI), chaque colonne de tableau et chaque recommandation doivent être taillés sur mesure pour la requête exacte de l'utilisateur.
 Tu dois répondre STRICTEMENT par un objet JSON valide, sans balises markdown ni texte en dehors de l'objet JSON.`;
 
-      const prompt = `DEMANDE DE L'UTILISATEUR :
+    const prompt = `DEMANDE DE L'UTILISATEUR :
 "${userPrompt}"
 
 RÉPONSE VALIDÉE ET CHIFFRÉE DE L'ASSISTANT (À REPRENDRE ET APPROFONDIR DANS LE RAPPORT) :
@@ -2180,57 +2181,61 @@ Conçois un rapport décisionnel officiel complet sous forme d'objet JSON respec
   "conclusion": "Conclusion formelle d'homologation."
 }`;
 
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system_instruction: {
-            parts: [{ text: systemInstruction }]
-          },
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: 2500,
-            responseMimeType: 'application/json'
-          }
-        })
-      });
+    for (const model of modelsToTry) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: {
+              parts: [{ text: systemInstruction }]
+            },
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.1,
+              maxOutputTokens: 2500,
+              responseMimeType: 'application/json'
+            }
+          })
+        });
 
-      if (resp.ok) {
-        const data: any = await resp.json();
-        const rawText = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('').trim() || '';
-        const parsed = extractJsonFromText(rawText);
-        if (parsed && parsed.title && Array.isArray(parsed.sections)) {
-          return {
-            title: String(parsed.title || 'RAPPORT OFFICIEL SMART-HOSTO'),
-            subtitle: String(parsed.subtitle || `Édité le ${ctx.currentDate || new Date().toLocaleDateString('fr-FR')}`),
-            category: String(parsed.category || 'RAPPORT HOSPITALIER OFFICIEL'),
-            dateStr: ctx.currentDate || new Date().toLocaleString('fr-FR'),
-            requesterName: staff.name || 'Personnel Soignant',
-            requesterRole: staff.profession || staff.role || 'Praticien',
-            executiveSummary: String(parsed.executiveSummary || ''),
-            kpis: Array.isArray(parsed.kpis) ? parsed.kpis : [],
-            sections: parsed.sections.map((sec: any) => ({
-              title: String(sec.title || 'Section'),
-              narrative: sec.narrative ? String(sec.narrative) : undefined,
-              bulletPoints: Array.isArray(sec.bulletPoints) ? sec.bulletPoints.map(String) : undefined,
-              table: sec.table && Array.isArray(sec.table.headers) && Array.isArray(sec.table.rows)
-                ? {
-                    headers: sec.table.headers.map(String),
-                    rows: sec.table.rows.map((row: any) => Array.isArray(row) ? row.map(String) : [String(row)])
-                  }
-                : undefined
-            })),
-            recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String) : undefined,
-            conclusion: parsed.conclusion ? String(parsed.conclusion) : undefined
-          };
+        if (resp.ok) {
+          const data: any = await resp.json();
+          const rawText = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('').trim() || '';
+          const parsed = extractJsonFromText(rawText);
+          if (parsed && parsed.title && Array.isArray(parsed.sections)) {
+            return {
+              title: String(parsed.title || 'RAPPORT OFFICIEL SMART-HOSTO'),
+              subtitle: String(parsed.subtitle || `Édité le ${ctx.currentDate || new Date().toLocaleDateString('fr-FR')}`),
+              category: String(parsed.category || 'RAPPORT HOSPITALIER OFFICIEL'),
+              dateStr: ctx.currentDate || new Date().toLocaleString('fr-FR'),
+              requesterName: staff.name || 'Personnel Soignant',
+              requesterRole: staff.profession || staff.role || 'Praticien',
+              executiveSummary: String(parsed.executiveSummary || ''),
+              kpis: Array.isArray(parsed.kpis) ? parsed.kpis : [],
+              sections: parsed.sections.map((sec: any) => ({
+                title: String(sec.title || 'Section'),
+                narrative: sec.narrative ? String(sec.narrative) : undefined,
+                bulletPoints: Array.isArray(sec.bulletPoints) ? sec.bulletPoints.map(String) : undefined,
+                table: sec.table && Array.isArray(sec.table.headers) && Array.isArray(sec.table.rows)
+                  ? {
+                      headers: sec.table.headers.map(String),
+                      rows: sec.table.rows.map((row: any) => Array.isArray(row) ? row.map(String) : [String(row)])
+                    }
+                  : undefined
+              })),
+              recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String) : undefined,
+              conclusion: parsed.conclusion ? String(parsed.conclusion) : undefined
+            };
+          }
+        } else {
+          const errBody = await resp.text().catch(() => '');
+          console.warn(`Gemini report model ${model} returned error ${resp.status}:`, errBody);
         }
-      } else {
-        const errBody = await resp.text().catch(() => '');
-        console.warn('Gemini report JSON generation API returned error:', resp.status, errBody);
+      } catch (aiErr) {
+        console.warn(`Gemini report attempt with ${model} failed:`, aiErr);
       }
-    } catch (aiErr) {
-      console.warn('Gemini report JSON generation failed, using intelligent dynamic fallback from AI reply:', aiErr);
     }
   }
 

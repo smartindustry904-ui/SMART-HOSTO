@@ -3,7 +3,7 @@ import {
   History, Search, Filter, Calendar, Stethoscope, BedDouble, 
   Beaker, Baby, ShieldAlert, User, Clock, ArrowRight, ShieldCheck, 
   Lock, Eye, RefreshCw, X, ChevronRight, FileText, CheckCircle2,
-  CalendarRange, AlertCircle, Activity, UserCheck, Layers, Sparkles
+  CalendarRange, AlertCircle, Activity, UserCheck, Layers, Sparkles, LogOut
 } from 'lucide-react';
 import { Patient, User as UserType } from '../../types';
 import { db } from '../../src/firebase';
@@ -14,7 +14,7 @@ export interface PatientHistoryEvent {
   patientId: string;
   patientName: string;
   dmeId?: string;
-  type: 'CONSULTATION' | 'HOSPITALISATION' | 'LABORATOIRE' | 'IMAGERIE' | 'MATERNITE' | 'URGENCE' | 'ORIENTATION';
+  type: 'CONSULTATION' | 'HOSPITALISATION' | 'LABORATOIRE' | 'IMAGERIE' | 'MATERNITE' | 'URGENCE' | 'ORIENTATION' | 'SORTIE';
   date: string;
   time?: string;
   timestamp: number;
@@ -81,6 +81,8 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
   useEffect(() => {
     if (propSelectedPatient?.id || propSelectedPatient?.patientId) {
       setSelectedPatientId(propSelectedPatient.id || propSelectedPatient.patientId);
+    } else {
+      setSelectedPatientId('ALL');
     }
   }, [propSelectedPatient]);
 
@@ -88,7 +90,9 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
   useEffect(() => {
     setIsLoading(true);
     let consultations: PatientHistoryEvent[] = [];
+    let patientHistoryRecords: PatientHistoryEvent[] = [];
     let hospitalizations: PatientHistoryEvent[] = [];
+    let dischargesList: PatientHistoryEvent[] = [];
     let labRequests: PatientHistoryEvent[] = [];
     let emergencyEvents: PatientHistoryEvent[] = [];
     let serviceQueues: PatientHistoryEvent[] = [];
@@ -97,7 +101,9 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
     const compileAll = () => {
       const merged = [
         ...consultations,
+        ...patientHistoryRecords,
         ...hospitalizations,
+        ...dischargesList,
         ...labRequests,
         ...emergencyEvents,
         ...serviceQueues,
@@ -139,7 +145,31 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
       compileAll();
     }, () => compileAll());
 
-    // B. Hospitalizations / Discharges
+    // A2. Patient History (Secondary Consultation Register)
+    const unsubPatientHistory = onSnapshot(collection(db, 'patient_history'), (snap) => {
+      patientHistoryRecords = snap.docs.map(docSnap => {
+        const d = docSnap.data();
+        const dateStr = d.date || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+        const ts = d.createdAt ? new Date(d.createdAt).getTime() : (d.timestamp ? new Date(d.timestamp).getTime() : Date.now());
+        return {
+          id: `phist-${docSnap.id}`,
+          patientId: d.patientId || '',
+          patientName: d.patient || d.patientName || 'Patient',
+          dmeId: d.dmeId || d.patientId || '',
+          type: 'CONSULTATION',
+          date: dateStr,
+          time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
+          timestamp: isNaN(ts) ? Date.now() : ts,
+          service: d.service || 'Consultation Médicale',
+          doctorName: d.doctor || d.doctorName || 'Dr. Référent',
+          motif: d.motif || 'Consultation',
+          mainDiagnosis: d.diagnosis || d.diagnosticPrincipal || 'Observation médicale enregistrée'
+        };
+      });
+      compileAll();
+    }, () => compileAll());
+
+    // B. Hospitalizations / Discharges Waiting
     const unsubDischarges = onSnapshot(collection(db, 'discharges_waiting'), (snap) => {
       hospitalizations = snap.docs.map(docSnap => {
         const d = docSnap.data();
@@ -162,6 +192,30 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
           dischargeDate: exitDate,
           dischargeReason: d.dischargeReason || d.motifSortie || d.motif || 'Séjour hospitalier régularisé',
           motif: d.admissionReason || d.motif || 'Hospitalisation'
+        };
+      });
+      compileAll();
+    }, () => compileAll());
+
+    // B2. Validated Administrative Discharges (discharges)
+    const unsubDischargesCompleted = onSnapshot(collection(db, 'discharges'), (snap) => {
+      dischargesList = snap.docs.map(docSnap => {
+        const d = docSnap.data();
+        const dateStr = d.dischargeDate || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+        return {
+          id: `disch-${docSnap.id}`,
+          patientId: d.patientId || docSnap.id,
+          patientName: d.patientName || 'Patient',
+          dmeId: d.dmeId || d.patientId || '',
+          type: 'SORTIE',
+          date: dateStr,
+          time: d.dischargeTime || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
+          timestamp: isNaN(ts) ? Date.now() : ts,
+          service: d.department || 'Sorties Administratives',
+          doctorName: d.user || 'Agent Accueil',
+          motif: `Sortie administrative validée (${d.department || 'Services Cliniques'})`,
+          status: 'Sortie Effectuée'
         };
       });
       compileAll();
@@ -225,25 +279,27 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
       compileAll();
     }, () => compileAll());
 
-    // E. Service Queues / Past Orientations
+    // E. Service Queues / Past Orientations & Completed Consultations
     const unsubQueues = onSnapshot(collection(db, 'service_queues'), (snap) => {
       serviceQueues = snap.docs.map(docSnap => {
         const d = docSnap.data();
         const dateStr = d.createdAt ? d.createdAt.split('T')[0] : 'N/A';
         const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+        const isConsulted = d.status === 'consulted' || d.status === 'ready_for_discharge' || d.isClotured === true;
         return {
           id: `queue-${docSnap.id}`,
           patientId: d.patientId || '',
           patientName: `${d.lastName || ''} ${d.firstName || ''}`.trim() || 'Patient',
           dmeId: d.dmeId || d.patientId || '',
-          type: 'ORIENTATION',
+          type: isConsulted ? 'CONSULTATION' : 'ORIENTATION',
           date: dateStr,
           time: d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined,
           timestamp: isNaN(ts) ? Date.now() : ts,
           service: d.service || d.queueName || 'Accueil & Triage',
-          doctorName: d.agentName || 'Agent d\'Accueil',
-          motif: `Admission & Orientation : ${d.motif || d.service || 'Général'}`,
-          priority: d.priority || 'normal'
+          doctorName: d.practitionerName || d.agentName || 'Agent d\'Accueil',
+          motif: isConsulted ? `Consultation clôturée (${d.service || d.queueName || 'Médecine'})` : `Admission & Orientation : ${d.motif || d.service || 'Général'}`,
+          priority: d.priority || 'normal',
+          mainDiagnosis: isConsulted ? 'Session médicale terminée' : undefined
         };
       });
       compileAll();
@@ -275,7 +331,9 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
 
     return () => {
       unsubConsultations();
+      unsubPatientHistory();
       unsubDischarges();
+      unsubDischargesCompleted();
       unsubLab();
       unsubEmergency();
       unsubQueues();
@@ -336,6 +394,7 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
         if (selectedServiceType === 'IMAGERIE' && event.type !== 'IMAGERIE') return false;
         if (selectedServiceType === 'MATERNITE' && event.type !== 'MATERNITE') return false;
         if (selectedServiceType === 'URGENCE' && event.type !== 'URGENCE') return false;
+        if (selectedServiceType === 'SORTIE' && event.type !== 'SORTIE') return false;
       }
 
       // 3. Date Range Filter
@@ -392,8 +451,9 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
     const labCount = filteredEvents.filter(e => e.type === 'LABORATOIRE' || e.type === 'IMAGERIE').length;
     const emergencyCount = filteredEvents.filter(e => e.type === 'URGENCE').length;
     const maternityCount = filteredEvents.filter(e => e.type === 'MATERNITE').length;
+    const sortiesCount = filteredEvents.filter(e => e.type === 'SORTIE').length;
 
-    return { total, consultationsCount, hospitalizationsCount, labCount, emergencyCount, maternityCount };
+    return { total, consultationsCount, hospitalizationsCount, labCount, emergencyCount, maternityCount, sortiesCount };
   }, [filteredEvents]);
 
   const resetFilters = () => {
@@ -413,6 +473,13 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
           label: 'Consultation',
           color: 'bg-blue-50 text-blue-700 border-blue-200',
           dot: 'bg-blue-600'
+        };
+      case 'SORTIE':
+        return {
+          icon: LogOut,
+          label: 'Sortie Administrative',
+          color: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+          dot: 'bg-emerald-600'
         };
       case 'HOSPITALISATION':
         return {

@@ -428,6 +428,7 @@ const Reception: React.FC<ReceptionProps> = ({
   const [patientsToDischarge, setPatientsToDischarge] = useState<any[]>([]);
   const [dischargeError, setDischargeError] = useState<{ patientId: string; message: string } | null>(null);
   const [isProcessingDischarge, setIsProcessingDischarge] = useState<string | null>(null);
+  const [selectedPatientForHistory, setSelectedPatientForHistory] = useState<Patient | null>(null);
 
   const [currentPatient, setCurrentPatient] = useState<Partial<Patient>>({
     gender: 'M',
@@ -568,7 +569,7 @@ const Reception: React.FC<ReceptionProps> = ({
       // 2. Synchronize PatientsToDischarge list with Firestore (discharges_waiting)
       const unsubDischarges = onSnapshot(collection(db, 'discharges_waiting'), (snapshot) => {
         if (!snapshot.empty) {
-          const list = snapshot.docs.map(doc => doc.data());
+          const list = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id, docId: doc.id }));
           setPatientsToDischarge(list);
         } else {
           setPatientsToDischarge([]);
@@ -1555,7 +1556,7 @@ const Reception: React.FC<ReceptionProps> = ({
 
       // Save database actions in parallel
       const p1 = setDoc(dischargeDocRef, sanitizeData(dischargeData));
-      const p2 = deleteDoc(doc(db, 'discharges_waiting', patient.id));
+      const p2 = deleteDoc(doc(db, 'discharges_waiting', patient.docId || patient.id));
       const p3 = setDoc(notifDocRef, sanitizeData({
         id: notifDocRef.id,
         message: `Sortie administrative validée pour ${patient.name} (${patient.id})`,
@@ -1797,7 +1798,10 @@ const Reception: React.FC<ReceptionProps> = ({
             ].map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => {
+                  if (tab.id === 'historique') setSelectedPatientForHistory(null);
+                  setActiveTab(tab.id as any);
+                }}
                 className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-all cursor-pointer ${
                   activeTab === tab.id
                     ? 'bg-blue-600 text-white shadow-xs'
@@ -1836,7 +1840,7 @@ const Reception: React.FC<ReceptionProps> = ({
               }`}>
                 <Users size={16} className="text-blue-500" /> Admissions & Orientations Récentes (Temps Réel)
               </h3>
-              <button onClick={() => setActiveTab('historique')} className="text-xs font-semibold text-blue-500 hover:underline flex items-center gap-1 cursor-pointer">
+              <button onClick={() => { setSelectedPatientForHistory(null); setActiveTab('historique'); }} className="text-xs font-semibold text-blue-500 hover:underline flex items-center gap-1 cursor-pointer">
                 Consulter Tout l'Historique →
               </button>
             </div>
@@ -1982,7 +1986,7 @@ const Reception: React.FC<ReceptionProps> = ({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setCurrentPatient(p);
+                                  setSelectedPatientForHistory(p);
                                   setActiveTab('historique');
                                 }}
                                 className="px-2.5 py-1.5 bg-white hover:bg-blue-50 border border-slate-200 text-slate-700 hover:text-blue-600 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer"
@@ -2630,7 +2634,7 @@ const Reception: React.FC<ReceptionProps> = ({
       {(activeTab === 'historique' || activeTab === 'demandes') && (
         <HistoriquePatient 
           user={user}
-          selectedPatient={currentPatient?.id ? (currentPatient as Patient) : null}
+          selectedPatient={selectedPatientForHistory}
           onSelectPatientForAdmission={(p) => {
             handleSelectPatient(p);
             setActiveTab('triage');
