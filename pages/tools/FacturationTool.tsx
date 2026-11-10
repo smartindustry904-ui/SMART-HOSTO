@@ -865,11 +865,32 @@ export const FacturationTool: React.FC<FacturationToolProps> = ({
                     type="number" 
                     value={montantRemis}
                     onChange={(e) => setMontantRemis(e.target.value)}
-                    className="w-full pl-4 pr-16 py-3 rounded-xl bg-slate-800 border border-slate-700 text-white font-black text-xl focus:border-blue-500 outline-none"
+                    className="w-full pl-4 pr-16 py-2.5 rounded-xl bg-slate-800 border border-slate-700 text-white font-black text-lg focus:border-blue-500 outline-none font-mono"
                     placeholder="0"
                   />
-                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-slate-500">FCFA</span>
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 font-black text-slate-500 text-xs">FCFA</span>
                 </div>
+                {netAPayer > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setMontantRemis(String(netAPayer))}
+                      className="px-2 py-1 text-[10px] font-bold bg-slate-800 hover:bg-slate-700 text-blue-400 rounded-lg border border-slate-700 transition-colors"
+                    >
+                      Exact
+                    </button>
+                    {[5000, 10000, 20000, 50000].filter(v => v >= netAPayer).map(val => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setMontantRemis(String(val))}
+                        className="px-2 py-1 text-[10px] font-semibold bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition-colors font-mono"
+                      >
+                        {val.toLocaleString()} F
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-3 gap-2 pt-2">

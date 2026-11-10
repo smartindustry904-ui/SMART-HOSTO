@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CreditCard, DollarSign, ArrowUpRight, Printer, Search, Calendar, Landmark, CheckCircle2, Edit3, X, Calculator, Wallet, Clock, FileText, Home, Loader2, Check, ArrowLeft, Lock, Unlock, ShieldAlert, Award, AlertCircle } from 'lucide-react';
+import { CreditCard, DollarSign, ArrowUpRight, Printer, Search, Calendar, Landmark, CheckCircle2, Edit3, X, Calculator, Wallet, Clock, FileText, Home, Loader2, Check, ArrowLeft, Lock, Unlock, ShieldAlert, Award, AlertCircle, Smartphone, Banknote } from 'lucide-react';
 import { PaymentRequest, CashierTransaction, PaymentStatus, TransactionFacturation, AvoirPatient, DettePatient, ParametresCaisse, CashierSession, Patient } from '../types';
 import { formatPatientFullName } from '../src/patientUtils';
 import { db, sanitizeData } from '../src/firebase';
@@ -1585,259 +1585,293 @@ const Cashier: React.FC<CashierProps> = ({
         </div>
       )}
 
-      {/* Premium Encaissement Modal */}
+      {/* Redesigned Elegant Encaissement Modal */}
       {showPaymentModal && selectedRequest && (
-        <div className="fixed inset-0 z-[100] bg-slate-900/40 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-hidden">
-          <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl animate-in zoom-in-95 duration-200 border border-slate-200/50 flex flex-col max-h-[95vh] overflow-hidden">
-             <div className="p-8 sm:p-12 relative flex flex-col h-full overflow-hidden">
-                {/* Background Decoration */}
-                <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/3 pointer-events-none" />
-
-                <div className="flex justify-between items-center mb-6 relative z-10 shrink-0">
-                   <div className="flex items-center gap-4">
-                      <div className="w-14 h-14 bg-emerald-600 rounded-2xl shadow-lg shadow-emerald-600/20 flex items-center justify-center text-white">
-                        <Calculator size={24} />
-                      </div>
-                      <div>
-                        <h2 className="text-2xl font-black tracking-tight text-slate-900">Encaissement</h2>
-                        <p className="text-xs font-bold text-emerald-600 uppercase tracking-widest mt-1">Demande {selectedRequest.id}</p>
-                      </div>
-                   </div>
-                   <button 
-                     onClick={() => !isProcessing && setShowPaymentModal(false)} 
-                     disabled={isProcessing}
-                     className="w-10 h-10 flex items-center justify-center hover:bg-slate-100 rounded-full text-slate-400 transition-colors"
-                   >
-                     <X size={24} />
-                   </button>
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-hidden animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200 border border-slate-200/90 flex flex-col max-h-[92vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-5 py-3.5 border-b border-slate-100 bg-slate-50/70 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 bg-emerald-600 rounded-xl shadow-xs flex items-center justify-center text-white shrink-0">
+                  <Calculator size={18} />
                 </div>
+                <div>
+                  <h2 className="text-base font-black tracking-tight text-slate-900">Encaissement de Facture</h2>
+                  <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider font-mono">Demande {selectedRequest.id}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => !isProcessing && setShowPaymentModal(false)} 
+                disabled={isProcessing}
+                className="w-8 h-8 flex items-center justify-center hover:bg-slate-200/70 rounded-xl text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                title="Fermer"
+              >
+                <X size={18} />
+              </button>
+            </div>
 
-                <div className="overflow-y-auto custom-scrollbar flex-1 pr-2 space-y-6 relative z-10 pb-6">
-                  {isCreditBlocked && (
-                    <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-[24px] flex items-start gap-3 shadow-sm animate-in fade-in">
-                      <ShieldAlert className="text-rose-600 shrink-0 mt-0.5" size={22} />
-                      <div className="min-w-0">
-                        <p className="text-xs font-black text-rose-800 uppercase tracking-wide flex items-center gap-1.5">
-                          <Lock size={14} /> Interdiction de Crédit (Comptabilité)
-                        </p>
-                        <p className="text-xs text-rose-700 mt-1 font-medium leading-relaxed">
-                          Le service Comptabilité a verrouillé les facilités de crédit pour ce patient. <strong>Aucun paiement partiel ni création de dette n'est autorisé.</strong> L'intégralité du net à payer doit obligatoirement être perçue ({netToPay.toLocaleString()} {establishment.currency}).
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="p-6 bg-slate-50/80 rounded-[24px] border border-slate-100 flex items-center justify-between">
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Patient</p>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="font-black text-xl text-slate-900">{formatPatientFullName(selectedPatientObj, selectedRequest.patientName)}</p>
-                        {isCreditBlocked && (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300">
-                            <Lock size={10} /> Crédit Bloqué
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <div className="text-right flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Service / Origine</p>
-                        <p className="text-sm font-bold text-slate-700 bg-white px-3 py-1 rounded-lg shadow-sm border border-slate-100 inline-block uppercase tracking-wider">
-                          {selectedRequest.type} • {selectedRequest.sourceModule}
-                        </p>
-                      </div>
-                    </div>
+            {/* Modal Scrollable Body */}
+            <div className="overflow-y-auto custom-scrollbar flex-1 p-5 space-y-3.5">
+              {isCreditBlocked && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-2xl flex items-start gap-2.5 shadow-2xs animate-in fade-in">
+                  <ShieldAlert className="text-rose-600 shrink-0 mt-0.5" size={18} />
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-rose-800 uppercase tracking-wide flex items-center gap-1.5">
+                      <Lock size={12} /> Interdiction de Crédit (Comptabilité)
+                    </p>
+                    <p className="text-[11px] text-rose-700 mt-0.5 font-medium leading-relaxed">
+                      Aucun paiement partiel ni création de dette n'est autorisé. Paiement intégral exigé ({netToPay.toLocaleString()} {establishment.currency}).
+                    </p>
                   </div>
+                </div>
+              )}
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="p-6 bg-white rounded-[24px] border border-slate-200 shadow-sm">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Montant de la Facture</p>
-                      <p className="font-black text-2xl text-slate-900">{(selectedRequest.totalAmount || 0).toLocaleString()} <span className="text-sm font-bold text-slate-400">{establishment.currency}</span></p>
-                    </div>
-                    <div className="p-6 bg-rose-50 rounded-[24px] border border-rose-100 flex justify-between items-start">
-                      <div>
-                        <p className="text-[10px] font-bold text-rose-500 uppercase tracking-widest mb-2">Reliquat dû</p>
-                        <p className="font-black text-2xl text-rose-600">{remainingDue.toLocaleString()} <span className="text-sm font-bold text-rose-400">{establishment.currency}</span></p>
-                      </div>
-                      {totalDetteEnCours > 0 && (
-                        <div className="flex flex-col items-end gap-1">
-                          <div className="flex items-center gap-2">
-                            <input 
-                              type="checkbox" 
-                              id="inc-debt-modal"
-                              checked={includeExistingDebt}
-                              onChange={(e) => setIncludeExistingDebt(e.target.checked)}
-                              className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 border-rose-200 shadow-inner"
-                            />
-                            <label htmlFor="inc-debt-modal" className="text-[10px] font-black text-rose-600 uppercase cursor-pointer tracking-tight">Inclure Dettes</label>
-                          </div>
-                          <span className="text-[9px] font-bold text-rose-400 italic">({totalDetteEnCours.toLocaleString()} F)</span>
-                        </div>
-                      )}
-                    </div>
+              {/* Patient Banner */}
+              <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Patient bénéficiaire</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="font-black text-sm text-slate-900 truncate">{formatPatientFullName(selectedPatientObj, selectedRequest.patientName)}</p>
+                    {isCreditBlocked && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[8.5px] font-black bg-rose-100 text-rose-800 border border-rose-200">
+                        <Lock size={9} /> Crédit Bloqué
+                      </span>
+                    )}
                   </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-[9.5px] font-bold text-slate-600 bg-white px-2.5 py-1 rounded-lg border border-slate-200/80 inline-block uppercase tracking-wider shadow-2xs">
+                    {selectedRequest.type} • {selectedRequest.sourceModule}
+                  </span>
+                </div>
+              </div>
 
-                  {totalAvoirDispo > 0 && (
-                    <div className="p-6 bg-emerald-50 rounded-[24px] border border-emerald-100 flex items-center justify-between">
-                      <div className="flex items-center gap-4">
+              {/* Amount Breakdown Cards */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div className="p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs">
+                  <p className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Montant Facturé</p>
+                  <p className="font-black text-base text-slate-900">{(selectedRequest.totalAmount || 0).toLocaleString()} <span className="text-[10px] font-bold text-slate-400">{establishment.currency}</span></p>
+                </div>
+                <div className="p-3 bg-rose-50/70 rounded-2xl border border-rose-100 flex justify-between items-start">
+                  <div>
+                    <p className="text-[8.5px] font-bold text-rose-500 uppercase tracking-wider mb-0.5">Reliquat Dû</p>
+                    <p className="font-black text-base text-rose-600">{remainingDue.toLocaleString()} <span className="text-[10px] font-bold text-rose-400">{establishment.currency}</span></p>
+                  </div>
+                  {totalDetteEnCours > 0 && (
+                    <div className="flex flex-col items-end gap-0.5">
+                      <div className="flex items-center gap-1.5">
                         <input 
                           type="checkbox" 
-                          id="use-avoir"
-                          checked={useAvoir}
-                          onChange={(e) => setUseAvoir(e.target.checked)}
-                          className="w-6 h-6 rounded-lg text-emerald-600 focus:ring-emerald-500 border-slate-300 shadow-inner"
+                          id="inc-debt-modal"
+                          checked={includeExistingDebt}
+                          onChange={(e) => setIncludeExistingDebt(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded text-rose-600 focus:ring-rose-500 border-rose-300"
                         />
-                        <label htmlFor="use-avoir" className="cursor-pointer">
-                          <p className="text-sm font-black text-emerald-800 tracking-tight uppercase">Utiliser l'avoir disponible</p>
-                          <p className="text-[10px] font-bold text-emerald-600 tracking-wider font-mono">SOLDE DISPONIBLE: {totalAvoirDispo.toLocaleString()} {establishment.currency}</p>
-                        </label>
+                        <label htmlFor="inc-debt-modal" className="text-[9px] font-black text-rose-600 uppercase cursor-pointer tracking-tight">+ Dettes</label>
                       </div>
-                      <div className="text-right">
-                        <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest mb-1">Application</p>
-                        <p className="font-black text-emerald-700 text-lg">-{montantAvoirApplique.toLocaleString()} F</p>
-                      </div>
+                      <span className="text-[8px] font-bold text-rose-400 italic">({totalDetteEnCours.toLocaleString()} F)</span>
                     </div>
                   )}
+                </div>
+              </div>
 
-                  <div className="p-8 bg-slate-900 rounded-[32px] text-white flex justify-between items-center shadow-xl relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-                    <div>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Net à encaisser</p>
-                      <h3 className="text-4xl font-black text-blue-400">{netToPay.toLocaleString()} <span className="text-sm font-bold text-slate-500">{establishment.currency}</span></h3>
-                    </div>
-                    <div className="text-right shrink-0">
-                       <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Facturé Global</p>
-                       <p className="text-lg font-bold text-slate-300">{netTotalToPay.toLocaleString()} F</p>
-                    </div>
+              {/* Avoir Patient */}
+              {totalAvoirDispo > 0 && (
+                <div className="p-3 bg-emerald-50/80 rounded-2xl border border-emerald-100 flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <input 
+                      type="checkbox" 
+                      id="use-avoir"
+                      checked={useAvoir}
+                      onChange={(e) => setUseAvoir(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-emerald-300"
+                    />
+                    <label htmlFor="use-avoir" className="cursor-pointer">
+                      <p className="text-xs font-black text-emerald-800 tracking-tight uppercase">Utiliser l'avoir disponible</p>
+                      <p className="text-[9px] font-bold text-emerald-600 font-mono">SOLDE: {totalAvoirDispo.toLocaleString()} {establishment.currency}</p>
+                    </label>
                   </div>
-
-                  <div className="space-y-4 pt-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">Montant remis par le patient</label>
-                    <div className="relative group">
-                       <Wallet className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={28} />
-                       <input 
-                         type="number" 
-                         value={paymentAmount}
-                         onChange={(e) => setPaymentAmount(e.target.value)}
-                         placeholder="0"
-                         className="w-full pl-18 pr-8 py-6 bg-slate-50 border-2 border-slate-100 rounded-[24px] focus:outline-none focus:bg-white focus:border-blue-500 font-black text-3xl text-slate-900 transition-all shadow-inner"
-                         disabled={isProcessing}
-                       />
-                       <span className="absolute right-6 top-1/2 -translate-y-1/2 font-black text-slate-400">{establishment.currency}</span>
-                    </div>
+                  <div className="text-right">
+                    <span className="font-black text-emerald-700 text-sm">-{montantAvoirApplique.toLocaleString()} F</span>
                   </div>
+                </div>
+              )}
 
-                  <div className="space-y-4">
-                    <label className="block text-xs font-black text-slate-400 uppercase tracking-widest px-1">Moyen de paiement</label>
-                    <div className="grid grid-cols-3 gap-3">
-                      {['CASH', 'CARD', 'MOBILE_MONEY'].map((method) => (
+              {/* Net à Encaisser Banner */}
+              <div className="p-4 bg-slate-900 rounded-2xl text-white flex justify-between items-center shadow-md relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                <div>
+                  <p className="text-[8.5px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Net à Encaisser</p>
+                  <h3 className="text-2xl font-black text-emerald-400 font-mono tracking-tight">{netToPay.toLocaleString()} <span className="text-xs font-bold text-slate-400 font-sans">{establishment.currency}</span></h3>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[8px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Total Global</p>
+                  <p className="text-xs font-bold text-slate-300 font-mono">{netTotalToPay.toLocaleString()} F</p>
+                </div>
+              </div>
+
+              {/* Montant Remis & Quick Presets */}
+              <div className="space-y-1.5">
+                <div className="flex justify-between items-center px-0.5">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-wider">Montant remis par le patient</label>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setPaymentAmount(netToPay.toString())}
+                      className="text-[9px] font-black uppercase text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded-lg border border-emerald-200 transition-colors cursor-pointer"
+                    >
+                      Exact ({netToPay.toLocaleString()})
+                    </button>
+                    {netToPay > 0 && [5000, 10000, 20000].filter(amt => amt >= netToPay && amt !== netToPay).slice(0, 2).map(amt => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setPaymentAmount(amt.toString())}
+                        className="text-[9px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 px-1.5 py-0.5 rounded-lg border border-slate-200 transition-colors cursor-pointer"
+                      >
+                        {amt.toLocaleString()} F
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="relative group">
+                  <Wallet className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-600 transition-colors" size={18} />
+                  <input 
+                    type="number" 
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-full pl-10 pr-14 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:bg-white focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 font-black text-lg text-slate-900 transition-all font-mono"
+                    disabled={isProcessing}
+                  />
+                  <span className="absolute right-3.5 top-1/2 -translate-y-1/2 font-bold text-xs text-slate-400">{establishment.currency}</span>
+                </div>
+              </div>
+
+              {/* Moyen de Paiement */}
+              <div className="space-y-1.5">
+                <label className="block text-[9px] font-black text-slate-500 uppercase tracking-wider px-0.5">Mode de règlement</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { id: 'CASH', label: 'Espèces', icon: Banknote },
+                    { id: 'CARD', label: 'Carte Bancaire', icon: CreditCard },
+                    { id: 'MOBILE_MONEY', label: 'Mobile Money', icon: Smartphone }
+                  ].map(({ id, label, icon: Icon }) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => setPaymentMethod(id as any)}
+                      disabled={isProcessing}
+                      className={`py-2 px-2.5 rounded-xl font-bold text-xs transition-all border flex items-center justify-center gap-1.5 cursor-pointer ${
+                        paymentMethod === id 
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-sm' 
+                        : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      <Icon size={14} className={paymentMethod === id ? 'text-emerald-400' : 'text-slate-400'} />
+                      <span>{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Surplus & Reste Warnings */}
+              {(surplus > 0 || resteAPayer > 0) && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
+                  {surplus > 0 && (
+                    <div className="p-3 bg-blue-50/90 border border-blue-200 rounded-2xl space-y-2">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-blue-800 font-bold uppercase tracking-wider text-[9px]">
+                          Monnaie à rendre (Surplus)
+                        </span>
+                        <span className="font-black text-sm text-blue-900 font-mono">+{surplus.toLocaleString()} {establishment.currency}</span>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-2">
                         <button
-                          key={method}
-                          onClick={() => setPaymentMethod(method as any)}
-                          disabled={isProcessing}
-                          className={`py-4 rounded-[20px] font-black text-[10px] uppercase tracking-widest transition-all border-2 ${
-                            paymentMethod === method 
-                            ? 'bg-slate-900 text-white border-slate-900 shadow-xl scale-[1.02]' 
-                            : 'bg-white text-slate-400 border-slate-100 hover:border-slate-300 hover:bg-slate-50'
+                          type="button"
+                          onClick={() => setSurplusAction('RENDRE')}
+                          className={`py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
+                            surplusAction === 'RENDRE' 
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-xs' 
+                              : 'bg-white text-blue-600 border-blue-200 hover:bg-blue-50'
                           }`}
                         >
-                          {method === 'CASH' ? 'Espèces' : method === 'CARD' ? 'Carte' : 'Mobile'}
+                          Rendre Monnaie
                         </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {(surplus > 0 || resteAPayer > 0) && (
-                    <div className="grid grid-cols-1 gap-3 animate-in fade-in slide-in-from-top-2">
-                      {surplus > 0 && (
-                        <div className="p-6 bg-blue-50 border border-blue-100 rounded-[28px] space-y-4 shadow-inner">
-                          <div className="flex justify-between items-center">
-                            <span className="text-[10px] text-blue-700 font-black uppercase tracking-widest">
-                              Surplus constaté
-                            </span>
-                            <span className="font-black text-xl text-blue-800">{surplus.toLocaleString()} FCFA</span>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-2">
-                             <button
-                               type="button"
-                               onClick={() => setSurplusAction('RENDRE')}
-                               className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
-                                 surplusAction === 'RENDRE' 
-                                   ? 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-600/20' 
-                                   : 'bg-white text-blue-400 border-blue-200 hover:bg-blue-50'
-                               }`}
-                             >
-                               Rendre Monnaie
-                             </button>
-                             <button
-                               type="button"
-                               onClick={() => setSurplusAction('AVANCE')}
-                               className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${
-                                 surplusAction === 'AVANCE' 
-                                   ? 'bg-emerald-600 text-white border-emerald-600 shadow-lg shadow-emerald-600/20' 
-                                   : 'bg-white text-emerald-400 border-emerald-200 hover:bg-emerald-50'
-                               }`}
-                             >
-                               Mise en Avance
-                             </button>
-                          </div>
-                          {!surplusAction && (
-                            <p className="text-[10px] text-blue-600 font-bold italic animate-pulse">← Veuillez choisir une option pour continuer</p>
-                          )}
-                        </div>
-                      )}
-                      {resteAPayer > 0 && remis > 0 && (
-                        <div className={`p-5 rounded-2xl flex justify-between items-center shadow-inner ${
-                          isCreditBlocked ? 'bg-rose-100 border-2 border-rose-400 text-rose-900' : 'bg-rose-50 border border-rose-100 text-rose-700'
-                        }`}>
-                          <div className="flex items-center gap-2">
-                            {isCreditBlocked && <Lock size={16} className="text-rose-600 shrink-0" />}
-                            <div>
-                              <span className="text-[10px] font-black uppercase tracking-widest block">
-                                {isCreditBlocked ? 'Reste non autorisé (Crédit bloqué)' : 'Nouvelle Dette (Reste)'}
-                              </span>
-                              {isCreditBlocked && (
-                                <span className="text-[9px] font-bold text-rose-700 block">Ce patient n'a pas droit au crédit. Paiement total exigé.</span>
-                              )}
-                            </div>
-                          </div>
-                          <span className="font-black text-lg text-rose-700">{resteAPayer.toLocaleString()} F</span>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSurplusAction('AVANCE')}
+                          className={`py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
+                            surplusAction === 'AVANCE' 
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
+                              : 'bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-50'
+                          }`}
+                        >
+                          Mettre en Avoir
+                        </button>
+                      </div>
+                      {!surplusAction && (
+                        <p className="text-[9px] text-blue-600 font-semibold italic text-center animate-pulse">Choisissez l'affectation du surplus</p>
                       )}
                     </div>
                   )}
-                </div>
 
-                <div className="shrink-0 pt-4 bg-white">
-                  <button 
-                    onClick={processPayment}
-                    disabled={(!paymentAmount && !useAvoir) || isProcessing || (isCreditBlocked && resteAPayer > 0)}
-                    className={`w-full py-6 rounded-[24px] font-black text-lg shadow-xl transition-all flex items-center justify-center gap-3 ${
-                      isCreditBlocked && resteAPayer > 0
-                        ? 'bg-rose-600 text-white cursor-not-allowed opacity-90 shadow-rose-600/20'
-                        : 'bg-emerald-600 text-white shadow-emerald-600/20 hover:bg-emerald-500 hover:-translate-y-1 disabled:opacity-50 disabled:hover:translate-y-0 disabled:hover:bg-emerald-600'
-                    }`}
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 size={24} className="animate-spin" />
-                        Traitement en cours...
-                      </>
-                    ) : isCreditBlocked && resteAPayer > 0 ? (
-                      <>
-                        <Lock size={22} />
-                        Paiement intégral requis (Crédit bloqué)
-                      </>
-                    ) : (
-                      <>
-                        Valider l'encaissement
-                        <ArrowUpRight size={24} />
-                      </>
-                    )}
-                  </button>
+                  {resteAPayer > 0 && remis > 0 && (
+                    <div className={`p-2.5 rounded-xl flex justify-between items-center text-xs ${
+                      isCreditBlocked ? 'bg-rose-100 border border-rose-300 text-rose-900' : 'bg-rose-50 border border-rose-100 text-rose-700'
+                    }`}>
+                      <div className="flex items-center gap-1.5">
+                        {isCreditBlocked && <Lock size={14} className="text-rose-600 shrink-0" />}
+                        <span className="text-[9px] font-black uppercase tracking-wider">
+                          {isCreditBlocked ? 'Reste non autorisé (Crédit bloqué)' : 'Reste à payer (Dette)'}
+                        </span>
+                      </div>
+                      <span className="font-black text-sm text-rose-700 font-mono">{resteAPayer.toLocaleString()} F</span>
+                    </div>
+                  )}
                 </div>
-             </div>
+              )}
+            </div>
+
+            {/* Modal Sticky Footer */}
+            <div className="p-3.5 border-t border-slate-100 bg-slate-50/70 flex items-center justify-end gap-2.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowPaymentModal(false)}
+                disabled={isProcessing}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold text-xs hover:bg-slate-100 transition-all cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button 
+                onClick={processPayment}
+                disabled={(!paymentAmount && !useAvoir) || isProcessing || (isCreditBlocked && resteAPayer > 0)}
+                className={`py-2.5 px-5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm ${
+                  isCreditBlocked && resteAPayer > 0
+                    ? 'bg-rose-600 text-white cursor-not-allowed opacity-90'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed'
+                }`}
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>Traitement...</span>
+                  </>
+                ) : isCreditBlocked && resteAPayer > 0 ? (
+                  <>
+                    <Lock size={14} />
+                    <span>Paiement intégral requis</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Valider l'encaissement</span>
+                    <ArrowUpRight size={16} />
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
