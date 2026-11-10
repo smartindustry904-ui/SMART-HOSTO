@@ -77,7 +77,7 @@ const App: React.FC = () => {
       setIsSidebarExpanded(true);
     }
   }, [isSidebarLocked]);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent'>('users');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent' | 'appearance'>('users');
   const [activeMaternityTab, setActiveMaternityTab] = useState<MaternitySubMenu>('dashboard');
   const [activeConsultationTab, setActiveConsultationTab] = useState<ConsultationSubMenu>('dashboard');
   const [activeEmergencyTab, setActiveEmergencyTab] = useState<EmergencySubMenu>('patients');
@@ -229,6 +229,19 @@ const App: React.FC = () => {
     const handleOpenUserProfile = () => setShowUserProfileModal(true);
     window.addEventListener('open-user-profile', handleOpenUserProfile);
 
+    const handleSettingsUpdated = () => {
+      try {
+        const savedConfig = localStorage.getItem('hospital_config');
+        if (savedConfig) {
+          const config = JSON.parse(savedConfig);
+          if (config.theme) {
+            applyTheme(config.theme, config.customThemeColor);
+          }
+        }
+      } catch (err) {}
+    };
+    window.addEventListener('settings-updated', handleSettingsUpdated);
+
     return () => {
       window.removeEventListener('app-notification', handleNotification);
       window.removeEventListener('change-lab-tab', handleChangeLabTab);
@@ -239,6 +252,7 @@ const App: React.FC = () => {
       window.removeEventListener('change-pharmacy-tab', handleChangePharmacyTab);
       window.removeEventListener('change-module', handleChangeModule);
       window.removeEventListener('open-user-profile', handleOpenUserProfile);
+      window.removeEventListener('settings-updated', handleSettingsUpdated);
     };
   }, []);
 
@@ -451,10 +465,14 @@ const App: React.FC = () => {
     // Appliquer le thème sauvegardé
     const savedConfig = localStorage.getItem('hospital_config');
     if (savedConfig) {
-      const config = JSON.parse(savedConfig);
-      if (config.theme) {
-        applyTheme(config.theme);
-      } else {
+      try {
+        const config = JSON.parse(savedConfig);
+        if (config.theme) {
+          applyTheme(config.theme, config.customThemeColor);
+        } else {
+          applyTheme('blue');
+        }
+      } catch (e) {
         applyTheme('blue');
       }
     } else {
@@ -568,7 +586,7 @@ const App: React.FC = () => {
     if (currentModule === 'SETTING') {
       const isAdmin = user.role === Role.ADMIN || user.roles?.includes('role_admin');
       if (!isAdmin) return <ModuleSelector user={user} onSelectModule={setCurrentModule} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
-      return <Settings activeTab={activeSettingsTab} setActiveTab={setActiveSettingsTab} user={user} />;
+      return <Settings activeTab={activeSettingsTab} setActiveTab={setActiveSettingsTab} user={user} theme={theme} toggleTheme={toggleTheme} />;
     }
 
     // Protection d'affichage : si le module est désactivé dans les paramètres, bloquer l'affichage

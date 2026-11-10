@@ -51,7 +51,8 @@ import {
   Heart,
   Syringe,
   Home,
-  MessageSquare
+  MessageSquare,
+  Palette
 } from 'lucide-react';
 import { Role, User, EmergencySubMenu, NurseSubMenu, ReceptionSubMenu, CashierSubMenu, LabSubMenu, InpatientSubMenu, PharmacySubMenu, AccountingSubMenu, MaternitySubMenu, ConsultationSubMenu } from '../types';
 import { useSystemAlerts } from '../hooks/useSystemAlerts';
@@ -71,8 +72,8 @@ interface SidebarProps {
   onToggleLock: () => void;
   theme: 'light' | 'dark';
   toggleTheme: () => void;
-  activeSettingsTab?: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'hospitalization' | 'whatsapp_agent';
-  setActiveSettingsTab?: (tab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'hospitalization' | 'whatsapp_agent') => void;
+  activeSettingsTab?: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'hospitalization' | 'whatsapp_agent';
+  setActiveSettingsTab?: (tab: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'hospitalization' | 'whatsapp_agent') => void;
   activeMaternityTab?: MaternitySubMenu;
   setActiveMaternityTab?: (tab: MaternitySubMenu) => void;
   activeConsultationTab?: ConsultationSubMenu;
@@ -159,6 +160,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'users', label: 'Utilisateurs', icon: Users },
     { id: 'roles', label: 'Rôles & Permissions', icon: Shield },
     { id: 'establishment', label: 'Établissement', icon: Hospital },
+    { id: 'appearance', label: 'Thèmes & Couleurs', icon: Palette },
     { id: 'referentials', label: 'Référentiels', icon: Database },
     { id: 'protocols', label: 'Catalogue Protocoles', icon: FileText },
     { id: 'cashier_settings', label: 'Paramètres de la caisse', icon: CreditCard },

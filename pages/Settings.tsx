@@ -41,7 +41,7 @@ import {
   FileText
 } from 'lucide-react';
 import { Role, User, EstablishmentConfig, MedicalAct, Medication, CustomRole, UserStatus, Supplier, SupplierInvoice, Licence } from '../types';
-import { THEMES, ThemeColor } from '../constants/themes';
+import { THEMES, ThemeColor, applyTheme } from '../constants/themes';
 import RolesPermissions from './settings/RolesPermissions';
 import ServicesDepartments from './settings/ServicesDepartments';
 import ProtocolsManagement from './settings/ProtocolsManagement';
@@ -57,17 +57,20 @@ import { MedicalStatusBadge } from '../components/common/MedicalStatusBadge';
 import { Avatar } from '../components/common/Avatar';
 import { ImageUpload } from '../components/common/ImageUpload';
 import { StaffPerformanceModal } from '../components/profile/StaffPerformanceModal';
+import { AppearanceSettings } from './settings/AppearanceSettings';
 import { db, sanitizeData, handleFirestoreError, OperationType } from '../src/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, where, addDoc, updateDoc, getDocs, limit, getDoc } from 'firebase/firestore';
 
 interface SettingsProps {
-  activeTab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent';
-  setActiveTab: (tab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent') => void;
+  activeTab: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent';
+  setActiveTab: (tab: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent') => void;
   user: User | null;
   onBackToDashboard?: () => void;
+  theme?: 'light' | 'dark';
+  toggleTheme?: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBackToDashboard }) => {
+const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBackToDashboard, theme = 'light', toggleTheme }) => {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [showAddMedication, setShowAddMedication] = useState(false);
   const [showAddMedicalAct, setShowAddMedicalAct] = useState(false);
@@ -975,6 +978,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
     users: 'Utilisateurs',
     roles: 'Rôles & Permissions',
     establishment: 'Établissement',
+    appearance: 'Apparence & Thèmes',
     referentials: 'Référentiels',
     cashier_settings: 'Caisse',
     services: 'Services',
@@ -1000,11 +1004,12 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
           { label: 'Rôles', value: roles.length, onClick: () => setActiveTab('roles'), active: activeTab === 'roles' }
         ]}
         actions={
-          <div className="flex items-center gap-1.5 overflow-x-auto max-w-[620px]">
+          <div className="flex items-center gap-1.5 overflow-x-auto max-w-[660px]">
             {[
               { id: 'users', label: 'Utilisateurs' },
               { id: 'roles', label: 'Rôles' },
               { id: 'establishment', label: 'Établissement' },
+              { id: 'appearance', label: '🎨 Thèmes & Couleurs' },
               { id: 'referentials', label: 'Référentiels' },
               { id: 'cashier_settings', label: 'Caisse' },
               { id: 'protocols', label: 'Protocoles' },
@@ -1768,39 +1773,45 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                   </div>
                   
                   <div className="col-span-2 space-y-4 mt-4">
-                    <div className="flex items-center gap-2">
-                      <Palette size={20} className="text-slate-400" />
-                      <label className="text-sm font-black text-slate-700 uppercase tracking-widest">Thème de l'interface</label>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Palette size={20} className="text-slate-400" />
+                        <label className="text-sm font-black text-slate-700 uppercase tracking-widest">Thème de l'interface</label>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('appearance')}
+                        className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Palette size={14} />
+                        <span>Personnalisation Avancée</span>
+                      </button>
                     </div>
-                    <div className="flex flex-wrap gap-4">
+                    <div className="flex flex-wrap gap-3">
                       {(Object.keys(THEMES) as ThemeColor[]).map((themeName) => (
                         <button
                           key={themeName}
                           type="button"
                           onClick={() => {
                             setEstablishment({...establishment, theme: themeName});
-                            // Appliquer le thème immédiatement pour prévisualisation
-                            const root = document.documentElement;
-                            Object.entries(THEMES[themeName]).forEach(([shade, color]) => {
-                              root.style.setProperty(`--theme-${shade}`, color as string);
-                            });
+                            applyTheme(themeName);
                           }}
-                          className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 transition-all ${
+                          className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border-2 transition-all cursor-pointer ${
                             (establishment.theme || 'blue') === themeName 
-                              ? 'border-slate-900 bg-slate-50' 
-                              : 'border-slate-100 hover:border-slate-300'
+                              ? 'border-blue-600 bg-blue-50/50 shadow-xs' 
+                              : 'border-slate-200 hover:border-slate-300 bg-white'
                           }`}
                         >
                           <div 
-                            className="w-6 h-6 rounded-full shadow-inner" 
-                            style={{ backgroundColor: THEMES[themeName][500] }}
+                            className="w-5 h-5 rounded-lg shadow-inner shrink-0" 
+                            style={{ backgroundColor: THEMES[themeName].accent || THEMES[themeName][500] }}
                           />
-                          <span className="font-bold text-sm capitalize">{themeName}</span>
+                          <span className="font-bold text-xs">{THEMES[themeName].name || themeName}</span>
                         </button>
                       ))}
                     </div>
                     <p className="text-xs text-slate-500 font-medium">
-                      Sélectionnez une couleur principale pour personnaliser l'interface de l'application.
+                      Sélectionnez une couleur principale pour personnaliser l'interface de l'application ou accédez à l'onglet dédié pour un thème sur-mesure.
                     </p>
                   </div>
                 </div>
@@ -1809,6 +1820,16 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 </button>
               </form>
             </div>
+          )}
+
+          {activeTab === 'appearance' && (
+            <AppearanceSettings
+              establishment={establishment}
+              setEstablishment={setEstablishment}
+              currentThemeMode={theme}
+              toggleThemeMode={toggleTheme}
+              showMessage={showMessage}
+            />
           )}
 
           {activeTab === 'services' && (

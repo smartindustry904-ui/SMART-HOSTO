@@ -645,6 +645,9 @@ export interface EstablishmentConfig {
   language: 'FR' | 'EN';
   currency: 'XAF' | 'USD' | 'EUR';
   theme?: string;
+  customThemeColor?: string;
+  themeMode?: 'light' | 'dark' | 'auto';
+  displayDensity?: 'comfortable' | 'standard' | 'compact';
   email?: string;
   city?: string;
   country?: string;
