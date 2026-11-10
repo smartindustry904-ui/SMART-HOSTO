@@ -24,6 +24,7 @@ import { ClinicTenant, SubscriptionInvoice } from '../../pages/ControlCenter';
 
 interface SuperAdminDashboardProps {
   clinics: ClinicTenant[];
+  plans?: Record<string, any>;
   invoices: SubscriptionInvoice[];
   superAdminsCount: number;
   totalHospitalUsersCount: number;
@@ -34,11 +35,16 @@ type TimeFilter = 'THIS_MONTH' | 'LAST_MONTH' | 'THIS_YEAR' | 'CUSTOM' | 'ALL';
 
 export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   clinics,
+  plans = SAAS_PLANS,
   invoices,
   superAdminsCount,
   totalHospitalUsersCount,
   onNavigateToTab
 }) => {
+  const effectivePlans = useMemo(() => ({ ...SAAS_PLANS, ...(plans || {}) }), [plans]);
+  const totalUserSeatCapacity = useMemo(() => {
+    return clinics.reduce((sum, c) => sum + (Number(c.quotas?.maxUsers) || 5), 0);
+  }, [clinics]);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('THIS_YEAR');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
@@ -151,22 +157,27 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300">
+    <div className="space-y-5 animate-in fade-in duration-300">
       
-      {/* HEADER & TIME FILTER BAR */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-slate-900/60 border border-white/10 p-5 rounded-3xl backdrop-blur-xl">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-rose-500/20 text-rose-400 border border-rose-500/30">
-              Cockpit Exécutif
-            </span>
-            <span className="text-xs text-slate-400 font-bold">• Données temps réel de la plateforme</span>
+      {/* COMPACT HEADER & TIME FILTER BAR */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-gradient-to-b from-[#161a29] to-[#0f121d] border border-white/15 px-4 py-3 rounded-2xl shadow-[0_10px_28px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.16)]">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-rose-500/20 border border-rose-400/30 flex items-center justify-center text-rose-300 shrink-0">
+            <BarChart3 size={18} />
           </div>
-          <h2 className="text-2xl font-black text-white mt-1">Synthèse de l'Activité Commerciale</h2>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight">Synthèse de l'Activité Commerciale</h2>
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                Cockpit Exécutif
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 font-medium">Données temps réel de la plateforme multi-tenant</p>
+          </div>
         </div>
 
         {/* Temporal Filters */}
-        <div className="flex flex-wrap items-center gap-2 bg-slate-950/60 p-1.5 rounded-2xl border border-white/5">
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-950/70 p-1 rounded-xl border border-white/10">
           <button
             onClick={() => setTimeFilter('THIS_MONTH')}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
@@ -322,13 +333,14 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               Comptes <ArrowRight size={12} />
             </span>
           </div>
-          <p className="text-xs uppercase font-black text-slate-400 tracking-wider mt-4">Comptes Utilisateurs</p>
+          <p className="text-xs uppercase font-black text-slate-400 tracking-wider mt-4">Comptes & Sièges Licences</p>
           <div className="flex items-baseline gap-2 mt-1">
-            <h3 className="text-3xl font-extrabold text-white">{superAdminsCount}</h3>
-            <span className="text-xs text-purple-300 font-bold">Super Admins</span>
+            <h3 className="text-3xl font-extrabold text-white">{totalHospitalUsersCount}</h3>
+            <span className="text-xs text-purple-300 font-bold">/ {totalUserSeatCapacity} sièges autorisés</span>
           </div>
-          <div className="mt-2 text-[11px] text-slate-400 font-bold">
-            <span>{totalHospitalUsersCount} utilisateurs hospitaliers actifs</span>
+          <div className="mt-2 text-[11px] text-slate-400 font-bold flex items-center justify-between">
+            <span>+{superAdminsCount} Super Admins plateforme</span>
+            <span className="text-emerald-400">{totalUserSeatCapacity > 0 ? Math.round((totalHospitalUsersCount / totalUserSeatCapacity) * 100) : 0}% occupé</span>
           </div>
         </div>
 
@@ -358,18 +370,23 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
-            {Object.keys(SAAS_PLANS).map((planKey) => {
-              const plan = SAAS_PLANS[planKey as SaaSPlanId];
+            {Object.keys(effectivePlans).map((planKey) => {
+              const plan = effectivePlans[planKey as SaaSPlanId] || SAAS_PLANS[planKey as SaaSPlanId] || SAAS_PLANS.STANDARD;
               const count = planDistribution[planKey] || 0;
               const percentage = totalClinics > 0 ? Math.round((count / totalClinics) * 100) : 0;
 
               return (
                 <div key={planKey} className="bg-slate-950/60 border border-white/5 p-4 rounded-2xl flex flex-col justify-between">
                   <div>
-                    <span className={`inline-block px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider mb-2 border ${plan.badgeColor}`}>
-                      {plan.id}
-                    </span>
-                    <p className="text-xs font-bold text-slate-300 line-clamp-1">{plan.label.split('(')[0]}</p>
+                    <div className="flex items-center justify-between gap-1 mb-2">
+                      <span className={`inline-block px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${plan.badgeColor}`}>
+                        {plan.id}
+                      </span>
+                      <span className="text-[9px] font-extrabold text-emerald-400">
+                        ≤{plan.max_users || 5} util.
+                      </span>
+                    </div>
+                    <p className="text-xs font-bold text-slate-300 line-clamp-1">{(plan.label || plan.id).split('(')[0]}</p>
                   </div>
                   <div className="mt-4">
                     <div className="flex items-baseline justify-between">

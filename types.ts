@@ -582,6 +582,7 @@ export interface User {
   id: string;
   username: string;
   email?: string;
+  phone?: string;
   password?: string; // TODO: For production, implement secure hashing (bcrypt/Argon2)
   forcePasswordChange?: boolean;
   passwordChangedAt?: string;
@@ -1538,11 +1539,16 @@ export interface Protocol {
 // ==========================================
 
 export interface Licence {
-  id: string; // e.g. 'licence_basic', 'licence_pro', 'licence_enterprise'
-  nom_licence: string; // e.g. 'Basic', 'Pro', 'Enterprise'
-  max_users: number; // Strictly enforced max staff users limit
+  id: string; // e.g. 'licence_basic', 'licence_standard', 'licence_premium', 'licence_enterprise'
+  nom_licence: string; // e.g. 'Basic', 'Standard', 'Premium', 'Enterprise'
+  max_users: number; // Included base staff users limit
+  min_users?: number; // Recommended min users for this tier
+  max_users_cap?: number; // Recommended upper ceiling before upgrading tier
+  pricePerExtraUserFCFA?: number; // Monthly cost per additional user seat beyond max_users
   description?: string;
   monthlyPriceFCFA?: number;
+  includedServiceIds?: string[];
+  badgeColor?: string;
   durationValue?: number;
   durationUnit?: 'Mois' | 'Années';
   status?: 'ACTIVE' | 'ARCHIVED';

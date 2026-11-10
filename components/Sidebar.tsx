@@ -50,7 +50,8 @@ import {
   CheckSquare,
   Heart,
   Syringe,
-  Home
+  Home,
+  MessageSquare
 } from 'lucide-react';
 import { Role, User, EmergencySubMenu, NurseSubMenu, ReceptionSubMenu, CashierSubMenu, LabSubMenu, InpatientSubMenu, PharmacySubMenu, AccountingSubMenu, MaternitySubMenu, ConsultationSubMenu } from '../types';
 import { useSystemAlerts } from '../hooks/useSystemAlerts';
@@ -70,8 +71,8 @@ interface SidebarProps {
   onToggleLock: () => void;
   theme: 'light' | 'dark';
   toggleTheme: () => void;
-  activeSettingsTab?: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'hospitalization';
-  setActiveSettingsTab?: (tab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'hospitalization') => void;
+  activeSettingsTab?: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'hospitalization' | 'whatsapp_agent';
+  setActiveSettingsTab?: (tab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'hospitalization' | 'whatsapp_agent') => void;
   activeMaternityTab?: MaternitySubMenu;
   setActiveMaternityTab?: (tab: MaternitySubMenu) => void;
   activeConsultationTab?: ConsultationSubMenu;
@@ -161,6 +162,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'referentials', label: 'Référentiels', icon: Database },
     { id: 'protocols', label: 'Catalogue Protocoles', icon: FileText },
     { id: 'cashier_settings', label: 'Paramètres de la caisse', icon: CreditCard },
+    { id: 'whatsapp_agent', label: 'Agent WhatsApp IA', icon: MessageSquare },
   ];
 
   const maternityMenu = [
@@ -306,42 +308,53 @@ const Sidebar: React.FC<SidebarProps> = ({
         animate={{ 
           x: isOpen || window.innerWidth >= 768 ? 0 : -120,
           opacity: isOpen || window.innerWidth >= 768 ? 1 : 0,
-          width: isExpanded ? 280 : 96,
-          height: 'calc(100vh - 40px)',
-          top: '20px',
-          left: '20px'
+          width: isExpanded ? 284 : 88,
+          height: 'calc(100vh - 32px)',
+          top: '16px',
+          left: '16px'
         }}
-        className={`fixed z-50 transition-all duration-500 rounded-[32px] ${
+        className={`fixed z-50 transition-all duration-300 rounded-[28px] ${
           theme === 'dark' 
-            ? 'bg-[#111111]/95 border-zinc-800 dark:border-white/10 shadow-none' 
-            : 'bg-white/95 border-slate-200/60 shadow-[0_15px_40px_rgba(0,0,0,0.06)]'
-        } backdrop-blur-3xl border overflow-hidden flex flex-col`}
+            ? 'bg-gradient-to-b from-[#171a26] to-[#0d0f17] border-white/15 shadow-[0_24px_50px_-12px_rgba(0,0,0,0.9),0_0_30px_-5px_rgba(59,130,246,0.12),inset_0_1px_0_0_rgba(255,255,255,0.22)]' 
+            : 'bg-gradient-to-b from-white to-slate-50/95 border-slate-200/90 shadow-[0_20px_45px_-10px_rgba(15,23,42,0.09),inset_0_1px_0_0_#ffffff]'
+        } backdrop-blur-2xl border overflow-hidden flex flex-col`}
       >
-        {/* Shiny Reflector */}
-        <div className={`absolute top-0 left-0 w-full h-full pointer-events-none opacity-20 ${theme === 'dark' ? 'bg-gradient-to-br from-white/10 via-transparent to-transparent' : 'bg-gradient-to-br from-blue-500/5 via-transparent to-transparent'}`}></div>
-        
-        {/* Enhanced Shiny Border (Dark Mode) */}
-        {theme === 'dark' && (
-          <div className="absolute inset-0 rounded-[32px] border border-white/10 pointer-events-none z-20">
-            <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/30 to-transparent"></div>
-            <div className="absolute bottom-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-white/5 to-transparent"></div>
-          </div>
-        )}
+        {/* Top Specular Shiny Rim Highlight */}
+        <div className={`absolute top-0 left-6 right-6 h-px pointer-events-none z-20 ${
+          theme === 'dark' 
+            ? 'bg-gradient-to-r from-transparent via-blue-400/50 to-transparent' 
+            : 'bg-gradient-to-r from-transparent via-blue-500/30 to-transparent'
+        }`} />
+
+        {/* Subtle Ambient Glow */}
+        <div className={`absolute top-0 left-0 w-full h-40 pointer-events-none opacity-35 ${theme === 'dark' ? 'bg-gradient-to-b from-blue-500/15 to-transparent' : 'bg-gradient-to-b from-blue-100/60 to-transparent'}`}></div>
 
         {/* Logo Section */}
-        <div className={`pt-6 pb-4 flex flex-col ${isExpanded ? 'items-start px-8' : 'items-center px-0'} gap-3 relative z-10 transition-all`}>
+        <div className={`pt-5 pb-4 flex flex-col ${isExpanded ? 'items-start px-5' : 'items-center px-0'} gap-3.5 relative z-10 transition-all`}>
           <div className={`flex items-center ${isExpanded ? 'justify-between w-full' : 'justify-center w-full'}`}>
-            <button 
-              onClick={() => setRole('DASHBOARD')}
-              className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500 shadow-xl group cursor-pointer ${
-                theme === 'dark' 
-                  ? 'bg-blue-600 text-white shadow-blue-500/20' 
-                  : 'bg-blue-500 text-white shadow-blue-400/20'
-              }`}
-              title="Accueil / Tableau de bord"
-            >
-              <Home size={22} className="group-hover:scale-110 transition-transform" />
-            </button>
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={() => setRole('DASHBOARD')}
+                className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-300 group cursor-pointer ${
+                  theme === 'dark' 
+                    ? 'bg-gradient-to-br from-blue-500 to-blue-700 text-white border border-blue-400/50 shadow-[0_8px_20px_rgba(37,99,235,0.4),inset_0_1px_0_rgba(255,255,255,0.3)]' 
+                    : 'bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg shadow-blue-600/25'
+                }`}
+                title="Accueil / Tableau de bord"
+              >
+                <Home size={22} className="group-hover:scale-110 transition-transform" />
+              </button>
+              {isExpanded && (
+                <div className="flex flex-col">
+                  <h1 className={`text-base font-black tracking-tight uppercase leading-none ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                    SmartHosto
+                  </h1>
+                  <span className="text-xs font-bold text-blue-500 dark:text-blue-400 uppercase tracking-wider mt-1">
+                    SIH Clinique
+                  </span>
+                </div>
+              )}
+            </div>
 
             {isExpanded && (
               <button 
@@ -349,33 +362,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                   e.stopPropagation();
                   onToggleLock();
                 }}
-                className={`p-2 rounded-xl transition-all cursor-pointer ${
+                className={`p-2 rounded-xl transition-all cursor-pointer border ${
                   isLocked 
-                    ? (theme === 'dark' ? 'bg-blue-600 text-white' : 'bg-blue-500 text-white')
-                    : (theme === 'dark' ? 'bg-white/5 text-white/40 hover:text-white' : 'bg-slate-100 text-slate-400 hover:text-blue-600')
+                    ? 'bg-blue-600 text-white border-blue-400/50 shadow-[0_0_15px_rgba(59,130,246,0.4)]'
+                    : (theme === 'dark' ? 'bg-zinc-800/90 text-zinc-300 border-white/15 hover:text-white hover:border-white/30' : 'bg-slate-100 text-slate-600 border-slate-200 hover:text-blue-600')
                 }`}
-                title={isLocked ? "Déverrouiller le menu" : "Verrouiller le menu"}
+                title={isLocked ? "Déverrouiller le menu" : "Épingler le menu"}
               >
                 {isLocked ? <Lock size={16} /> : <Unlock size={16} />}
               </button>
             )}
           </div>
-          <AnimatePresence>
-            {isExpanded && (
-              <motion.div 
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -10 }}
-              >
-                <h1 className={`text-sm font-black tracking-tighter uppercase italic ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>SmartHosto</h1>
-              </motion.div>
-            )}
-          </AnimatePresence>
-          <div className={`h-[1px] ${isExpanded ? 'w-full' : 'w-8 mx-auto'} ${theme === 'dark' ? 'bg-white/10' : 'bg-slate-100'} transition-all`}></div>
+          <div className={`h-px ${isExpanded ? 'w-full' : 'w-10 mx-auto'} ${theme === 'dark' ? 'bg-white/12' : 'bg-slate-200/80'} transition-all`}></div>
         </div>
         
         {/* Navigation Items */}
-        <nav className={`flex-1 ${isExpanded ? 'px-4 items-stretch' : 'px-0 items-center w-full'} space-y-1 overflow-y-auto no-scrollbar py-2 relative z-10 flex flex-col transition-all`}>
+        <nav className={`flex-1 ${isExpanded ? 'px-4 items-stretch' : 'px-0 items-center w-full'} space-y-1.5 overflow-y-auto no-scrollbar py-2 relative z-10 flex flex-col transition-all`}>
           {currentRole === 'DASHBOARD' ? (
             filteredItems.map((item) => {
               const alertInfo = getModuleAlertInfo(item.id);
@@ -532,71 +534,79 @@ const Sidebar: React.FC<SidebarProps> = ({
         </nav>
 
         {/* Bottom Actions */}
-        <div className={`pb-6 flex flex-col ${isExpanded ? 'items-start px-4' : 'items-center px-0'} gap-3 relative z-10 transition-all`}>
-          <div className={`h-[1px] ${isExpanded ? 'w-full' : 'w-10 mx-auto'} ${theme === 'dark' ? 'bg-white/10' : 'bg-slate-100'} transition-all`}></div>
+        <div className={`pb-5 flex flex-col ${isExpanded ? 'items-start px-4' : 'items-center px-0'} gap-2.5 relative z-10 transition-all`}>
+          <div className={`h-px ${isExpanded ? 'w-full' : 'w-10 mx-auto'} ${theme === 'dark' ? 'bg-white/12' : 'bg-slate-200/80'} transition-all`}></div>
           
           <button 
             onClick={toggleTheme}
-            className={`flex items-center transition-all duration-300 border cursor-pointer ${
+            className={`flex items-center transition-all duration-200 border cursor-pointer ${
               isExpanded 
-                ? 'w-full px-4 justify-start gap-3 h-10 rounded-xl' 
-                : 'w-10 h-10 px-0 justify-center mx-auto rounded-xl'
+                ? 'w-full px-4 justify-start gap-3 h-11 rounded-2xl' 
+                : 'w-11 h-11 px-0 justify-center mx-auto rounded-2xl'
             } ${
               theme === 'dark' 
-                ? 'bg-zinc-900 text-amber-400 hover:bg-zinc-800 border-zinc-800 hover:border-zinc-700 shadow-none hover:shadow-[0_0_12px_rgba(251,191,36,0.2)]' 
-                : 'bg-white text-slate-500 hover:bg-slate-50 border-slate-100 shadow-xs'
+                ? 'bg-gradient-to-b from-zinc-800 to-zinc-900 text-amber-400 hover:border-amber-400/50 border-white/15 shadow-[0_4px_15px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12)] hover:shadow-[0_0_18px_rgba(251,191,36,0.25)]' 
+                : 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200/90 shadow-xs'
             }`}
             title={!isExpanded ? "Changer de thème" : undefined}
           >
             <div className="shrink-0 flex items-center justify-center">
-              {theme === 'dark' ? <Zap size={18} /> : <Activity size={18} />}
+              {theme === 'dark' ? <Zap size={19} /> : <Activity size={19} />}
             </div>
-            {isExpanded && <span className="text-[11px] font-black uppercase tracking-widest">Theme</span>}
+            {isExpanded && <span className="text-sm font-bold tracking-tight">Mode {theme === 'dark' ? 'Sombre' : 'Clair'}</span>}
           </button>
 
           <button 
             onClick={onLogout}
-            className={`flex items-center transition-all duration-300 border cursor-pointer ${
+            className={`flex items-center transition-all duration-200 border cursor-pointer ${
               isExpanded 
-                ? 'w-full px-4 justify-start gap-3 h-10 rounded-xl' 
-                : 'w-10 h-10 px-0 justify-center mx-auto rounded-xl'
+                ? 'w-full px-4 justify-start gap-3 h-11 rounded-2xl' 
+                : 'w-11 h-11 px-0 justify-center mx-auto rounded-2xl'
             } ${
               theme === 'dark' 
-                ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20 border-red-500/20 hover:border-red-500/40 shadow-none' 
-                : 'bg-red-50 text-red-500 hover:bg-red-100 border-transparent shadow-xs'
+                ? 'bg-rose-500/15 text-rose-400 hover:bg-rose-500/25 border-rose-500/30 hover:border-rose-400/50 shadow-[0_4px_12px_rgba(0,0,0,0.4)]' 
+                : 'bg-rose-50 text-rose-600 hover:bg-rose-100 border-rose-200/80 shadow-2xs'
             }`}
             title={!isExpanded ? "Déconnexion" : undefined}
           >
             <div className="shrink-0 flex items-center justify-center">
-              <LogOut size={18} />
+              <LogOut size={19} />
             </div>
-            {isExpanded && <span className="text-[11px] font-black uppercase tracking-widest">Logout</span>}
+            {isExpanded && <span className="text-sm font-bold tracking-tight">Déconnexion</span>}
           </button>
 
           {/* Mini Profile (Clickable: Opens Mon Profil & Finances) */}
           <div 
             onClick={() => onOpenProfile ? onOpenProfile() : window.dispatchEvent(new CustomEvent('open-user-profile'))}
-            className={`relative group mt-1 flex items-center cursor-pointer transition-all hover:opacity-90 ${isExpanded ? 'w-full px-4 gap-3 py-1.5 rounded-2xl hover:bg-white/5' : 'justify-center w-full px-0'}`}
+            className={`relative group mt-1 flex items-center cursor-pointer transition-all ${
+              isExpanded 
+                ? `w-full px-3 gap-3 py-2 rounded-2xl border ${
+                    theme === 'dark' 
+                      ? 'bg-gradient-to-b from-zinc-800/80 to-zinc-900/80 border-white/12 hover:border-blue-400/50 shadow-[0_4px_12px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.1)]' 
+                      : 'bg-slate-50/80 border-slate-200/80 hover:border-blue-300 hover:bg-blue-50/30'
+                  }` 
+                : 'justify-center w-full px-0'
+            }`}
             title="Mon Profil & Mes Finances"
           >
             <Avatar 
               user={user} 
-              size={36} 
+              size={40} 
               roundedClassName="rounded-xl" 
-              className={`border-2 ${theme === 'dark' ? 'border-zinc-800' : 'border-slate-100'} shadow-sm group-hover:border-blue-500/50 transition-colors mx-auto ${isExpanded ? 'mx-0' : ''}`} 
+              className={`border-2 ${theme === 'dark' ? 'border-white/20' : 'border-white'} shadow-md group-hover:border-blue-500 transition-colors mx-auto ${isExpanded ? 'mx-0' : ''}`} 
             />
             {isExpanded && (
-              <div className="flex flex-col overflow-hidden text-left">
-                <p className={`text-[11px] font-extrabold truncate font-heading group-hover:text-blue-500 transition-colors ${theme === 'dark' ? 'text-zinc-200' : 'text-slate-900'}`}>{user.name}</p>
-                <p className="text-[9px] font-bold text-blue-500 uppercase tracking-widest truncate">{user.role}</p>
+              <div className="flex flex-col overflow-hidden text-left min-w-0">
+                <p className={`text-sm font-extrabold truncate group-hover:text-blue-400 transition-colors ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{user.name}</p>
+                <p className="text-xs font-bold text-blue-500 dark:text-blue-400 uppercase tracking-wider truncate">{user.role}</p>
               </div>
             )}
             {!isExpanded && (
-              <div className={`absolute left-full ml-4 top-1/2 -translate-y-1/2 px-4 py-2 rounded-xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-300 z-50 ${
-                theme === 'dark' ? 'bg-[#111111] text-zinc-200 border border-zinc-800 shadow-[0_0_15px_rgba(0,0,0,0.8)]' : 'bg-white text-slate-900 shadow-xl border border-slate-100'
+              <div className={`absolute left-full ml-4 top-1/2 -translate-y-1/2 px-4 py-2.5 rounded-2xl whitespace-nowrap opacity-0 pointer-events-none group-hover:opacity-100 transition-all duration-200 z-50 ${
+                theme === 'dark' ? 'bg-[#151824] text-white border border-white/20 shadow-[0_15px_35px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]' : 'bg-white text-slate-900 shadow-xl border border-slate-200'
               }`}>
-                <p className="text-xs font-black">{user.name}</p>
-                <p className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">{user.role} • Mon Profil</p>
+                <p className="text-sm font-extrabold">{user.name}</p>
+                <p className="text-xs font-bold text-blue-500 uppercase tracking-wider">{user.role} • Mon Profil</p>
               </div>
             )}
           </div>
@@ -624,34 +634,34 @@ const NavIcon: React.FC<NavIconProps> = ({ icon: Icon, label, active, onClick, t
       <button
         onClick={onClick}
         title={!isExpanded ? label : undefined}
-        className={`h-10 rounded-xl flex items-center transition-all duration-300 relative overflow-hidden group cursor-pointer ${
+        className={`h-11 rounded-2xl flex items-center transition-all duration-200 relative overflow-hidden group cursor-pointer ${
           isExpanded 
-            ? 'w-full px-4 justify-start gap-3' 
-            : 'w-10 px-0 justify-center mx-auto'
+            ? 'w-full px-4 justify-start gap-3.5' 
+            : 'w-11 px-0 justify-center mx-auto'
         } ${
           active
             ? (theme === 'dark' 
-                ? 'bg-blue-600 text-white shadow-[0_0_15px_rgba(59,130,246,0.35)] ring-1 ring-blue-400/50' 
-                : 'bg-slate-900 text-white shadow-lg shadow-slate-900/20')
+                ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white border border-blue-400/60 shadow-[0_8px_20px_-4px_rgba(37,99,235,0.6),inset_0_1px_0_rgba(255,255,255,0.35)]' 
+                : 'bg-gradient-to-r from-slate-900 to-slate-800 text-white shadow-lg shadow-slate-900/20')
             : theme === 'dark'
-            ? 'text-zinc-400 hover:text-zinc-100 hover:bg-white/5 border border-transparent hover:border-zinc-800'
-            : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100/50 border border-transparent'
+            ? 'text-zinc-300 hover:text-white hover:bg-white/[0.07] border border-transparent hover:border-white/15'
+            : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/90 border border-transparent hover:border-slate-200/80'
         }`}
       >
         <div className="relative shrink-0 flex items-center justify-center">
-          <Icon size={18} className={`transition-transform duration-300 ${active ? 'scale-110' : 'group-hover/nav:scale-110'}`} />
+          <Icon size={20} className={`transition-transform duration-200 ${active ? 'scale-110' : 'group-hover/nav:scale-110'}`} />
           {badgeCount && badgeCount > 0 && !isExpanded && (
-            <span className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ${badgeType === 'critical' ? 'bg-rose-500 animate-pulse ring-2 ring-white dark:ring-black' : 'bg-amber-500'}`} />
+            <span className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full ${badgeType === 'critical' ? 'bg-rose-500 animate-pulse ring-2 ring-white dark:ring-slate-900' : 'bg-amber-500'}`} />
           )}
         </div>
         
         {isExpanded && (
           <div className="flex items-center justify-between flex-1 min-w-0 pr-1">
-            <span className="text-[11px] font-black uppercase tracking-tight whitespace-nowrap overflow-hidden text-ellipsis font-heading leading-none">
+            <span className="text-[13.5px] font-bold tracking-tight whitespace-nowrap overflow-hidden text-ellipsis leading-none">
               {label}
             </span>
             {badgeCount && badgeCount > 0 && (
-              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black text-white ${badgeType === 'critical' ? 'bg-rose-500 animate-pulse' : 'bg-amber-500'}`}>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-extrabold text-white ${badgeType === 'critical' ? 'bg-rose-500 animate-pulse' : 'bg-amber-500'}`}>
                 {badgeCount}
               </span>
             )}
@@ -660,17 +670,17 @@ const NavIcon: React.FC<NavIconProps> = ({ icon: Icon, label, active, onClick, t
         
         {/* Active Indicator Dot */}
         {active && isExpanded && !badgeCount && (
-          <div className="absolute right-3 w-1 h-1 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.8)]" />
+          <div className="absolute right-3 w-2 h-2 rounded-full bg-white shadow-[0_0_10px_rgba(255,255,255,0.9)]" />
         )}
       </button>
 
       {!isExpanded && (
-        <div className={`absolute left-full ml-4 top-1/2 -translate-y-1/2 px-4 py-2 rounded-xl whitespace-nowrap opacity-0 pointer-events-none group-hover/nav:opacity-100 transition-all duration-300 z-50 translate-x-2 group-hover/nav:translate-x-0 flex items-center gap-2 ${
-          theme === 'dark' ? 'bg-[#111111] text-zinc-200 border border-zinc-800 shadow-[0_0_15px_rgba(0,0,0,0.8)]' : 'bg-slate-900 text-white shadow-xl shadow-slate-900/10'
+        <div className={`absolute left-full ml-4 top-1/2 -translate-y-1/2 px-4 py-2 rounded-2xl whitespace-nowrap opacity-0 pointer-events-none group-hover/nav:opacity-100 transition-all duration-200 z-50 translate-x-1 group-hover/nav:translate-x-0 flex items-center gap-2 ${
+          theme === 'dark' ? 'bg-[#151824] text-white border border-white/20 shadow-[0_15px_35px_rgba(0,0,0,0.9),inset_0_1px_0_rgba(255,255,255,0.2)]' : 'bg-slate-900 text-white shadow-xl'
         }`}>
-          <span className="text-[10px] font-black uppercase tracking-widest">{label}</span>
+          <span className="text-sm font-bold">{label}</span>
           {badgeCount && badgeCount > 0 && (
-            <span className={`px-1.5 py-0.5 rounded-full text-[8px] font-black text-white ${badgeType === 'critical' ? 'bg-rose-500' : 'bg-amber-500'}`}>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-extrabold text-white ${badgeType === 'critical' ? 'bg-rose-500' : 'bg-amber-500'}`}>
               {badgeCount}
             </span>
           )}

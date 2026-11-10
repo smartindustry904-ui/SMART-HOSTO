@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: smarthosto-whatsapp-webhook
+    env: node
+    plan: free
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WHATSAPP_VERIFY_TOKEN
+        value: smarthosto_meta_verify_2026
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        value: "1172475902608668"
+      - key: WHATSAPP_BUSINESS_ACCOUNT_ID
+        value: "1635250944216380"
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

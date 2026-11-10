@@ -636,7 +636,7 @@ const Pharmacy: React.FC<PharmacyProps> = ({
   const shiftTotals = getShiftTotals();
 
   return (
-    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#020617] text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       <MicroHeader
         icon={Pill}
         title={
@@ -657,6 +657,7 @@ const Pharmacy: React.FC<PharmacyProps> = ({
         onHomeClick={onBackToDashboard}
         onBackClick={activeTab !== 'dashboard' ? () => setActiveTab('dashboard') : undefined}
         user={{ name: user?.name || 'Pharmacien', role: 'Officine' }}
+        theme={theme}
         quickStats={[
           { label: 'En attente', value: pendingPrescriptions.length, onClick: () => setActiveTab('prescriptions'), active: activeTab === 'prescriptions' },
           { label: 'Vente Directe', value: inventory.length, onClick: () => setActiveTab('sales'), active: activeTab === 'sales' },
@@ -667,31 +668,35 @@ const Pharmacy: React.FC<PharmacyProps> = ({
           <div className="flex items-center gap-2">
             {/* Session indicator */}
             {activeSession ? (
-              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl">
+              <div className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border ${
+                theme === 'dark' ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'
+              }`}>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[11px] font-bold text-emerald-800 hidden sm:inline">Caisse Ouverte</span>
+                <span className={`text-xs font-bold hidden sm:inline ${theme === 'dark' ? 'text-emerald-400' : 'text-emerald-800'}`}>Caisse Ouverte</span>
                 <button
                   onClick={() => { setActualCashInput(''); setShowCloseSessionModal(true); }}
-                  className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                  className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-[11px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
                 >
-                  <Lock size={12} /> Clôturer
+                  <Lock size={11} /> Clôturer
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-xl">
+              <div className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border ${
+                theme === 'dark' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50 border-amber-200'
+              }`}>
                 <span className="w-2 h-2 rounded-full bg-amber-500" />
-                <span className="text-[11px] font-bold text-amber-800 hidden sm:inline">Caisse Fermée</span>
+                <span className={`text-xs font-bold hidden sm:inline ${theme === 'dark' ? 'text-amber-400' : 'text-amber-800'}`}>Caisse Fermée</span>
                 <button
                   onClick={() => setShowOpenSessionModal(true)}
-                  className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                  className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
                 >
-                  <Unlock size={12} /> Ouvrir
+                  <Unlock size={11} /> Ouvrir
                 </button>
               </div>
             )}
 
             {/* Quick tab switcher */}
-            <div className="hidden md:flex items-center bg-white border border-slate-200 p-0.5 rounded-xl text-xs">
+            <div className="hidden md:flex items-center gap-1.5">
               {[
                 { id: 'dashboard', label: 'Dashboard' },
                 { id: 'prescriptions', label: `Ordonnances (${pendingPrescriptions.length})` },
@@ -701,10 +706,12 @@ const Pharmacy: React.FC<PharmacyProps> = ({
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`px-2.5 py-1 rounded-lg font-bold text-xs transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors cursor-pointer ${
                     activeTab === tab.id
-                      ? 'bg-blue-600 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : theme === 'dark'
+                      ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                      : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
                   }`}
                 >
                   {tab.label}

@@ -213,7 +213,7 @@ const Inpatient: React.FC<InpatientProps> = ({
   };
 
   return (
-    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#020617] text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       
       {/* MicroHeader Navigation */}
       <MicroHeader
@@ -233,14 +233,16 @@ const Inpatient: React.FC<InpatientProps> = ({
         user={{ name: user?.name || 'Personnel Hospitalisation' }}
         theme={theme}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 overflow-x-auto">
             
             {/* 1. Lits d'hospitalisation */}
             <button
               onClick={() => handleTabChange('beds')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all cursor-pointer ${
                 currentTab === 'beds'
                   ? 'bg-blue-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
               }`}
             >
@@ -261,9 +263,11 @@ const Inpatient: React.FC<InpatientProps> = ({
                   }));
                 }
               }}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all cursor-pointer ${
                 currentTab === 'patient_bed'
                   ? 'bg-blue-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
               }`}
             >
@@ -274,9 +278,11 @@ const Inpatient: React.FC<InpatientProps> = ({
             {/* 3. Demandes d'admission */}
             <button
               onClick={() => handleTabChange('requests')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all relative cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all relative cursor-pointer ${
                 currentTab === 'requests'
                   ? 'bg-amber-500 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
               }`}
             >
@@ -287,9 +293,11 @@ const Inpatient: React.FC<InpatientProps> = ({
             {/* 4. Historique des séjours */}
             <button
               onClick={() => handleTabChange('history')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all cursor-pointer ${
                 currentTab === 'history'
                   ? 'bg-blue-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
               }`}
             >
@@ -301,7 +309,7 @@ const Inpatient: React.FC<InpatientProps> = ({
             <button
               onClick={() => handleOpenAdmissionModal()}
               disabled={availableBeds.length === 0}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-1.5 rounded-xl font-black text-xs uppercase tracking-wider shadow-sm transition-all cursor-pointer ml-1"
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-3.5 py-1.5 rounded-xl font-semibold text-xs shadow-xs transition-all cursor-pointer ml-1"
             >
               <Plus size={14} />
               <span>Occuper un Lit</span>

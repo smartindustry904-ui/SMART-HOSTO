@@ -22,13 +22,14 @@ import {
   HelpCircle
 } from 'lucide-react';
 import { ClinicTenant, SubscriptionInvoice } from '../../pages/ControlCenter';
-import { SAAS_PLANS, SaaSPlanId } from '../../src/config/plans';
+import { SAAS_PLANS, SaaSPlanId, calculateLicensePriceForUsers, buildClinicEntitlementMaps } from '../../src/config/plans';
 import { db, sanitizeData } from '../../src/firebase';
-import { collection, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, setDoc, doc } from 'firebase/firestore';
 
 interface SuperAdminFinancesProps {
   clinics: ClinicTenant[];
   invoices: SubscriptionInvoice[];
+  plans?: Record<string, any>;
   currentUser?: any;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
 }
@@ -36,9 +37,15 @@ interface SuperAdminFinancesProps {
 export const SuperAdminFinances: React.FC<SuperAdminFinancesProps> = ({
   clinics,
   invoices,
+  plans: externalPlans,
   currentUser,
   showToast
 }) => {
+  const availablePlans = useMemo<Record<string, any>>(() => {
+    if (externalPlans && Object.keys(externalPlans).length > 0) return externalPlans;
+    return SAAS_PLANS;
+  }, [externalPlans]);
+
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [filterClinicId, setFilterClinicId] = useState<string>('ALL');
@@ -54,12 +61,14 @@ export const SuperAdminFinances: React.FC<SuperAdminFinancesProps> = ({
   const [paymentForm, setPaymentForm] = useState({
     clinicId: '',
     plan: 'STANDARD',
-    amount: 950000,
+    maxUsers: 15,
+    amount: 150000,
     currency: 'FCFA',
     invoiceDate: new Date().toISOString().split('T')[0],
     paidDate: new Date().toISOString().split('T')[0],
     paymentMethod: 'Virement bancaire' as 'Virement bancaire' | 'Chèque' | 'Mobile Money' | 'Espèces' | 'Carte Bancaire',
     status: 'PAID' as 'PAID' | 'PENDING' | 'OVERDUE',
+    extendLicenseMonths: 12,
     notes: 'Règlement de l\'abonnement annuel'
   });
 
@@ -232,7 +241,47 @@ export const SuperAdminFinances: React.FC<SuperAdminFinancesProps> = ({
     showToast('Exportation JSON des finances de la plateforme terminée', 'success');
   };
 
-  // Submit New Payment / Invoice
+  // Mark an existing PENDING/OVERDUE invoice as PAID & Reactivate Clinic
+  const handleMarkInvoicePaid = async (inv: SubscriptionInvoice) => {
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const docId = inv._docId || inv.id;
+      await setDoc(doc(db, 'saas_invoices', docId), sanitizeData({
+        status: 'PAID',
+        paidDate: todayStr,
+        updatedAt: new Date().toISOString()
+      }), { merge: true });
+
+      if (inv.clinicId) {
+        await updateDoc(doc(db, 'saas_clinics', inv.clinicId), sanitizeData({
+          status: 'ACTIVE',
+          updatedAt: new Date().toISOString()
+        })).catch(() => {});
+        await setDoc(doc(db, 'hospitals', inv.clinicId), sanitizeData({
+          id: inv.clinicId,
+          status: 'ACTIVE',
+          updatedAt: new Date().toISOString()
+        }), { merge: true }).catch(() => {});
+      }
+
+      await addDoc(collection(db, 'saas_logs'), sanitizeData({
+        timestamp: new Date().toISOString(),
+        user: currentUser?.username || 'superadmin',
+        action: 'INVOICE_MARKED_PAID',
+        details: `Facture ${inv.id} (${inv.clinicName}) marquée comme PAYÉE (${(Number(inv.amount) || 0).toLocaleString()} FCFA) & structure réactivée`,
+        category: 'LICENSE',
+        clinicId: inv.clinicId,
+        clinicName: inv.clinicName
+      }));
+
+      showToast(`Facture ${inv.id} marquée comme encaissée !`, 'success');
+    } catch (err) {
+      console.error('Error marking invoice paid:', err);
+      showToast('Erreur lors de la validation du paiement', 'error');
+    }
+  };
+
+  // Submit New Payment / Invoice & Synchronize Structure License/Quota
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!paymentForm.clinicId || !paymentForm.amount) {
@@ -245,11 +294,18 @@ export const SuperAdminFinances: React.FC<SuperAdminFinancesProps> = ({
 
     setIsSubmitting(true);
     try {
+      const invoiceId = `FAC-${Date.now().toString().slice(-6)}`;
+      const maxUsersNum = Math.max(1, Number(paymentForm.maxUsers) || targetClinic.quotas?.maxUsers || 15);
+      const nextPlanId = (paymentForm.plan || targetClinic.licenseType || 'STANDARD').toUpperCase();
+      const planDef = availablePlans[nextPlanId] || SAAS_PLANS[nextPlanId as SaaSPlanId] || SAAS_PLANS.STANDARD;
+      const monthlyPriceCalc = calculateLicensePriceForUsers(planDef, maxUsersNum, 1).monthlyTotal;
+
       const invoicePayload: SubscriptionInvoice = {
-        id: `FAC-${Date.now().toString().slice(-6)}`,
+        id: invoiceId,
         clinicId: targetClinic.id,
         clinicName: targetClinic.name,
-        plan: paymentForm.plan,
+        plan: nextPlanId,
+        userCount: maxUsersNum,
         amount: Number(paymentForm.amount),
         currency: 'FCFA',
         dueDate: paymentForm.invoiceDate,
@@ -258,23 +314,72 @@ export const SuperAdminFinances: React.FC<SuperAdminFinancesProps> = ({
         paymentMethod: paymentForm.paymentMethod
       };
 
-      await addDoc(collection(db, 'saas_invoices'), sanitizeData({
+      await setDoc(doc(db, 'saas_invoices', invoiceId), sanitizeData({
         ...invoicePayload,
         createdAt: new Date().toISOString()
       }));
+
+      // Auto-extend & sync clinic license + quota + modules if payment is PAID
+      if (paymentForm.status === 'PAID') {
+        const currentEnd = targetClinic.licenseEnd ? new Date(targetClinic.licenseEnd) : new Date();
+        const baseDate = isNaN(currentEnd.getTime()) || currentEnd.getTime() < Date.now() ? new Date() : currentEnd;
+        if (paymentForm.extendLicenseMonths > 0) {
+          baseDate.setMonth(baseDate.getMonth() + Number(paymentForm.extendLicenseMonths));
+        }
+        const newEndStr = paymentForm.extendLicenseMonths > 0
+          ? baseDate.toISOString().split('T')[0]
+          : (targetClinic.licenseEnd || baseDate.toISOString().split('T')[0]);
+        const licenceId = `licence_${nextPlanId.toLowerCase()}`;
+
+        const { servicesConfig, activatedModules } = buildClinicEntitlementMaps(
+          nextPlanId,
+          targetClinic.servicesConfig || {},
+          availablePlans
+        );
+
+        await updateDoc(doc(db, 'saas_clinics', targetClinic.id), sanitizeData({
+          status: 'ACTIVE',
+          licenseType: nextPlanId,
+          nom_licence: planDef.nom_licence || planDef.label || nextPlanId,
+          licence_id: licenceId,
+          licenceId: licenceId,
+          licensePrice: monthlyPriceCalc,
+          licenseEnd: newEndStr,
+          quotas: {
+            ...(targetClinic.quotas || {}),
+            maxUsers: maxUsersNum
+          },
+          servicesConfig,
+          activatedModules,
+          updatedAt: new Date().toISOString()
+        }));
+
+        await setDoc(doc(db, 'hospitals', targetClinic.id), sanitizeData({
+          id: targetClinic.id,
+          name: targetClinic.name,
+          status: 'ACTIVE',
+          licence_id: licenceId,
+          licenceId: licenceId,
+          nom_licence: planDef.nom_licence || planDef.label || nextPlanId,
+          licenseType: nextPlanId,
+          licensePrice: monthlyPriceCalc,
+          max_users: maxUsersNum,
+          updatedAt: new Date().toISOString()
+        }), { merge: true });
+      }
 
       // Audit Log
       await addDoc(collection(db, 'saas_logs'), sanitizeData({
         timestamp: new Date().toISOString(),
         user: currentUser?.username || 'superadmin',
         action: 'PAYMENT_RECORDED',
-        details: `Facture/Paiement d'abonnement ${invoicePayload.id} enregistré pour ${targetClinic.name}. Montant : ${invoicePayload.amount.toLocaleString()} FCFA (${paymentForm.status})`,
+        details: `Facture/Paiement d'abonnement ${invoicePayload.id} enregistré pour ${targetClinic.name} (Formule: ${nextPlanId}, Quota: ${maxUsersNum} util., Montant : ${invoicePayload.amount.toLocaleString()} FCFA, Statut: ${paymentForm.status})`,
         category: 'LICENSE',
         clinicId: targetClinic.id,
         clinicName: targetClinic.name
       }));
 
-      showToast(`Encaissement de ${invoicePayload.amount.toLocaleString()} FCFA enregistré pour ${targetClinic.name}`, 'success');
+      showToast(`Encaissement de ${invoicePayload.amount.toLocaleString()} FCFA synchronisé pour ${targetClinic.name} (${maxUsersNum} util.)`, 'success');
       setShowPaymentModal(false);
     } catch (err) {
       console.error('Error recording payment:', err);
@@ -285,40 +390,45 @@ export const SuperAdminFinances: React.FC<SuperAdminFinancesProps> = ({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <div className="space-y-4 animate-in fade-in duration-300">
       
-      {/* HEADER BAR */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 border border-white/10 p-5 rounded-3xl backdrop-blur-xl">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-rose-500/20 text-rose-400 border border-rose-500/30">
-              Revenus SaaS Plateforme
-            </span>
-            <span className="text-xs text-slate-400 font-bold">• Encaissements & Licences SmartHosto</span>
+      {/* COMPACT HEADER BAR */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-b from-[#161a29] to-[#0f121d] border border-white/15 px-4 py-3 rounded-2xl shadow-[0_10px_28px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.16)]">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-rose-500/20 border border-rose-400/30 flex items-center justify-center text-rose-300 shrink-0">
+            <CreditCard size={18} />
           </div>
-          <h2 className="text-2xl font-black text-white mt-1">Paramètres Financiers & Abonnements</h2>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight">Paramètres Financiers & Abonnements</h2>
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                Revenus SaaS
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 font-medium">Encaissements de licences, renouvellements & facturation SmartHosto</p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={handleExportCSV}
-            className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all"
+            className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
             title="Exporter en CSV"
           >
-            <FileSpreadsheet size={15} /> Export CSV
+            <FileSpreadsheet size={14} /> CSV
           </button>
           <button
             onClick={handleExportJSON}
-            className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all"
+            className="px-3 py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
             title="Exporter en JSON"
           >
-            <Download size={15} /> Export JSON
+            <Download size={14} /> JSON
           </button>
           <button
             onClick={() => setShowPaymentModal(true)}
-            className="px-5 py-2.5 bg-rose-600 hover:bg-rose-500 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-rose-900/30 transition-all cursor-pointer"
+            className="px-4 py-2 bg-gradient-to-b from-rose-500 to-rose-700 hover:from-rose-400 hover:to-rose-600 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-1.5 border border-rose-400/40 shadow-[0_6px_16px_rgba(225,29,72,0.4),inset_0_1px_0_0_rgba(255,255,255,0.3)] transition-all cursor-pointer"
           >
-            <Plus size={16} /> Enregistrer un Encaissement
+            <Plus size={15} /> Enregistrer un Encaissement
           </button>
         </div>
       </div>
@@ -522,14 +632,25 @@ export const SuperAdminFinances: React.FC<SuperAdminFinancesProps> = ({
                         {inv.paymentMethod || 'Non spécifié'}
                       </td>
                       <td className="py-4">
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black ${
-                          isPaid 
-                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
-                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                        }`}>
-                          {isPaid ? <CheckCircle2 size={10} /> : <Clock size={10} />}
-                          {isPaid ? 'ENCAISSÉ' : 'EN ATTENTE'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black ${
+                            isPaid 
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          }`}>
+                            {isPaid ? <CheckCircle2 size={10} /> : <Clock size={10} />}
+                            {isPaid ? 'ENCAISSÉ' : 'EN ATTENTE'}
+                          </span>
+                          {!isPaid && (
+                            <button
+                              onClick={() => handleMarkInvoicePaid(inv)}
+                              className="px-2 py-0.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-[10px] transition-all cursor-pointer"
+                              title="Marquer cette facture comme encaissée"
+                            >
+                              Encaisser ✓
+                            </button>
+                          )}
+                        </div>
                       </td>
                       <td className="py-4 text-right pr-6 font-black text-white">
                         {(Number(inv.amount) || 0).toLocaleString('fr-FR')} FCFA
@@ -564,45 +685,86 @@ export const SuperAdminFinances: React.FC<SuperAdminFinancesProps> = ({
                   value={paymentForm.clinicId}
                   onChange={(e) => {
                     const c = clinics.find(x => x.id === e.target.value);
+                    const cPlan = c?.licenseType || 'STANDARD';
+                    const planDef = availablePlans[cPlan] || SAAS_PLANS[cPlan as SaaSPlanId] || SAAS_PLANS.STANDARD;
+                    const cUsers = c?.quotas?.maxUsers || planDef.max_users || 15;
+                    const months = paymentForm.extendLicenseMonths > 0 ? paymentForm.extendLicenseMonths : 1;
+                    const calcAmount = calculateLicensePriceForUsers(planDef, cUsers, months).periodTotal;
                     setPaymentForm({
                       ...paymentForm,
                       clinicId: e.target.value,
-                      plan: c?.licenseType || 'STANDARD',
-                      amount: c ? SAAS_PLANS[c.licenseType as SaaSPlanId]?.monthlyPriceFCFA || 950000 : 950000
+                      plan: cPlan,
+                      maxUsers: cUsers,
+                      amount: calcAmount
                     });
                   }}
                   className="w-full mt-1.5 px-4 py-2.5 bg-slate-950 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
                 >
                   <option value="">Sélectionnez un établissement...</option>
                   {clinics.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.city}, {c.country})</option>
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.licenseType} • {c.quotas?.maxUsers || 15} util.)
+                    </option>
                   ))}
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="text-xs font-bold text-slate-400">Formule Associée</label>
                   <select
                     value={paymentForm.plan}
-                    onChange={(e) => setPaymentForm({...paymentForm, plan: e.target.value})}
-                    className="w-full mt-1.5 px-4 py-2 bg-slate-950 border border-white/10 rounded-xl text-xs text-slate-300 focus:outline-none focus:border-rose-500"
+                    onChange={(e) => {
+                      const nextPlan = e.target.value;
+                      const planDef = availablePlans[nextPlan] || SAAS_PLANS[nextPlan as SaaSPlanId] || SAAS_PLANS.STANDARD;
+                      const nextUsers = Math.max(paymentForm.maxUsers, planDef.max_users || 5);
+                      const months = paymentForm.extendLicenseMonths > 0 ? paymentForm.extendLicenseMonths : 1;
+                      const calcAmount = calculateLicensePriceForUsers(planDef, nextUsers, months).periodTotal;
+                      setPaymentForm({
+                        ...paymentForm,
+                        plan: nextPlan,
+                        maxUsers: nextUsers,
+                        amount: calcAmount
+                      });
+                    }}
+                    className="w-full mt-1.5 px-3 py-2 bg-slate-950 border border-white/10 rounded-xl text-xs font-bold text-slate-200 focus:outline-none focus:border-rose-500"
                   >
-                    {Object.keys(SAAS_PLANS).map(k => (
+                    {Object.keys(availablePlans).map(k => (
                       <option key={k} value={k}>{k}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-400">Montant (FCFA) *</label>
+                  <label className="text-xs font-bold text-emerald-400">Quota Utilisateurs</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={paymentForm.maxUsers}
+                    onChange={(e) => {
+                      const nextUsers = Math.max(1, Number(e.target.value) || 1);
+                      const planDef = availablePlans[paymentForm.plan] || SAAS_PLANS[paymentForm.plan as SaaSPlanId] || SAAS_PLANS.STANDARD;
+                      const months = paymentForm.extendLicenseMonths > 0 ? paymentForm.extendLicenseMonths : 1;
+                      const calcAmount = calculateLicensePriceForUsers(planDef, nextUsers, months).periodTotal;
+                      setPaymentForm({
+                        ...paymentForm,
+                        maxUsers: nextUsers,
+                        amount: calcAmount
+                      });
+                    }}
+                    className="w-full mt-1.5 px-3 py-2 bg-slate-950 border border-emerald-500/30 rounded-xl text-xs font-mono font-bold text-emerald-300 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400">Montant Total (FCFA) *</label>
                   <input 
                     type="number"
                     required
                     min={0}
-                    step={10000}
+                    step={5000}
                     value={paymentForm.amount}
                     onChange={(e) => setPaymentForm({...paymentForm, amount: Number(e.target.value)})}
-                    className="w-full mt-1.5 px-4 py-2 bg-slate-950 border border-white/10 rounded-xl text-xs text-white focus:outline-none focus:border-rose-500"
+                    className="w-full mt-1.5 px-3 py-2 bg-slate-950 border border-white/10 rounded-xl text-xs font-mono font-bold text-white focus:outline-none focus:border-rose-500"
                   />
                 </div>
               </div>
@@ -656,6 +818,33 @@ export const SuperAdminFinances: React.FC<SuperAdminFinancesProps> = ({
                   </select>
                 </div>
               </div>
+
+              {paymentForm.status === 'PAID' && (
+                <div className="p-3 bg-emerald-950/20 border border-emerald-500/30 rounded-xl">
+                  <label className="text-xs font-bold text-emerald-300 block mb-1">
+                    Renouvellement Automatique de la Licence de la Structure
+                  </label>
+                  <select
+                    value={paymentForm.extendLicenseMonths}
+                    onChange={(e) => {
+                      const nextMonths = Number(e.target.value);
+                      const planDef = availablePlans[paymentForm.plan] || SAAS_PLANS[paymentForm.plan as SaaSPlanId] || SAAS_PLANS.STANDARD;
+                      const calcAmount = calculateLicensePriceForUsers(planDef, paymentForm.maxUsers, nextMonths > 0 ? nextMonths : 1).periodTotal;
+                      setPaymentForm({
+                        ...paymentForm,
+                        extendLicenseMonths: nextMonths,
+                        amount: calcAmount
+                      });
+                    }}
+                    className="w-full px-3 py-2 bg-slate-950 border border-emerald-500/30 rounded-xl text-xs text-white font-bold focus:outline-none"
+                  >
+                    <option value={12}>Prolonger la licence de +1 An (12 mois) & Réactiver</option>
+                    <option value={6}>Prolonger la licence de +6 Mois & Réactiver</option>
+                    <option value={1}>Prolonger la licence de +1 Mois & Réactiver</option>
+                    <option value={0}>Ne pas modifier la date d'expiration actuelle</option>
+                  </select>
+                </div>
+              )}
 
               <div className="flex justify-end gap-3 pt-4 border-t border-white/5">
                 <button

@@ -3,26 +3,35 @@ import { CANONICAL_MODULES, hasImplementedModule } from './modules';
 export type SaaSPlanId = 'DEMO' | 'BASIC' | 'STANDARD' | 'PREMIUM' | 'ENTERPRISE';
 
 export interface SaaSPlan {
-  id: SaaSPlanId;
+  id: SaaSPlanId | string;
   label: string;
   badgeColor: string;
   description: string;
   monthlyPriceFCFA: number;
+  max_users: number; // Base included users in this tier
+  min_users?: number; // Recommended min users
+  max_users_cap?: number; // Recommended max users before next tier
+  pricePerExtraUserFCFA: number; // Price per additional user seat per month
   includedServiceIds: string[]; // Canonical service IDs included in the contract
 }
 
 /**
- * CONTRACTUAL PLANS OF SMARTHOSTO
+ * CONTRACTUAL PLANS OF SMARTHOSTO (PAR TRANCHE D'UTILISATEURS & MODULES)
  * 
- * Defines the default baseline of hospital services included in each commercial tier.
+ * Defines the baseline of hospital services, included user seats (max_users),
+ * and per-extra-user seat pricing for each commercial tier.
  */
 export const SAAS_PLANS: Record<SaaSPlanId, SaaSPlan> = {
   DEMO: {
     id: 'DEMO',
-    label: 'Démonstration / Essai',
+    label: 'Démonstration / Essai (1–3 util.)',
     badgeColor: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
-    description: 'Accès découverte aux fonctionnalités de base pour évaluation',
+    description: 'Accès découverte aux fonctionnalités de base pour évaluation (jusqu\'à 3 utilisateurs)',
     monthlyPriceFCFA: 0,
+    max_users: 3,
+    min_users: 1,
+    max_users_cap: 5,
+    pricePerExtraUserFCFA: 0,
     includedServiceIds: [
       'SRV-ACCUEIL',
       'SRV-CONSULTATION',
@@ -31,10 +40,14 @@ export const SAAS_PLANS: Record<SaaSPlanId, SaaSPlan> = {
   },
   BASIC: {
     id: 'BASIC',
-    label: 'Formule Basique (Cabinet Médical)',
+    label: 'Formule Basique — Cabinet (5 util. inclus)',
     badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-    description: 'Cabinet médical ou dispensaire sans hospitalisation ni laboratoire',
-    monthlyPriceFCFA: 450000,
+    description: 'Cabinet médical ou dispensaire sans hospitalisation ni laboratoire (Pack 5 utilisateurs inclus)',
+    monthlyPriceFCFA: 60000,
+    max_users: 5,
+    min_users: 1,
+    max_users_cap: 14,
+    pricePerExtraUserFCFA: 10000,
     includedServiceIds: [
       'SRV-ACCUEIL',
       'SRV-CONSULTATION',
@@ -45,10 +58,14 @@ export const SAAS_PLANS: Record<SaaSPlanId, SaaSPlan> = {
   },
   STANDARD: {
     id: 'STANDARD',
-    label: 'Formule Standard (Centre Médical)',
+    label: 'Formule Standard — Centre Médical (15 util. inclus)',
     badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
-    description: 'Centre médical avec analyses biologiques et soins ambulatoires',
-    monthlyPriceFCFA: 950000,
+    description: 'Centre médical avec analyses biologiques et soins ambulatoires (Pack 15 utilisateurs inclus)',
+    monthlyPriceFCFA: 150000,
+    max_users: 15,
+    min_users: 6,
+    max_users_cap: 34,
+    pricePerExtraUserFCFA: 8500,
     includedServiceIds: [
       'SRV-ACCUEIL',
       'SRV-CONSULTATION',
@@ -60,10 +77,14 @@ export const SAAS_PLANS: Record<SaaSPlanId, SaaSPlan> = {
   },
   PREMIUM: {
     id: 'PREMIUM',
-    label: 'Formule Premium (Clinique Médico-Chirurgicale)',
+    label: 'Formule Premium — Clinique (35 util. inclus)',
     badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-    description: 'Clinique complète avec maternité, urgences et séjours d\'hospitalisation',
-    monthlyPriceFCFA: 1500000,
+    description: 'Clinique complète avec maternité, urgences et séjours d\'hospitalisation (Pack 35 utilisateurs inclus)',
+    monthlyPriceFCFA: 300000,
+    max_users: 35,
+    min_users: 16,
+    max_users_cap: 99,
+    pricePerExtraUserFCFA: 7000,
     includedServiceIds: [
       'SRV-ACCUEIL',
       'SRV-CONSULTATION',
@@ -78,10 +99,14 @@ export const SAAS_PLANS: Record<SaaSPlanId, SaaSPlan> = {
   },
   ENTERPRISE: {
     id: 'ENTERPRISE',
-    label: 'Formule Enterprise (Centre Hospitalier / Hôpital)',
+    label: 'Formule Enterprise — Hôpital / CHU (100 util. inclus)',
     badgeColor: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
-    description: 'Tous les modules hospitaliers actuels et futurs sans restriction',
-    monthlyPriceFCFA: 2800000,
+    description: 'Tous les modules hospitaliers actuels et futurs pour grands hôpitaux (Pack 100 utilisateurs inclus)',
+    monthlyPriceFCFA: 650000,
+    max_users: 100,
+    min_users: 50,
+    max_users_cap: 500,
+    pricePerExtraUserFCFA: 5000,
     includedServiceIds: [
       'SRV-ACCUEIL',
       'SRV-CONSULTATION',
@@ -94,6 +119,55 @@ export const SAAS_PLANS: Record<SaaSPlanId, SaaSPlan> = {
       'SRV-CAISSE'
     ]
   }
+};
+
+/**
+ * Calculates the exact monthly and total price for a given plan and number of users.
+ * Formula: Base Monthly Price (covers up to plan.max_users) + Extra Users * pricePerExtraUserFCFA
+ */
+export const calculateLicensePriceForUsers = (
+  plan: Partial<SaaSPlan> | undefined,
+  targetUsers: number,
+  durationMonths: number = 1
+) => {
+  const basePrice = Number(plan?.monthlyPriceFCFA ?? 150000);
+  const includedUsers = Math.max(1, Number(plan?.max_users ?? 15));
+  const extraUserRate = Number(plan?.pricePerExtraUserFCFA ?? 8500);
+  const requestedUsers = Math.max(1, Number(targetUsers) || includedUsers);
+
+  const extraUsers = Math.max(0, requestedUsers - includedUsers);
+  const extraUsersMonthlyCost = extraUsers * extraUserRate;
+  const monthlyTotal = basePrice + extraUsersMonthlyCost;
+  const periodTotal = monthlyTotal * Math.max(1, durationMonths);
+  const costPerUserMonthly = requestedUsers > 0 ? Math.round(monthlyTotal / requestedUsers) : 0;
+
+  return {
+    basePrice,
+    includedUsers,
+    requestedUsers,
+    extraUsers,
+    extraUserRate,
+    extraUsersMonthlyCost,
+    monthlyTotal,
+    periodTotal,
+    costPerUserMonthly
+  };
+};
+
+/**
+ * Recommends the most cost-effective / appropriate plan for a given number of users.
+ */
+export const recommendPlanForUserCount = (
+  userCount: number,
+  plansCatalog: Record<string, Partial<SaaSPlan>> = SAAS_PLANS
+): string => {
+  const n = Math.max(1, Number(userCount) || 1);
+  if (n <= 3 && plansCatalog.DEMO) return 'DEMO';
+  if (n <= 8 && plansCatalog.BASIC) return 'BASIC';
+  if (n <= 25 && plansCatalog.STANDARD) return 'STANDARD';
+  if (n <= 65 && plansCatalog.PREMIUM) return 'PREMIUM';
+  if (plansCatalog.ENTERPRISE) return 'ENTERPRISE';
+  return Object.keys(plansCatalog)[0] || 'STANDARD';
 };
 
 /**
@@ -121,7 +195,7 @@ export interface StructureServiceEntitlement {
  * Computes the complete list of entitlements for a structure based on its plan and overrides.
  */
 export const computeStructureEntitlements = (
-  planId: SaaSPlanId = 'STANDARD',
+  planId: SaaSPlanId | string = 'STANDARD',
   customConfig: Record<string, {
     isAuthorized?: boolean;
     isCustomGranted?: boolean;
@@ -130,9 +204,12 @@ export const computeStructureEntitlements = (
     is_active?: boolean;
     specificSettings?: Record<string, any>;
   }> = {},
-  availableServices: Array<{ id: string; name: string; type: string; description?: string; specificSettings?: any }> = []
+  availableServices: Array<{ id: string; name: string; type: string; description?: string; specificSettings?: any }> = [],
+  plansCatalog: Record<string, Partial<SaaSPlan>> = SAAS_PLANS
 ): StructureServiceEntitlement[] => {
-  const plan = SAAS_PLANS[planId] || SAAS_PLANS.STANDARD;
+  const key = String(planId || 'STANDARD').toUpperCase();
+  const plan = plansCatalog[key] || SAAS_PLANS[key as SaaSPlanId] || SAAS_PLANS.STANDARD;
+  const planIncluded = plan.includedServiceIds || SAAS_PLANS.STANDARD.includedServiceIds;
 
   // Combine predefined catalog with any custom services passed
   const catalog = availableServices.length > 0 ? availableServices : [
@@ -164,7 +241,7 @@ export const computeStructureEntitlements = (
 
   return catalog.map(srv => {
     const isImplemented = hasImplementedModule(srv.id);
-    const isInPlan = plan.includedServiceIds.includes(srv.id);
+    const isInPlan = planIncluded.includes(srv.id);
     const saved = customConfig[srv.id];
 
     const isCustomGranted = saved?.isCustomGranted ?? false;
@@ -201,4 +278,35 @@ export const computeStructureEntitlements = (
       specificSettings: saved?.specificSettings || srv.specificSettings || {}
     };
   });
+};
+
+/**
+ * Helper to generate synchronized servicesConfig and activatedModules maps
+ * when a structure's plan or custom services change.
+ */
+export const buildClinicEntitlementMaps = (
+  planId: SaaSPlanId | string = 'STANDARD',
+  existingServicesConfig: Record<string, any> = {},
+  plansCatalog: Record<string, Partial<SaaSPlan>> = SAAS_PLANS
+) => {
+  const entitlements = computeStructureEntitlements(planId, existingServicesConfig, [], plansCatalog);
+  const servicesConfig: Record<string, any> = {};
+  const activatedModules: Record<string, boolean> = {};
+
+  entitlements.forEach(e => {
+    servicesConfig[e.serviceId] = {
+      isAuthorized: e.isAuthorized,
+      isCustomGranted: e.isCustomGranted,
+      isRevoked: e.isRevoked,
+      status: e.status,
+      is_active: e.is_active,
+      specificSettings: e.specificSettings || {}
+    };
+    if (e.is_active) {
+      activatedModules[e.serviceId] = true;
+      activatedModules[e.serviceName] = true;
+    }
+  });
+
+  return { servicesConfig, activatedModules, entitlements };
 };

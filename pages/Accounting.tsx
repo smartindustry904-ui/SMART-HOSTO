@@ -42,6 +42,7 @@ interface AccountingProps {
   onBackToDashboard: () => void;
   activeTab?: AccountingSubMenu;
   setActiveTab?: (tab: AccountingSubMenu) => void;
+  theme?: 'light' | 'dark';
 }
 
 export const Accounting: React.FC<AccountingProps> = ({
@@ -50,7 +51,8 @@ export const Accounting: React.FC<AccountingProps> = ({
   cashierTransactions: cashierTransactionsProp = [],
   onBackToDashboard,
   activeTab: activeTabProp,
-  setActiveTab: setActiveTabProp
+  setActiveTab: setActiveTabProp,
+  theme = 'light'
 }) => {
   // Navigation: Restrict strictly to 4 Essential Hospital Finance Pillars
   const [internalTab, setInternalTab] = useState<AccountingSubMenu>('dashboard');
@@ -239,7 +241,7 @@ export const Accounting: React.FC<AccountingProps> = ({
   ];
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans bg-slate-50 text-slate-900">
+    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       
       {/* Top Header & Navigation Strip */}
       <MicroHeader
@@ -251,6 +253,7 @@ export const Accounting: React.FC<AccountingProps> = ({
         onHomeClick={onBackToDashboard}
         onBackClick={activeTab !== 'dashboard' ? () => setActiveTab('dashboard') : undefined}
         user={{ name: user?.name || 'Comptable' }}
+        theme={theme}
         actions={
           <div className="flex items-center gap-1.5 overflow-x-auto">
             {navItems.map(item => {
@@ -260,9 +263,11 @@ export const Accounting: React.FC<AccountingProps> = ({
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-all shrink-0 cursor-pointer flex items-center gap-1.5 ${
                     isActive
-                      ? 'bg-emerald-600 text-white shadow-sm'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : theme === 'dark'
+                      ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                       : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100/80'
                   }`}
                 >

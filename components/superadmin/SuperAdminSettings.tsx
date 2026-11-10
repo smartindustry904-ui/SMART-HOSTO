@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Settings, 
   Shield, 
@@ -42,11 +42,20 @@ export const SuperAdminSettings: React.FC<SuperAdminSettingsProps> = ({
   const [logCategoryFilter, setLogCategoryFilter] = useState('ALL');
 
   // Form State
-  const [defaultCurrency, setDefaultCurrency] = useState('FCFA');
-  const [defaultLanguage, setDefaultLanguage] = useState('Français');
-  const [platformName, setPlatformName] = useState('SmartHosto Cloud SaaS');
-  const [supportEmail, setSupportEmail] = useState('contact@smarthosto.com');
+  const [defaultCurrency, setDefaultCurrency] = useState(globalConfig?.defaultCurrency || 'FCFA');
+  const [defaultLanguage, setDefaultLanguage] = useState(globalConfig?.defaultLanguage || 'Français');
+  const [platformName, setPlatformName] = useState(globalConfig?.platformName || 'SmartHosto Cloud SaaS');
+  const [supportEmail, setSupportEmail] = useState(globalConfig?.supportEmail || 'contact@smarthosto.com');
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (globalConfig) {
+      if (globalConfig.defaultCurrency) setDefaultCurrency(globalConfig.defaultCurrency);
+      if (globalConfig.defaultLanguage) setDefaultLanguage(globalConfig.defaultLanguage);
+      if (globalConfig.platformName) setPlatformName(globalConfig.platformName);
+      if (globalConfig.supportEmail) setSupportEmail(globalConfig.supportEmail);
+    }
+  }, [globalConfig]);
 
   // Filtered Logs
   const filteredLogs = logs.filter(log => {
@@ -86,18 +95,23 @@ export const SuperAdminSettings: React.FC<SuperAdminSettingsProps> = ({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <div className="space-y-4 animate-in fade-in duration-300">
       
-      {/* HEADER BAR */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 border border-white/10 p-5 rounded-3xl backdrop-blur-xl">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-500/20 text-slate-300 border border-slate-500/30">
-              Système & Sécurité
-            </span>
-            <span className="text-xs text-slate-400 font-bold">• Réglages Généraux & Traçabilité</span>
+      {/* COMPACT HEADER BAR */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-b from-[#161a29] to-[#0f121d] border border-white/15 px-4 py-3 rounded-2xl shadow-[0_10px_28px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.16)]">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-slate-500/20 border border-slate-400/30 flex items-center justify-center text-slate-300 shrink-0">
+            <Settings size={18} />
           </div>
-          <h2 className="text-2xl font-black text-white mt-1">Paramètres de la Plateforme</h2>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight">Paramètres de la Plateforme</h2>
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-slate-500/20 text-slate-300 border border-slate-500/30">
+                Système & Audit
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 font-medium">Réglages globaux, inspection d'établissements & journal de sécurité</p>
+          </div>
         </div>
 
         {/* Sub-tabs */}

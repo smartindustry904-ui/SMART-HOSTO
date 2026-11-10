@@ -27,13 +27,14 @@ import {
   Loader2,
   DollarSign
 } from 'lucide-react';
-import { SAAS_PLANS, SaaSPlanId, StructureServiceEntitlement, computeStructureEntitlements } from '../../src/config/plans';
+import { SAAS_PLANS, SaaSPlanId, StructureServiceEntitlement, computeStructureEntitlements, buildClinicEntitlementMaps, calculateLicensePriceForUsers } from '../../src/config/plans';
 import { CANONICAL_MODULES, hasImplementedModule, getModuleForService } from '../../src/config/modules';
 import { db, sanitizeData } from '../../src/firebase';
 import { doc, updateDoc, setDoc, addDoc, collection } from 'firebase/firestore';
 
 export interface StructureServicesManagerProps {
   clinics: any[];
+  plans?: Record<string, any>;
   currentUser?: any;
   onSwitchTenantContext?: (clinic: any) => void;
   showToast?: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -42,11 +43,13 @@ export interface StructureServicesManagerProps {
 
 export const StructureServicesManager: React.FC<StructureServicesManagerProps> = ({
   clinics,
+  plans = SAAS_PLANS,
   currentUser,
   onSwitchTenantContext,
   showToast = (msg: string, _type?: 'success' | 'error' | 'info') => console.log(msg),
   initialSelectedClinicId = null
 }) => {
+  const effectivePlans = useMemo(() => ({ ...SAAS_PLANS, ...(plans || {}) }), [plans]);
   // Navigation & selection
   const [selectedClinicId, setSelectedClinicId] = useState<string | null>(initialSelectedClinicId);
 
@@ -80,16 +83,17 @@ export const StructureServicesManager: React.FC<StructureServicesManagerProps> =
     if (!selectedClinic) return [];
     return computeStructureEntitlements(
       selectedClinic.licenseType as SaaSPlanId,
-      selectedClinic.servicesConfig || {}
+      selectedClinic.servicesConfig || {},
+      effectivePlans
     );
-  }, [selectedClinic]);
+  }, [selectedClinic, effectivePlans]);
 
   // Global KPIs across all clinics
   const globalKPIs = useMemo(() => {
     let totalAuthorized = 0;
     let totalActivated = 0;
     clinics.forEach(c => {
-      const entitlements = computeStructureEntitlements(c.licenseType, c.servicesConfig || {});
+      const entitlements = computeStructureEntitlements(c.licenseType, c.servicesConfig || {}, effectivePlans);
       totalAuthorized += entitlements.filter(e => e.isAuthorized).length;
       totalActivated += entitlements.filter(e => e.is_active).length;
     });
@@ -98,7 +102,7 @@ export const StructureServicesManager: React.FC<StructureServicesManagerProps> =
       avgAuthorized: clinics.length > 0 ? Math.round(totalAuthorized / clinics.length) : 0,
       totalActivated
     };
-  }, [clinics]);
+  }, [clinics, effectivePlans]);
 
   // Filtered general list of clinics
   const filteredClinics = useMemo(() => {
@@ -163,11 +167,19 @@ export const StructureServicesManager: React.FC<StructureServicesManagerProps> =
   ) => {
     setIsProcessing(clinicId);
     try {
-      const clinicRef = doc(db, 'saas_clinics', clinicId);
-      await updateDoc(clinicRef, {
-        servicesConfig: sanitizeData(updatedServicesConfig),
+      const activatedModules: Record<string, boolean> = {};
+      Object.entries(updatedServicesConfig).forEach(([srvId, cfg]: [string, any]) => {
+        activatedModules[srvId] = Boolean(cfg?.is_active || cfg?.status === 'active');
+      });
+
+      const payload = sanitizeData({
+        servicesConfig: updatedServicesConfig,
+        activatedModules,
         updatedAt: new Date().toISOString()
       });
+
+      await setDoc(doc(db, 'saas_clinics', clinicId), payload, { merge: true });
+      await setDoc(doc(db, 'hospitals', clinicId), payload, { merge: true });
       await logAudit(auditAction, auditDetails, clinicId, selectedClinic?.name || clinicId);
       showToast(successMessage, 'success');
     } catch (error: any) {
@@ -323,40 +335,47 @@ export const StructureServicesManager: React.FC<StructureServicesManagerProps> =
     setIsProcessing(selectedClinic.id);
 
     try {
-      const plan = SAAS_PLANS[newPlanId];
-      const nextPrice = plan.monthlyPriceFCFA;
-      
-      // Recompute entitlements with the new plan baseline while preserving custom overrides
-      const newEntitlements = computeStructureEntitlements(newPlanId, selectedClinic.servicesConfig || {});
-      const newServicesConfig: Record<string, any> = {};
-      
-      newEntitlements.forEach(e => {
-        newServicesConfig[e.serviceId] = {
-          isAuthorized: e.isAuthorized,
-          isCustomGranted: e.isCustomGranted,
-          isRevoked: e.isRevoked,
-          status: e.status,
-          is_active: e.is_active,
-          specificSettings: e.specificSettings || {}
-        };
-      });
+      const plan = effectivePlans[newPlanId] || SAAS_PLANS[newPlanId] || SAAS_PLANS.STANDARD;
+      const currentSeats = Number(selectedClinic.quotas?.maxUsers || selectedClinic.max_users || plan.max_users || 5);
+      const nextSeats = Math.max(currentSeats, Number(plan.max_users) || 5);
+      const calc = calculateLicensePriceForUsers(plan, nextSeats, 1);
+      const nextPrice = calc.monthlyTotal;
+      const { servicesConfig: newServicesConfig, activatedModules } = buildClinicEntitlementMaps(
+        newPlanId,
+        selectedClinic.servicesConfig || {},
+        effectivePlans
+      );
 
-      const clinicRef = doc(db, 'saas_clinics', selectedClinic.id);
-      await updateDoc(clinicRef, {
+      const updatePayload = sanitizeData({
         licenseType: newPlanId,
+        licence_id: `licence_${String(newPlanId).toLowerCase()}`,
+        nom_licence: plan.label,
         licensePrice: nextPrice,
-        servicesConfig: sanitizeData(newServicesConfig),
+        max_users: nextSeats,
+        quotas: {
+          ...(selectedClinic.quotas || { maxPatients: 5000, maxStorageGB: 25 }),
+          maxUsers: nextSeats
+        },
+        servicesConfig: newServicesConfig,
+        activatedModules,
         updatedAt: new Date().toISOString()
       });
 
+      await setDoc(doc(db, 'saas_clinics', selectedClinic.id), updatePayload, { merge: true });
+      await setDoc(doc(db, 'hospitals', selectedClinic.id), {
+        id: selectedClinic.id,
+        name: selectedClinic.name,
+        ...updatePayload
+      }, { merge: true });
+
       await logAudit(
         'Changement de Forfait',
-        `Migration au forfait ${plan.label} (${newPlanId}) pour ${selectedClinic.name}. Services inclus réalignés.`,
+        `Migration au forfait ${plan.label} (${newPlanId}, ${nextSeats} util., ${nextPrice.toLocaleString('fr-FR')} FCFA/mois) pour ${selectedClinic.name}. Services inclus réalignés.`,
         selectedClinic.id,
         selectedClinic.name
       );
 
-      showToast(`Forfait de ${selectedClinic.name} mis à jour : ${plan.label}.`, 'success');
+      showToast(`Forfait de ${selectedClinic.name} mis à jour : ${plan.label} (${nextSeats} util.).`, 'success');
     } catch (e: any) {
       console.error("Failed to update plan:", e);
       showToast(`Échec du changement de forfait : ${e.message || e}`, 'error');
@@ -367,36 +386,34 @@ export const StructureServicesManager: React.FC<StructureServicesManagerProps> =
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-300">
+    <div className="space-y-5 animate-in fade-in duration-300">
       
       {/* ============================================================== */}
       {/* VUE 1 : VUE GÉNÉRALE DES STRUCTURES (Aucune structure choisie) */}
       {/* ============================================================== */}
       {!selectedClinic && (
-        <div className="space-y-6">
-          {/* Header */}
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-white/10 pb-6">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 bg-rose-600/20 text-rose-400 border border-rose-500/30 rounded-2xl flex items-center justify-center shadow-lg shadow-rose-900/20">
-                  <Building2 size={22} />
-                </div>
-                <div>
-                  <h2 className="text-xl font-extrabold text-white flex items-center gap-2">
-                    Services & Départements par Structure
-                    <span className="text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2.5 py-0.5 rounded-full font-black uppercase">
-                      Gouvernance Super Admin
-                    </span>
-                  </h2>
-                  <p className="text-xs text-slate-400 font-medium">
-                    Gestion commerciale et contractuelle stricte des services autorisés et activés pour chaque centre médical client.
-                  </p>
-                </div>
+        <div className="space-y-4">
+          {/* Compact Header */}
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 bg-gradient-to-b from-[#161a29] to-[#0f121d] border border-white/15 px-4 py-3 rounded-2xl shadow-[0_10px_28px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.16)]">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-rose-600/20 text-rose-400 border border-rose-500/30 rounded-xl flex items-center justify-center shrink-0">
+                <Building2 size={18} />
+              </div>
+              <div>
+                <h2 className="text-base sm:text-lg font-extrabold text-white flex items-center gap-2 tracking-tight">
+                  Services & Départements par Structure
+                  <span className="text-[9px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2 py-0.5 rounded-full font-black uppercase">
+                    Gouvernance Super Admin
+                  </span>
+                </h2>
+                <p className="text-[11px] text-slate-400 font-medium">
+                  Gestion commerciale et contractuelle des services autorisés et activés pour chaque centre médical client.
+                </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 bg-slate-950/60 border border-white/5 px-4 py-2 rounded-2xl text-xs font-bold text-slate-400">
-              <span>{globalKPIs.totalClinics} structures enregistrées</span>
+            <div className="flex items-center gap-2 bg-slate-950/70 border border-white/10 px-3.5 py-1.5 rounded-xl text-xs font-bold text-slate-300">
+              <span>{globalKPIs.totalClinics} structures</span>
               <span className="text-slate-600">•</span>
               <span className="text-emerald-400 font-extrabold">{globalKPIs.totalActivated} services actifs</span>
             </div>
@@ -465,8 +482,8 @@ export const StructureServicesManager: React.FC<StructureServicesManagerProps> =
           {/* General Structures List */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
             {filteredClinics.map(clinic => {
-              const plan = SAAS_PLANS[clinic.licenseType as SaaSPlanId] || SAAS_PLANS.STANDARD;
-              const entitlements = computeStructureEntitlements(clinic.licenseType as SaaSPlanId, clinic.servicesConfig || {});
+              const plan = effectivePlans[clinic.licenseType as SaaSPlanId] || SAAS_PLANS[clinic.licenseType as SaaSPlanId] || SAAS_PLANS.STANDARD;
+              const entitlements = computeStructureEntitlements(clinic.licenseType as SaaSPlanId, clinic.servicesConfig || {}, effectivePlans);
               const authorizedCount = entitlements.filter(e => e.isAuthorized).length;
               const activeCount = entitlements.filter(e => e.is_active).length;
               const inactiveCount = entitlements.filter(e => e.isAuthorized && !e.is_active).length;
@@ -564,9 +581,9 @@ export const StructureServicesManager: React.FC<StructureServicesManagerProps> =
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-extrabold text-white">{selectedClinic.name}</h2>
                   <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border ${
-                    (SAAS_PLANS[selectedClinic.licenseType as SaaSPlanId] || SAAS_PLANS.STANDARD).badgeColor
+                    (effectivePlans[selectedClinic.licenseType as SaaSPlanId] || SAAS_PLANS[selectedClinic.licenseType as SaaSPlanId] || SAAS_PLANS.STANDARD).badgeColor
                   }`}>
-                    Forfait {selectedClinic.licenseType}
+                    Forfait {selectedClinic.licenseType} ({selectedClinic.usage?.activeUsers || 0}/{selectedClinic.quotas?.maxUsers || 5} util.)
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 font-mono">

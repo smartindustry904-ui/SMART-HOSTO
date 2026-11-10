@@ -867,18 +867,26 @@ const Consultation: React.FC<ConsultationProps> = ({
 
       const batch = writeBatch(db);
 
-      // 1. Write the Clinical Observation document into 'consultations' as clotured
+      // 1. Write the Clinical Observation document into 'consultations' as clotured & assigned to this practitioner
+      const practitionerName = user?.name || user?.username || 'Médecin';
+      const practitionerId = user?.id || '';
       const consDocRef = doc(db, 'consultations', consultationId);
       const consultationPayload = {
         id: consultationId,
         patientId: activePatient.id,
+        patientName: `${activePatient.lastName} ${activePatient.firstName}`,
         patient: `${activePatient.lastName} ${activePatient.firstName}`,
         patientIdRaw: activePatient.id,
         age: activePatient.age,
         gender: activePatient.gender,
         date: dateStr,
         time: timeStr,
-        doctor: user?.name || 'Dr. Sarr',
+        doctor: practitionerName,
+        doctorName: practitionerName,
+        doctorId: practitionerId,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
+        practitionerRole: user?.role || 'MEDECIN',
         doctorEmail: user?.email || '',
         motif: compilationData.motif,
         diagnosis: compilationData.hypotheses?.principal || 'Diagnostic non précisé',
@@ -887,9 +895,13 @@ const Consultation: React.FC<ConsultationProps> = ({
         observation: compilationData.observation,
         type: compilationData.mode === 'gynecologie' ? 'Consultation Gynécologique' : compilationData.mode === 'obstetrique' ? 'CPN / Maternité' : 'Consultation Générale',
         status: 'cloture',
+        isClotured: true,
+        cloturedAt: today.toISOString(),
+        cloturedBy: practitionerName,
+        cloturedById: practitionerId,
         createdAt: today.toISOString()
       };
-      batch.set(consDocRef, consultationPayload);
+      batch.set(consDocRef, sanitizeData(consultationPayload));
 
       // Write to patient_history collection with status 'cloture'
       const historyId = `HIST-${activePatient.id}-${consultationId}`;
@@ -899,13 +911,18 @@ const Consultation: React.FC<ConsultationProps> = ({
         consultationId: consultationId,
         date: dateStr,
         time: timeStr,
-        doctor: user?.name || 'Dr. Sarr',
+        doctor: practitionerName,
+        doctorId: practitionerId,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
         motif: compilationData.motif || '',
         diagnosis: compilationData.hypotheses?.principal || 'Diagnostic non précisé',
         treatment: compilationData.prescriptions || [],
         exams: compilationData.examensDemandes || [],
         observation: compilationData.observation || '',
         status: 'cloture',
+        isClotured: true,
+        cloturedAt: today.toISOString(),
         updatedAt: today.toISOString()
       }));
 
@@ -946,22 +963,26 @@ const Consultation: React.FC<ConsultationProps> = ({
         });
       }
 
-      // 4. Update appointment status to COMPLETED if one exists for today
-      try {
-        const todayISO = today.toISOString().split('T')[0];
-        const qApp = query(
-          collection(db, 'appointments'), 
-          where('patientId', '==', activePatient.id),
-          where('date', '==', todayISO),
-          where('status', 'in', ['PENDING', 'IN_PROGRESS'])
-        );
-        const appSnaps = await getDocs(qApp);
-        for (const appDoc of appSnaps.docs) {
-          batch.update(doc(db, 'appointments', appDoc.id), sanitizeData({ status: 'COMPLETED' }));
-        }
-      } catch (appErr) {
-        console.error("Error updating appointment status on closure:", appErr);
-      }
+      // 4. Update appointment status to COMPLETED asynchronously (offline-first, non-blocking)
+      const todayISO = today.toISOString().split('T')[0];
+      const qApp = query(
+        collection(db, 'appointments'), 
+        where('patientId', '==', activePatient.id),
+        where('date', '==', todayISO),
+        where('status', 'in', ['PENDING', 'IN_PROGRESS'])
+      );
+      getDocs(qApp)
+        .then(appSnaps => {
+          appSnaps.docs.forEach(appDoc => {
+            updateDoc(doc(db, 'appointments', appDoc.id), sanitizeData({
+              status: 'COMPLETED',
+              practitionerId: practitionerId,
+              practitionerName: practitionerName,
+              cloturedAt: today.toISOString()
+            })).catch(() => {});
+          });
+        })
+        .catch(() => {});
 
       // 5. Generate the Cashier Payment Invoice (PaymentRequest) with Strict Double-Billing Prevention
       const invoiceItems: any[] = [];
@@ -1050,11 +1071,27 @@ const Consultation: React.FC<ConsultationProps> = ({
       let totalAmount = 0;
       let invoiceId: string | undefined = undefined;
 
+      // Also assign any existing admission/consultation payment requests for this patient today to the practitioner who closed it
+      (paymentRequests || [])
+        .filter(pr => pr.patientId === activePatient.id && pr.createdAt?.startsWith(todayStr))
+        .forEach(pr => {
+          batch.set(doc(db, 'payment_requests', pr.id), sanitizeData({
+            practitionerId: practitionerId,
+            practitionerName: practitionerName,
+            practitionerRole: user?.role || 'MEDECIN',
+            doctorId: practitionerId,
+            doctor: practitionerName,
+            isClotured: true,
+            cloturedAt: today.toISOString(),
+            cloturedBy: practitionerName
+          }), { merge: true });
+        });
+
       if (invoiceItems.length > 0) {
         totalAmount = invoiceItems.reduce((sum, item) => sum + item.totalPrice, 0);
         if (totalAmount > 0) {
           invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
-          const newPaymentRequest: PaymentRequest = {
+          const newPaymentRequest: any = {
             id: invoiceId,
             patientId: activePatient.id,
             patientName: `${activePatient.lastName} ${activePatient.firstName}`,
@@ -1066,7 +1103,14 @@ const Consultation: React.FC<ConsultationProps> = ({
             amountPaid: 0,
             status: 'PENDING',
             createdAt: today.toISOString(),
-            createdBy: user?.name || 'Docteur'
+            createdBy: practitionerName,
+            practitionerId: practitionerId,
+            practitionerName: practitionerName,
+            practitionerRole: user?.role || 'MEDECIN',
+            doctorId: practitionerId,
+            doctor: practitionerName,
+            isClotured: true,
+            cloturedAt: today.toISOString()
           };
 
           batch.set(doc(db, 'payment_requests', invoiceId), sanitizeData(newPaymentRequest));
@@ -1075,45 +1119,64 @@ const Consultation: React.FC<ConsultationProps> = ({
 
       // 6. Trace the final audit trail
       batch.set(doc(collection(db, 'audit_logs')), sanitizeData({
-        user: user?.name || user?.email || 'Docteur',
+        user: practitionerName,
         role: 'DOCTOR',
         date: dateStr,
         time: timeStr,
         timestamp: today.toISOString(),
         action: `Clôture de consultation - Patient archivé : ${activePatient.lastName} ${activePatient.firstName}`,
-        details: { consultationId, invoiceId, totalAmount, diagnosis: compilationData.hypotheses.principal },
+        details: { consultationId, invoiceId, totalAmount, diagnosis: compilationData.hypotheses.principal, practitionerId },
         module: 'Consultation'
       }));
 
-      // 7. Update service queues status to ready_for_discharge
-      const q = query(collection(db, 'service_queues'), where('patientId', '==', activePatient.id));
-      const snaps = await getDocs(q);
-      for (const dSnap of snaps.docs) {
-        batch.update(doc(db, 'service_queues', dSnap.id), sanitizeData({ 
+      // 7. Optimistic Offline-First UI Update (0ms delay)
+      const targetPatientId = activePatient.id;
+      const targetQueueDocId = (activePatient as any).queueDocId;
+      if (targetQueueDocId) {
+        batch.set(doc(db, 'service_queues', targetQueueDocId), sanitizeData({
           status: 'ready_for_discharge',
-          isClotured: true 
-        }));
+          isClotured: true,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          cloturedAt: today.toISOString()
+        }), { merge: true });
       }
 
-      // Commit all operations atomically!
-      await batch.commit();
-
-      // Update local state status to ready_for_discharge and show Vue Generale
-      setActivePatient(prev => prev ? { ...prev, status: 'ready_for_discharge' } : null);
+      setWaitingQueue((prev: any[]) => prev.map(p =>
+        (p.id === targetPatientId || p.patientId === targetPatientId)
+          ? { ...p, status: 'ready_for_discharge', isClotured: true, practitionerId, practitionerName }
+          : p
+      ));
+      setActivePatient(prev => prev ? { ...prev, status: 'ready_for_discharge', isClotured: true } : null);
       setConsultationTab('GENERAL');
-
       setShowClosureDialog(false);
       setIsClosing(false);
       setCompilationData(null);
 
       window.dispatchEvent(new CustomEvent('app-notification', { 
-        detail: { message: '✓ Consultation clôturée avec succès', type: 'success' }
+        detail: { message: '✓ Consultation clôturée et assignée au praticien avec succès', type: 'success' }
       }));
+
+      // Commit local IndexedDB batch immediately & update remaining queue entries in background
+      batch.commit().catch(err => console.warn("Background batch commit warning:", err));
+      getDocs(query(collection(db, 'service_queues'), where('patientId', '==', targetPatientId)))
+        .then(snaps => {
+          snaps.docs.forEach(dSnap => {
+            updateDoc(doc(db, 'service_queues', dSnap.id), sanitizeData({
+              status: 'ready_for_discharge',
+              isClotured: true,
+              practitionerId: practitionerId,
+              practitionerName: practitionerName,
+              cloturedAt: today.toISOString()
+            })).catch(() => {});
+          });
+        })
+        .catch(() => {});
     } catch (e) {
       setIsClosing(false);
       console.error("Closure finalize failed: ", e);
       window.dispatchEvent(new CustomEvent('app-notification', { 
-        detail: { message: "✗ Échec de la clôture de la consultation : aucune modification enregistrée.", type: 'error' }
+        detail: { message: "✗ Échec de la clôture de la consultation.", type: 'error' }
       }));
     }
   };
@@ -1676,7 +1739,7 @@ const Consultation: React.FC<ConsultationProps> = ({
   const consultationInProgressQueue = Array.from(uniqueInProgressMap.values());
 
   return (
-    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans selection:bg-blue-100 selection:text-blue-900 ${theme === 'dark' ? 'bg-[#020617] text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans selection:bg-blue-500/20 ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       <MicroHeader
         icon={ClipboardList}
         breadcrumbs={[

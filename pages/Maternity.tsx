@@ -267,7 +267,7 @@ const Maternity: React.FC<MaternityProps> = ({
   }, [selectedPatient]);
 
   return (
-    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#020617] text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       {/* Universal MicroHeader with 5 tabs conforming to Section 1 & Section 17 */}
       <MicroHeader
         icon={Baby}
@@ -289,9 +289,11 @@ const Maternity: React.FC<MaternityProps> = ({
           <div className="flex items-center gap-1.5 overflow-x-auto">
             <button
               onClick={() => setActiveTab('dashboard')}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
                 normalizedActiveTab === 'dashboard' 
-                  ? 'bg-pink-600 text-white shadow-sm' 
+                  ? 'bg-pink-600 text-white shadow-xs' 
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
@@ -300,16 +302,18 @@ const Maternity: React.FC<MaternityProps> = ({
 
             <button
               onClick={() => setActiveTab('waiting_room')}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
                 normalizedActiveTab === 'waiting_room' 
-                  ? 'bg-pink-600 text-white shadow-sm' 
+                  ? 'bg-pink-600 text-white shadow-xs' 
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
               <Users size={13} />
               Salle d'Attente
               {maternityQueue.length > 0 && (
-                <span className="px-1.5 py-0.2 bg-pink-100 text-pink-700 rounded-full text-[10px] font-black">
+                <span className="px-1.5 py-0.2 bg-pink-500/20 text-pink-500 rounded-full text-[11px] font-bold">
                   {maternityQueue.length}
                 </span>
               )}
@@ -317,9 +321,11 @@ const Maternity: React.FC<MaternityProps> = ({
 
             <button
               onClick={() => setActiveTab('cpn')}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
                 normalizedActiveTab === 'cpn' 
-                  ? 'bg-pink-600 text-white shadow-sm' 
+                  ? 'bg-pink-600 text-white shadow-xs' 
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
@@ -329,16 +335,18 @@ const Maternity: React.FC<MaternityProps> = ({
 
             <button
               onClick={() => setActiveTab('delivery_room')}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
                 normalizedActiveTab === 'delivery_room' 
-                  ? 'bg-pink-600 text-white shadow-sm' 
+                  ? 'bg-pink-600 text-white shadow-xs' 
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
               <Baby size={13} />
               Salle d'Accouchement
               {(admissions || []).filter(a => a.status === 'En travail').length > 0 && (
-                <span className="px-1.5 py-0.2 bg-pink-100 text-pink-700 rounded-full text-[10px] font-black">
+                <span className="px-1.5 py-0.2 bg-pink-500/20 text-pink-500 rounded-full text-[11px] font-bold">
                   {(admissions || []).filter(a => a.status === 'En travail').length}
                 </span>
               )}
@@ -346,9 +354,11 @@ const Maternity: React.FC<MaternityProps> = ({
 
             <button
               onClick={() => setActiveTab('history')}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
                 normalizedActiveTab === 'history' 
-                  ? 'bg-pink-600 text-white shadow-sm' 
+                  ? 'bg-pink-600 text-white shadow-xs' 
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >

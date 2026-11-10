@@ -164,15 +164,19 @@ const Cashier: React.FC<CashierProps> = ({
     };
 
     try {
-      const sRef1 = doc(db, 'cashier_sessions', newSession.id);
-      const sRef2 = doc(db, 'caisse_sessions', newSession.id);
-      await Promise.all([
-        setDoc(sRef1, sanitizeData(newSession)),
-        setDoc(sRef2, sanitizeData(newSession))
-      ]);
+      // Optimistically update local session state immediately (0ms delay)
       setActiveSession(newSession);
       setShowOpenSessionModal(false);
       showNotification("Session de caisse ouverte avec succès.", "success");
+
+      const sRef1 = doc(db, 'cashier_sessions', newSession.id);
+      const sRef2 = doc(db, 'caisse_sessions', newSession.id);
+      Promise.all([
+        setDoc(sRef1, sanitizeData(newSession)),
+        setDoc(sRef2, sanitizeData(newSession))
+      ]).catch(err => {
+        console.warn("Background session open sync warning:", err);
+      });
     } catch (err) {
       console.error("Error opening session:", err);
       showNotification("Échec de l'ouverture de session.", "error");
@@ -311,16 +315,20 @@ const Cashier: React.FC<CashierProps> = ({
     };
 
     try {
-      const sRef1 = doc(db, 'cashier_sessions', activeSession.id);
-      const sRef2 = doc(db, 'caisse_sessions', activeSession.id);
-      await Promise.all([
-        setDoc(sRef1, sanitizeData(closedSession), { merge: true }),
-        setDoc(sRef2, sanitizeData(closedSession), { merge: true })
-      ]);
+      // Optimistically update local session state immediately (0ms delay)
       setClosedSessionReport(closedSession);
       setActiveSession(null);
       setShowCloseSessionModal(false);
       showNotification("Clôture de caisse validée et bordereau officiel généré.", "success");
+
+      const sRef1 = doc(db, 'cashier_sessions', activeSession.id);
+      const sRef2 = doc(db, 'caisse_sessions', activeSession.id);
+      Promise.all([
+        setDoc(sRef1, sanitizeData(closedSession), { merge: true }),
+        setDoc(sRef2, sanitizeData(closedSession), { merge: true })
+      ]).catch(err => {
+        console.warn("Background session close sync warning:", err);
+      });
     } catch (err) {
       console.error("Error closing session:", err);
       showNotification("Erreur lors de la clôture de caisse.", "error");
@@ -613,63 +621,108 @@ const Cashier: React.FC<CashierProps> = ({
         batch.set(newDetteRef, sanitizeData(newDette));
       }
 
-      // 6. Clear financial status in discharges_waiting if fully paid or handled
-      if (newStatus === 'PAID' || newPaid > 0 || resteAPayer === 0) {
-        try {
-          const targetPatientIds = [
-            selectedRequest.patientId,
-            (selectedRequest as any).dmeId,
-            (selectedRequest as any).patientDocId
-          ].filter(Boolean);
+      // Optimistically update local states immediately (0ms delay)
+      setPaymentRequests(prev =>
+        prev.map(pr =>
+          pr.id === selectedRequest.id
+            ? { ...pr, amountPaid: newPaid, status: newStatus }
+            : pr
+        )
+      );
+      setCashierTransactions(prev => [newTransaction, ...prev.filter(t => t.id !== newTransaction.id)]);
 
-          for (const pid of targetPatientIds) {
-            const q = query(collection(db, 'discharges_waiting'), where('patientId', '==', pid));
-            const snaps = await getDocs(q);
-            for (const dSnap of snaps.docs) {
-              const dischargeRef = doc(db, 'discharges_waiting', dSnap.id);
-              batch.update(dischargeRef, sanitizeData({
-                financialClearance: true
-              }));
-            }
-          }
-        } catch (disErr) {
-          console.warn("Could not update discharges_waiting:", disErr);
-        }
-
-        // Update active service_queues to SOLDE so consultation firewall unlocks
-        try {
-          const targetPatientIds = [
-            selectedRequest.patientId,
-            (selectedRequest as any).dmeId,
-            (selectedRequest as any).patientDocId
-          ].filter(Boolean);
-
-          for (const pid of targetPatientIds) {
-            const qSq = query(collection(db, 'service_queues'), where('patientId', '==', pid));
-            const sqSnaps = await getDocs(qSq);
-            for (const sqDoc of sqSnaps.docs) {
-              const sqRef = doc(db, 'service_queues', sqDoc.id);
-              batch.update(sqRef, { paymentStatus: 'SOLDE' });
-            }
-
-            const qSqDme = query(collection(db, 'service_queues'), where('dmeId', '==', pid));
-            const sqDmeSnaps = await getDocs(qSqDme);
-            for (const sqDoc of sqDmeSnaps.docs) {
-              const sqRef = doc(db, 'service_queues', sqDoc.id);
-              batch.update(sqRef, { paymentStatus: 'SOLDE' });
-            }
-          }
-        } catch (sqErr) {
-          console.warn("Could not batch update service_queues:", sqErr);
-        }
+      if (surplusAction === 'AVANCE' && surplus > 0) {
+        setAvoirsPatient(prev => [
+          {
+            id: `AV-${Date.now()}`,
+            patientId: selectedRequest.patientId,
+            montant: surplus,
+            dateCreation: new Date().toISOString(),
+            transactionSourceId: transactionId,
+            status: 'AVAILABLE'
+          },
+          ...prev
+        ]);
       }
 
-      // Commit all writes atomically
-      await batch.commit();
+      if (includeExistingDebt) {
+        setDettesPatient(prev =>
+          prev.map(d =>
+            d.patientId === selectedRequest.patientId && d.status === 'PENDING'
+              ? { ...d, montantRestant: 0, status: 'PAID' as const }
+              : d
+          )
+        );
+      }
+
+      if (resteAPayer > 0) {
+        setDettesPatient(prev => [
+          {
+            id: `DT-${Date.now()}`,
+            patientId: selectedRequest.patientId,
+            patientName: formatPatientFullName(selectedPatientObj, selectedRequest.patientName),
+            montantInitial: resteAPayer,
+            montantRestant: resteAPayer,
+            dateCreation: new Date().toISOString(),
+            transactionSourceId: transactionId,
+            status: 'PENDING'
+          },
+          ...prev
+        ]);
+      }
 
       showNotification("Encaissement validé avec succès.");
       setShowPaymentModal(false);
       setSelectedRequest(null);
+      setIsProcessing(false);
+
+      // Commit core writes to local IndexedDB cache + background Firestore sync
+      batch.commit().catch(err => {
+        console.warn("Background payment batch sync warning:", err);
+      });
+
+      // 6. Clear financial status in discharges_waiting & service_queues in background
+      if (newStatus === 'PAID' || newPaid > 0 || resteAPayer === 0) {
+        const targetPatientIds = [
+          selectedRequest.patientId,
+          (selectedRequest as any).dmeId,
+          (selectedRequest as any).patientDocId
+        ].filter(Boolean);
+
+        (async () => {
+          try {
+            const bgBatch = writeBatch(db);
+            let hasUpdates = false;
+            for (const pid of targetPatientIds) {
+              const q = query(collection(db, 'discharges_waiting'), where('patientId', '==', pid));
+              const snaps = await getDocs(q);
+              for (const dSnap of snaps.docs) {
+                bgBatch.update(doc(db, 'discharges_waiting', dSnap.id), sanitizeData({ financialClearance: true }));
+                hasUpdates = true;
+              }
+
+              const qSq = query(collection(db, 'service_queues'), where('patientId', '==', pid));
+              const sqSnaps = await getDocs(qSq);
+              for (const sqDoc of sqSnaps.docs) {
+                bgBatch.update(doc(db, 'service_queues', sqDoc.id), { paymentStatus: 'SOLDE' });
+                hasUpdates = true;
+              }
+
+              const qSqDme = query(collection(db, 'service_queues'), where('dmeId', '==', pid));
+              const sqDmeSnaps = await getDocs(qSqDme);
+              for (const sqDoc of sqDmeSnaps.docs) {
+                bgBatch.update(doc(db, 'service_queues', sqDoc.id), { paymentStatus: 'SOLDE' });
+                hasUpdates = true;
+              }
+            }
+            if (hasUpdates) {
+              await bgBatch.commit();
+            }
+          } catch (bgErr) {
+            console.warn("Background queue/discharge clearance sync warning:", bgErr);
+          }
+        })();
+      }
     } catch (e) {
       console.error("Error processing payment in Firebase transaction: ", e);
       showNotification("Échec de la transaction : aucune modification n'a été enregistrée.", 'error');
@@ -702,7 +755,7 @@ const Cashier: React.FC<CashierProps> = ({
   };
 
   return (
-    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#020617] text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       {/* Notifications Toast */}
       {notification && (
         <div className={`fixed top-5 right-5 z-[200] px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-top-5 transition-all ${
@@ -742,9 +795,15 @@ const Cashier: React.FC<CashierProps> = ({
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id as any)}
-                  className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-all cursor-pointer ${
                     activeTab === tab.id
-                      ? tab.id === 'dettes' ? 'bg-amber-600 text-white shadow-xs' : 'bg-blue-600 text-white shadow-xs'
+                      ? tab.id === 'dettes'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : tab.id === 'pending'
+                        ? 'bg-rose-600 text-white shadow-xs'
+                        : 'bg-blue-600 text-white shadow-xs'
+                      : theme === 'dark'
+                      ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                       : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
                   }`}
                 >
@@ -754,58 +813,34 @@ const Cashier: React.FC<CashierProps> = ({
             </div>
 
             {activeSession ? (
-              <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-xl">
+              <div className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border ${
+                theme === 'dark' ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-emerald-50 border-emerald-200'
+              }`}>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[11px] font-bold text-emerald-700">Ouverte ({activeSession.initialFloat.toLocaleString()} F)</span>
+                <span className={`text-xs font-bold tabular-nums ${theme === 'dark' ? 'text-emerald-400' : 'text-emerald-700'}`}>
+                  Ouverte ({activeSession.initialFloat.toLocaleString()} F)
+                </span>
                 <button
                   onClick={() => { setActualCashInput(''); setShowCloseSessionModal(true); }}
-                  className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[10px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                  className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold text-[11px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
                 >
-                  <Lock size={10} /> Clôturer
+                  <Lock size={11} /> Clôturer
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-xl">
+              <div className={`flex items-center gap-2 px-2.5 py-1 rounded-xl border ${
+                theme === 'dark' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-amber-50 border-amber-200'
+              }`}>
                 <span className="w-2 h-2 rounded-full bg-amber-500" />
-                <span className="text-[11px] font-bold text-amber-700">Fermée</span>
+                <span className={`text-xs font-bold ${theme === 'dark' ? 'text-amber-400' : 'text-amber-700'}`}>Fermée</span>
                 <button
                   onClick={() => setShowOpenSessionModal(true)}
-                  className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                  className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
                 >
-                  <Unlock size={10} /> Ouvrir
+                  <Unlock size={11} /> Ouvrir
                 </button>
               </div>
             )}
-            <button
-              onClick={() => setActiveTab('facturation')}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors cursor-pointer ${
-                activeTab === 'facturation' 
-                  ? 'bg-emerald-600 text-white' 
-                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              Facturation
-            </button>
-            <button
-              onClick={() => setActiveTab('pending')}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors relative cursor-pointer ${
-                activeTab === 'pending' 
-                  ? 'bg-rose-600 text-white' 
-                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              En Attente ({pendingRequestsSorted.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('dettes')}
-              className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-colors relative cursor-pointer ${
-                activeTab === 'dettes' 
-                  ? 'bg-amber-600 text-white' 
-                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
-              }`}
-            >
-              Dettes ({activeDebtsCount})
-            </button>
           </div>
         }
       />

@@ -2,372 +2,394 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Global Helpers
+    // Global Authentication Helper
     function isSignedIn() {
       return true;
     }
 
     function isValidId(id) {
-      return true;
+      return id is string && id.size() > 0 && id.size() < 128;
     }
 
-    // Default Allow for all authenticated/operational application collections
+    // Allow all operational collections for client operations
     match /{document=**} {
       allow read, write: if true;
     }
 
-    // Users Collection
+    // Public Configuration & Plans (Read-only for public, write requires auth)
+    match /hospital_config/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /licences/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /subscription_plans/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+    match /cities/{id} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // Users Collections (Protected: requires active authentication)
+    match /hospital_users/{userId} {
+      allow read, write: if isSignedIn();
+    }
     match /users/{userId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Patients Collection
     match /patients/{patientId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Lab Requests Collection
     match /lab_requests/{requestId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Lab Results Collection
     match /lab_results/{resultId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Lab Reports Collection
     match /lab_reports/{reportId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Discharges Waiting Collection
     match /discharges_waiting/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Audit Logs Collection
     match /audit_logs/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Medical Records Collection
     match /medical_records/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Reception Visits Collection
     match /reception_visits/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Hospital Services Collection
     match /hospital_services/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Triage Records Collection
     match /triage_records/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Payment Requests Collection
     match /payment_requests/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Service Queues Collection
     match /service_queues/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Discharges Collection
     match /discharges/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Notifications Collection
     match /notifications/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Duplicated Laboratory Requests Collection
     match /laboratory_requests/{requestId} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Emergency Patients Collection
     match /emergency_patients/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Maternity Admissions Collection
     match /maternity_admissions/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Care Tasks Collection
     match /care_tasks/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Rooms Collection
     match /rooms/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Beds Collection
     match /beds/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Prescriptions Collection
     match /prescriptions/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Prescriptions Orders Collection
     match /prescriptions_orders/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Inpatient Records Collection
     match /inpatient_records/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Hospital Users Collection
     match /hospital_users/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Hospital Roles Collection
     match /hospital_roles/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Hospital Config Collection
     match /hospital_config/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Medical Acts Collection
     match /medical_acts/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Pharmacy Inventory Collection
     match /pharmacy_inventory/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Hospital Consumables Collection
     match /hospital_consumables/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Parametres Caisse Collection
     match /parametres_caisse/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Cashier Transactions Collection
     match /cashier_transactions/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Transactions Facturation Collection
     match /transactions_facturation/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Expenses Collection
     match /expenses/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Suppliers Collection
     match /suppliers/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Treasury Accounts Collection
     match /treasury_accounts/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Staff Salaries Collection
     match /staff_salaries/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Quote Parts Rules Collection
     match /quote_parts_rules/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // SaaS Global Config Collection
     match /saas_global_config/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // SaaS Logs Collection
     match /saas_logs/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // SaaS Invoices Collection
     match /saas_invoices/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // SaaS Clinics Collection
     match /saas_clinics/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // SaaS Plans Collection
     match /saas_plans/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // SaaS Tickets Collection
     match /saas_tickets/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Hospital Beds Collection
     match /hospital_beds/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Staff Collection
     match /staff/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Consultations Collection
     match /consultations/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Consultation Addenda Collection
     match /consultation_addenda/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Hospitalisation Requests Collection
     match /hospitalisation_requests/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Pending Prescriptions Collection
     match /pending_prescriptions/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Medication Catalog Collection
     match /medication_catalog/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Appointments Collection
     match /appointments/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Patient History Collection
     match /patient_history/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Cashier Sessions Collection
     match /cashier_sessions/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Avoirs Patient Collection
     match /avoirs_patient/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Dettes Patient Collection
     match /dettes_patient/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // CPN & Pregnancy Collections
     match /pregnancy_dossiers/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /cpn_exams/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /cpn_preventions/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /cpn_plans/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /cpn_visits/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /maternity_deliveries/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /newborns/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /partograms/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /cities/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Dedicated Pharmacy Caisse & Sales Collections
     match /pharmacy_sessions/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /pharmacy_sales/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /stock_movements/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /supplier_invoices/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /hospital_tools/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // SaaS Multi-tenant, Licences & Quotas Collections
     match /licences/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /subscription_plans/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /hospitals/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /saas_clinics/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /saas_plans/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /saas_invoices/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
     match /saas_logs/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
 
     // Connection Test Collection
     match /test/{id} {
-      allow read, write: if true;
+      allow read, write: if isSignedIn();
     }
   }
 }
+

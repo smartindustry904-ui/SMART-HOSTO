@@ -369,7 +369,7 @@ const Emergency: React.FC<EmergencyProps> = ({
   }, [encounters]);
 
   return (
-    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#020617] text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       <MicroHeader
         icon={ShieldAlert}
         breadcrumbs={[
@@ -390,16 +390,18 @@ const Emergency: React.FC<EmergencyProps> = ({
             {/* Tab: Patients aux urgences */}
             <button
               onClick={() => setActiveMenu('patients')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all shrink-0 cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all shrink-0 cursor-pointer ${
                 activeMenu === 'patients'
                   ? 'bg-rose-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
               <Users size={13} className={activeMenu === 'patients' ? 'text-white' : 'text-slate-400'} />
               <span>Patients aux urgences</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                activeMenu === 'patients' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+              <span className={`text-[11px] font-bold px-1.5 py-0.2 rounded-full ${
+                activeMenu === 'patients' ? 'bg-white/20 text-white' : theme === 'dark' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
               }`}>
                 {activeCount}
               </span>
@@ -408,17 +410,19 @@ const Emergency: React.FC<EmergencyProps> = ({
             {/* Tab: Prise en charge */}
             <button
               onClick={() => setActiveMenu('prise_en_charge')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all shrink-0 cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all shrink-0 cursor-pointer ${
                 activeMenu === 'prise_en_charge'
                   ? 'bg-rose-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
               <Stethoscope size={13} className={activeMenu === 'prise_en_charge' ? 'text-white' : 'text-slate-400'} />
               <span>Prise en charge</span>
               {selectedEncounter && (
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full truncate max-w-[100px] ${
-                  activeMenu === 'prise_en_charge' ? 'bg-white/20 text-white' : 'bg-rose-50 text-rose-700'
+                <span className={`text-[11px] font-bold px-1.5 py-0.2 rounded-full truncate max-w-[100px] ${
+                  activeMenu === 'prise_en_charge' ? 'bg-white/20 text-white' : 'bg-rose-500/15 text-rose-500'
                 }`}>
                   {selectedEncounter.lastName}
                 </span>
@@ -428,16 +432,18 @@ const Emergency: React.FC<EmergencyProps> = ({
             {/* Tab: Historique */}
             <button
               onClick={() => setActiveMenu('historique')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all shrink-0 cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all shrink-0 cursor-pointer ${
                 activeMenu === 'historique'
                   ? 'bg-rose-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
               <History size={13} className={activeMenu === 'historique' ? 'text-white' : 'text-slate-400'} />
               <span>Historique</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
-                activeMenu === 'historique' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+              <span className={`text-[11px] font-bold px-1.5 py-0.2 rounded-full ${
+                activeMenu === 'historique' ? 'bg-white/20 text-white' : theme === 'dark' ? 'bg-slate-700 text-slate-200' : 'bg-slate-100 text-slate-600'
               }`}>
                 {historyCount}
               </span>

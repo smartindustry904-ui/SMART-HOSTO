@@ -1,24 +1,27 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Role, User, EmergencySubMenu, NurseSubMenu, ReceptionSubMenu, CashierSubMenu, LabSubMenu, InpatientSubMenu, PharmacySubMenu, AccountingSubMenu, ConsultationSubMenu, MaternitySubMenu } from './types';
 import Sidebar from './components/Sidebar';
 import Landing from './pages/Landing';
-import Dashboard from './pages/Dashboard';
-import Reception from './pages/Reception';
-import SoinsInfirmiers from './pages/SoinsInfirmiers';
-import Consultation from './pages/Consultation';
-import Inpatient from './pages/Inpatient';
-import Lab from './pages/Lab';
-import Maternity from './pages/Maternity';
-import Pharmacy from './pages/Pharmacy';
-import Cashier from './pages/Cashier';
-import { Accounting } from './pages/Accounting';
-import Personnel from './pages/Personnel';
-import Emergency from './pages/Emergency';
 import ModuleSelector from './pages/ModuleSelector';
-import Settings from './pages/Settings';
-import ComingSoon from './pages/ComingSoon';
-import { ControlCenter } from './pages/ControlCenter';
+
+// Code-split dynamic page loading for performance optimization
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Reception = lazy(() => import('./pages/Reception'));
+const SoinsInfirmiers = lazy(() => import('./pages/SoinsInfirmiers'));
+const Consultation = lazy(() => import('./pages/Consultation'));
+const Inpatient = lazy(() => import('./pages/Inpatient'));
+const Lab = lazy(() => import('./pages/Lab'));
+const Maternity = lazy(() => import('./pages/Maternity'));
+const Pharmacy = lazy(() => import('./pages/Pharmacy'));
+const Cashier = lazy(() => import('./pages/Cashier'));
+const Accounting = lazy(() => import('./pages/Accounting').then(m => ({ default: m.Accounting })));
+const Personnel = lazy(() => import('./pages/Personnel'));
+const Emergency = lazy(() => import('./pages/Emergency'));
+const Settings = lazy(() => import('./pages/Settings'));
+const ComingSoon = lazy(() => import('./pages/ComingSoon'));
+const ControlCenter = lazy(() => import('./pages/ControlCenter').then(m => ({ default: m.ControlCenter })));
+
 import ForcePasswordChangeModal from './components/auth/ForcePasswordChangeModal';
 import { UserProfileModal } from './components/profile/UserProfileModal';
 import { Menu, LogOut, Bell, LayoutDashboard, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
@@ -29,9 +32,23 @@ import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { collection, query, onSnapshot, orderBy, doc, getDoc } from 'firebase/firestore';
 import { applyTheme } from './constants/themes';
 
+const ModuleLoadingFallback: React.FC<{ theme: 'light' | 'dark' }> = ({ theme }) => (
+  <div className={`min-h-[60vh] flex flex-col items-center justify-center p-8 transition-colors ${theme === 'dark' ? 'text-zinc-300' : 'text-slate-700'}`}>
+    <div className="relative flex items-center justify-center mb-5">
+      <div className="w-14 h-14 rounded-full border-4 border-blue-500/20 border-t-blue-600 animate-spin" />
+      <div className="absolute w-6 h-6 rounded-full bg-blue-500/10 flex items-center justify-center">
+        <div className="w-2.5 h-2.5 rounded-full bg-blue-600 animate-ping" />
+      </div>
+    </div>
+    <p className="text-xs font-bold tracking-widest uppercase opacity-80">Initialisation du service médical...</p>
+    <p className="text-[11px] opacity-50 mt-1">SMART-HOSTO Cockpit</p>
+  </div>
+);
+
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [showUserProfileModal, setShowUserProfileModal] = useState<boolean>(false);
+  const [inspectingTenant, setInspectingTenant] = useState<{ id: string; name: string } | null>(null);
   const [currentModule, setCurrentModule] = useState<Role | 'DASHBOARD' | 'SETTING' | 'IMAGERIE' | 'HOSPITALISATION' | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('smarthosto_theme');
@@ -60,7 +77,7 @@ const App: React.FC = () => {
       setIsSidebarExpanded(true);
     }
   }, [isSidebarLocked]);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols'>('users');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent'>('users');
   const [activeMaternityTab, setActiveMaternityTab] = useState<MaternitySubMenu>('dashboard');
   const [activeConsultationTab, setActiveConsultationTab] = useState<ConsultationSubMenu>('dashboard');
   const [activeEmergencyTab, setActiveEmergencyTab] = useState<EmergencySubMenu>('patients');
@@ -77,10 +94,27 @@ const App: React.FC = () => {
   const hospitalServicesRef = React.useRef(hospitalServicesList);
   hospitalServicesRef.current = hospitalServicesList;
 
+  const isUserSuperAdmin = (u: any): boolean => {
+    if (!u) return false;
+    const uname = String(u.username || '').toLowerCase().trim();
+    const uid = String(u.id || '').toLowerCase().trim();
+    const urole = String(u.role || '').toUpperCase().trim();
+    return (
+      urole === Role.SUPER_ADMIN ||
+      urole === 'SUPER_ADMIN' ||
+      u.roles?.includes('role_super_admin') ||
+      uname === 'superadmin' ||
+      uname === 'sa1' ||
+      uid === 'super_admin_id' ||
+      uid === 'sa1_superadmin' ||
+      uid.startsWith('sa_')
+    );
+  };
+
   // Sécurisation stricte de la navigation : si le module courant est désactivé dans les paramètres,
   // rediriger immédiatement vers l'accueil pour empêcher tout contournement ou accès direct
   useEffect(() => {
-    if (currentModule && currentModule !== 'DASHBOARD' && !hospitalServicesLoading) {
+    if (currentModule && currentModule !== 'DASHBOARD' && currentModule !== Role.SUPER_ADMIN && !hospitalServicesLoading) {
       if (!isModuleActiveAndAvailable(currentModule, hospitalServicesList)) {
         setCurrentModule('DASHBOARD');
         window.dispatchEvent(new CustomEvent('app-notification', {
@@ -428,42 +462,64 @@ const App: React.FC = () => {
     }
 
     if (savedSession) {
-      const userData = JSON.parse(savedSession);
-      
-      // Set up authentication before showing authenticated modules
-      signInAnonymously(auth)
-        .then(async () => {
-          let latestUser = userData;
-          if (userData.id) {
-            try {
-              const uSnap = await getDoc(doc(db, 'hospital_users', userData.id));
+      try {
+        const userData = JSON.parse(savedSession);
+        if (isUserSuperAdmin(userData)) {
+          userData.role = Role.SUPER_ADMIN;
+        }
+        // Restauration hors-ligne instantanée (0ms de délai) : affichage immédiat de l'interface
+        setUser(userData);
+        if (isUserSuperAdmin(userData)) {
+          setCurrentModule(Role.SUPER_ADMIN);
+        } else {
+          setCurrentModule('DASHBOARD');
+        }
+
+        // Authentification et synchronisation discrète en tâche de fond sans bloquer l'UI
+        signInAnonymously(auth).catch(() => {});
+        if (userData.id) {
+          getDoc(doc(db, 'hospital_users', userData.id))
+            .then((uSnap) => {
               if (uSnap.exists()) {
-                latestUser = { ...userData, ...uSnap.data() };
-                localStorage.setItem('hospital_session', JSON.stringify(latestUser));
+                const freshData = uSnap.data();
+                delete freshData.password;
+                setUser(prev => prev ? { ...prev, ...freshData } : userData);
+                localStorage.setItem('hospital_session', JSON.stringify({ ...userData, ...freshData }));
               }
-            } catch (syncErr) {
-              console.warn("Could not sync fresh user doc from Firestore:", syncErr);
-            }
-          }
-          setUser(latestUser);
-          if (latestUser.role === Role.SUPER_ADMIN) {
-            setCurrentModule(Role.SUPER_ADMIN);
-          } else {
-            setCurrentModule('DASHBOARD');
-          }
-        })
-        .catch(err => {
-          console.error("Firebase recovery sign-in failed:", err);
-          // Fallback to allow app to run even if firebase has transient issues
-          setUser(userData);
-          if (userData.role === Role.SUPER_ADMIN) {
-            setCurrentModule(Role.SUPER_ADMIN);
-          } else {
-            setCurrentModule('DASHBOARD');
-          }
-        });
+            })
+            .catch(() => {});
+        }
+      } catch (err) {
+        console.warn("Session restore error:", err);
+      }
     }
   }, []);
+
+  // Synchronisation en direct du profil utilisateur actif avec la base de données réelle
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      const unsub = onSnapshot(doc(db, 'hospital_users', user.id), (snap) => {
+        if (snap.exists()) {
+          const fresh = snap.data();
+          delete fresh.password;
+          setUser(prev => prev ? { ...prev, ...fresh } : null);
+          const saved = localStorage.getItem('hospital_session');
+          if (saved) {
+            try {
+              const current = JSON.parse(saved);
+              localStorage.setItem('hospital_session', JSON.stringify({ ...current, ...fresh }));
+            } catch {}
+          }
+        }
+      }, (err) => {
+        console.warn("Live user profile sync notice:", err);
+      });
+      return () => unsub();
+    } catch (e) {
+      console.warn("Could not attach live user profile listener:", e);
+    }
+  }, [user?.id]);
 
   // Gestion responsive de la sidebar
   useEffect(() => {
@@ -481,8 +537,11 @@ const App: React.FC = () => {
   }, []);
 
   const handleLogin = (userData: User) => {
+    const isSuperAdmin = isUserSuperAdmin(userData);
+    if (isSuperAdmin) {
+      userData.role = Role.SUPER_ADMIN;
+    }
     setUser(userData);
-    const isSuperAdmin = userData.role === Role.SUPER_ADMIN || userData.roles?.includes('role_super_admin') || userData.username === 'superadmin';
     if (isSuperAdmin) {
       setCurrentModule(Role.SUPER_ADMIN);
     } else {
@@ -494,6 +553,7 @@ const App: React.FC = () => {
   const handleLogout = () => {
     localStorage.removeItem('hospital_session');
     auth.signOut();
+    setInspectingTenant(null);
     setUser(null);
     setCurrentModule(null);
   };
@@ -541,6 +601,8 @@ const App: React.FC = () => {
           setPaymentRequests={setPaymentRequests}
           activeMenu={activeConsultationTab}
           setActiveMenu={setActiveConsultationTab}
+          onBackToDashboard={() => setCurrentModule('DASHBOARD')}
+          theme={theme}
         />;
       case Role.NURSE: 
         return (
@@ -637,6 +699,7 @@ const App: React.FC = () => {
             onBackToDashboard={() => setCurrentModule('DASHBOARD')}
             activeTab={activeAccountingTab}
             setActiveTab={setActiveAccountingTab}
+            theme={theme}
           />
         ); 
       case Role.URGENCE:
@@ -650,6 +713,7 @@ const App: React.FC = () => {
             activeMenu={activeEmergencyTab}
             setActiveMenu={setActiveEmergencyTab}
             onBackToDashboard={() => setCurrentModule('DASHBOARD')}
+            theme={theme}
           />
         );
       case 'IMAGERIE':
@@ -687,17 +751,21 @@ const App: React.FC = () => {
     );
   }
 
-  if (currentModule === Role.SUPER_ADMIN) {
-    const isRealSuperAdmin = user.role === Role.SUPER_ADMIN || user.roles?.includes('role_super_admin') || user.username === 'superadmin';
+  if ((currentModule === Role.SUPER_ADMIN || isUserSuperAdmin(user)) && !inspectingTenant) {
+    const isRealSuperAdmin = isUserSuperAdmin(user);
     if (!isRealSuperAdmin) {
       setCurrentModule('DASHBOARD');
       return null;
     }
     return (
-      <div className="min-h-screen bg-slate-950">
+      <div className="min-h-screen bg-[#070910]">
         <ControlCenter 
           currentUser={user} 
-          onBackToDashboard={handleLogout} 
+          onBackToDashboard={handleLogout}
+          onInspectTenant={(clinic) => {
+            setInspectingTenant({ id: clinic.id, name: clinic.name });
+            setCurrentModule('DASHBOARD');
+          }}
         />
       </div>
     );
@@ -733,7 +801,28 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className={`min-h-screen flex transition-colors duration-300 ${theme === 'dark' ? 'bg-[#000000] text-zinc-200' : 'bg-[#F0F5F9] text-slate-900'}`}>
+    <div className={`min-h-screen flex transition-colors duration-300 ${theme === 'dark' ? 'bg-[#050508] text-zinc-100' : 'bg-[#F1F5F9] text-slate-900'}`}>
+      {inspectingTenant && isUserSuperAdmin(user) && (
+        <div className="fixed top-0 left-0 right-0 z-[100] bg-gradient-to-r from-purple-900/95 via-rose-900/95 to-slate-900/95 backdrop-blur-md border-b border-white/15 text-white text-xs font-bold px-4 py-2 flex items-center justify-between shadow-xl">
+          <div className="flex items-center gap-2.5">
+            <span className="px-2 py-0.5 rounded-md bg-rose-500/30 border border-rose-400/40 text-[10px] font-black uppercase tracking-wider text-rose-200">
+              Mode Inspection Super Admin
+            </span>
+            <span className="text-zinc-200">
+              Établissement inspecté : <strong className="text-white">{inspectingTenant.name}</strong> <span className="text-zinc-400 font-mono text-[10px]">({inspectingTenant.id})</span>
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              setInspectingTenant(null);
+              setCurrentModule(Role.SUPER_ADMIN);
+            }}
+            className="px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 border border-white/20 text-white font-extrabold text-[11px] transition-all cursor-pointer"
+          >
+            ← Retour au Control Center
+          </button>
+        </div>
+      )}
       {isLicenseExpired && isLocalAdmin && (
         <div className="fixed top-0 left-0 right-0 z-50 bg-rose-600 text-white text-xs font-bold px-4 py-2 flex items-center justify-between shadow-lg">
           <div className="flex items-center gap-2">
@@ -785,7 +874,7 @@ const App: React.FC = () => {
         />
       )}
       
-      <main className={`flex-1 min-h-screen relative transition-all duration-500 ${currentModule !== 'DASHBOARD' ? (isSidebarExpanded || isSidebarLocked ? 'md:pl-[320px]' : 'md:pl-[136px]') : 'pl-0'}`}>
+      <main className={`flex-1 min-h-screen relative transition-all duration-300 ${currentModule !== 'DASHBOARD' ? (isSidebarExpanded || isSidebarLocked ? 'md:pl-[308px]' : 'md:pl-[112px]') : 'pl-0'}`}>
         {!isSidebarOpen && currentModule !== 'DASHBOARD' && (
           <button 
             onClick={() => setIsSidebarOpen(true)}
@@ -796,7 +885,9 @@ const App: React.FC = () => {
         )}
         <div className="max-w-[1600px] mx-auto">
           {/* renderModule handles its own header for Dashboard */}
-          {renderModule()}
+          <Suspense fallback={<ModuleLoadingFallback theme={theme} />}>
+            {renderModule()}
+          </Suspense>
         </div>
         
         {/* Notifications persistantes contextuelles */}

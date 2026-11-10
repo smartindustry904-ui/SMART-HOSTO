@@ -201,7 +201,7 @@ const Lab: React.FC<LabProps> = ({
   }, [resultats]);
 
   return (
-    <div className={`p-3 sm:p-5 h-screen flex flex-col overflow-hidden ${theme === 'dark' ? 'bg-[#020617] text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`p-3 sm:p-5 h-screen flex flex-col overflow-hidden font-sans ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       <MicroHeader
         icon={Beaker}
         breadcrumbs={[
@@ -230,9 +230,11 @@ const Lab: React.FC<LabProps> = ({
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as any)}
-                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-all cursor-pointer ${
                   activeTab === tab.id
                     ? 'bg-blue-600 text-white shadow-xs'
+                    : theme === 'dark'
+                    ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                     : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
                 }`}
               >

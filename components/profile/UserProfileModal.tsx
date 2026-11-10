@@ -19,14 +19,15 @@ import {
   RefreshCw,
   AlertCircle,
   FileText,
-  DollarSign
+  DollarSign,
+  MessageSquare
 } from 'lucide-react';
 import { User } from '../../types';
 import { ImageUpload } from '../common/ImageUpload';
 import { Avatar } from '../common/Avatar';
-import { sanitizeData } from '../../src/firebase';
-import { doc, updateDoc } from 'firebase/firestore';
-import { db } from '../../src/firebase';
+import WhatsAppAgentSettings from '../../pages/settings/WhatsAppAgentSettings';
+import { sanitizeData, db } from '../../src/firebase';
+import { doc, updateDoc, collection, getDocs, getDocsFromCache } from 'firebase/firestore';
 
 interface UserProfileModalProps {
   user: User;
@@ -43,7 +44,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onUserUpdated,
   theme = 'light'
 }) => {
-  const [activeTab, setActiveTab] = useState<'INFO' | 'FINANCE'>('INFO');
+  const [activeTab, setActiveTab] = useState<'INFO' | 'FINANCE' | 'WHATSAPP'>('INFO');
   
   // Basic info form state
   const [name, setName] = useState(user.name || '');
@@ -108,41 +109,210 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     }
   }, [isOpen, user]);
 
-  // Fetch performance and financials
+  // Helper to read collection cache-first (0ms delay if cached in IndexedDB)
+  const getCollectionCacheFirst = async (colName: string) => {
+    const colRef = collection(db, colName);
+    try {
+      const cached = await getDocsFromCache(colRef);
+      if (!cached.empty) {
+        // Trigger background refresh without blocking
+        getDocs(colRef).catch(() => {});
+        return cached;
+      }
+    } catch {}
+    return await getDocs(colRef);
+  };
+
+  // Fetch performance and financials (Offline-First directly from client Firestore cache + DB, ONLY clotured/completed acts)
   const fetchPerformance = async () => {
     if (!user?.id) return;
     setIsLoadingPerformance(true);
     try {
-      const params = new URLSearchParams({
-        requester_id: user.id,
-        requester_role: user.role || 'MEDECIN',
-        startDate,
-        endDate,
-        type: typeFilter,
-        paymentStatus: paymentStatusFilter
-      });
+      const targetStaffId = String(user.id).trim();
+      const staffNameLower = String(user.name || '').toLowerCase().trim();
+      const staffEmailLower = String(user.email || '').toLowerCase().trim();
+      const staffRole = String(user.role || user.profession || '').toUpperCase();
 
-      const res = await fetch(`/api/staff/${user.id}/performance?${params.toString()}`, {
-        headers: {
-          'x-user-id': user.id,
-          'x-user-role': user.role || 'MEDECIN'
+      let defaultRate = Number((user as any).quotePartRate) || 0;
+      if (!defaultRate) {
+        if (staffRole.includes('MEDECIN') || staffRole.includes('DOCTOR') || staffRole.includes('CHIRURGIEN')) {
+          defaultRate = 20;
+        } else if (staffRole.includes('MATERNITE') || staffRole.includes('SAGE_FEMME') || staffRole.includes('MIDWIFE')) {
+          defaultRate = 15;
+        } else if (staffRole.includes('INFIRMIER') || staffRole.includes('NURSE') || staffRole.includes('SOIN')) {
+          defaultRate = 10;
+        } else if (staffRole.includes('LAB') || staffRole.includes('BIOLOGISTE') || staffRole.includes('TECHNICIEN')) {
+          defaultRate = 10;
+        } else {
+          defaultRate = 5;
         }
-      });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.message || 'Impossible de récupérer vos performances');
       }
 
-      const data = await res.json();
+      const acts: Array<any> = [];
+
+      // 1. Consultations (ONLY clotured/completed acts assigned to this practitioner)
+      try {
+        const cSnap = await getCollectionCacheFirst('consultations');
+        cSnap.forEach(d => {
+          const c = d.data();
+          const isClotured =
+            c.isClotured === true ||
+            c.status === 'cloture' ||
+            c.status === 'CLOTURE' ||
+            c.status === 'completed' ||
+            c.status === 'TERMINEE' ||
+            c.status === 'FAIT';
+          if (!isClotured) return;
+
+          const cDoctor = String(c.practitionerName || c.doctor || c.doctorName || '').toLowerCase().trim();
+          const cEmail = String(c.doctorEmail || '').toLowerCase().trim();
+          const cDocId = String(c.practitionerId || c.doctorId || '').trim();
+
+          if (
+            cDocId === targetStaffId ||
+            (staffNameLower && cDoctor && cDoctor === staffNameLower) ||
+            (staffEmailLower && cEmail && cEmail === staffEmailLower)
+          ) {
+            const fee = Number(c.fee || c.amount || c.cost || 15000);
+            const rate = Number(c.quotePartRate) || defaultRate;
+            const comm = Math.round((fee * rate) / 100);
+            const isPaid = c.paymentStatus === 'PAID' || c.paymentStatus === 'SOLDE';
+            acts.push({
+              id: d.id,
+              type: 'CONSULTATION',
+              typeLabel: c.specialty || c.type || 'Consultation Médicale',
+              date: c.cloturedAt || c.createdAt || c.date || new Date().toISOString(),
+              patientId: c.patientId || '',
+              patientName: c.patientName || c.patient || 'Patient',
+              description: c.diagnosis || c.motif || 'Consultation clinique clôturée',
+              amount: fee,
+              commissionRate: rate,
+              commissionAmount: comm,
+              paymentStatus: isPaid ? 'PAID' : 'PENDING',
+              paymentDate: isPaid ? (c.paidAt || c.cloturedAt || c.date || c.createdAt) : undefined
+            });
+          }
+        });
+      } catch {}
+
+      // 2. Nursing Acts / Soins Infirmiers (ONLY completed/FAIT acts assigned to this practitioner)
+      try {
+        const naSnap = await getCollectionCacheFirst('nursing_acts');
+        naSnap.forEach(d => {
+          const na = d.data();
+          const isDone =
+            na.isClotured === true ||
+            na.status === 'FAIT' ||
+            na.status === 'cloture' ||
+            na.status === 'COMPLETED';
+          if (!isDone) return;
+
+          const naPracId = String(na.practitionerId || na.nurseId || na.executedById || '').trim();
+          const naPracName = String(na.practitionerName || na.executedBy || '').toLowerCase().trim();
+          if (
+            naPracId === targetStaffId ||
+            (staffNameLower && naPracName && naPracName === staffNameLower)
+          ) {
+            const fee = Number(na.price || na.amount || na.cost || 5000);
+            const rate = Number(na.quotePartRate) || defaultRate;
+            const comm = Math.round((fee * rate) / 100);
+            const isPaid = na.paymentStatus === 'PAID' || na.paymentStatus === 'SOLDE';
+            acts.push({
+              id: d.id,
+              type: 'SOIN',
+              typeLabel: na.actName || 'Soin Infirmier',
+              date: na.cloturedAt || na.executedAt || na.createdAt || new Date().toISOString(),
+              patientId: na.patientId || '',
+              patientName: na.patientName || 'Patient',
+              description: na.executionNote || na.actName || 'Acte de soin infirmier réalisé',
+              amount: fee,
+              commissionRate: rate,
+              commissionAmount: comm,
+              paymentStatus: isPaid ? 'PAID' : 'PENDING',
+              paymentDate: isPaid ? (na.paidAt || na.cloturedAt || na.executedAt) : undefined
+            });
+          }
+        });
+      } catch {}
+
+      // 3. Payment Requests (ONLY clotured/completed acts assigned to this practitioner)
+      try {
+        const prSnap = await getCollectionCacheFirst('payment_requests');
+        prSnap.forEach(d => {
+          const pr = d.data();
+          const isClotured =
+            pr.isClotured === true ||
+            pr.actStatus === 'cloture' ||
+            pr.actStatus === 'FAIT' ||
+            pr.actStatus === 'COMPLETED';
+          if (!isClotured) return;
+
+          const prDoc = String(pr.practitionerName || pr.doctor || pr.doctorName || '').toLowerCase().trim();
+          const prDocId = String(pr.practitionerId || pr.doctorId || '').trim();
+          if (prDocId === targetStaffId || (staffNameLower && prDoc && prDoc === staffNameLower)) {
+            const already = acts.some(
+              a =>
+                a.id === d.id ||
+                (a.patientName === pr.patientName &&
+                  a.date.slice(0, 10) === String(pr.cloturedAt || pr.createdAt || pr.date).slice(0, 10))
+            );
+            if (!already) {
+              const fee = Number(pr.totalAmount || pr.amount || 0);
+              const rate = Number(pr.quotePartRate) || defaultRate;
+              const comm = Math.round((fee * rate) / 100);
+              const isPaid = pr.status === 'PAID' || pr.paymentStatus === 'PAID';
+              let type: 'CONSULTATION' | 'SOIN' | 'ACCOUCHEMENT' | 'LABO' | 'AUTRE' = 'AUTRE';
+              const tStr = String(pr.type || pr.motif || '').toUpperCase();
+              if (tStr.includes('CONSULT')) type = 'CONSULTATION';
+              else if (tStr.includes('SOIN') || tStr.includes('PANSEMENT') || tStr.includes('INJECTION')) type = 'SOIN';
+              else if (tStr.includes('MATERN') || tStr.includes('ACCOUCH')) type = 'ACCOUCHEMENT';
+              else if (tStr.includes('LAB') || tStr.includes('EXAMEN') || tStr.includes('ANALYSE')) type = 'LABO';
+
+              acts.push({
+                id: d.id,
+                type,
+                typeLabel: pr.type || 'Acte Spécialisé / Prestation',
+                date: pr.cloturedAt || pr.createdAt || pr.date || new Date().toISOString(),
+                patientId: pr.patientId || '',
+                patientName: pr.patientName || 'Patient',
+                description: pr.description || pr.motif || 'Prestation médicale clôturée',
+                amount: fee,
+                commissionRate: rate,
+                commissionAmount: comm,
+                paymentStatus: isPaid ? 'PAID' : 'PENDING',
+                paymentDate: isPaid ? (pr.paidAt || pr.cloturedAt || pr.createdAt) : undefined
+              });
+            }
+          }
+        });
+      } catch {}
+
+      acts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      const filteredActs = acts.filter(act => {
+        const actDate = String(act.date || '').slice(0, 10);
+        if (startDate && actDate < startDate) return false;
+        if (endDate && actDate > endDate) return false;
+        if (typeFilter !== 'ALL' && act.type !== typeFilter) return false;
+        if (paymentStatusFilter !== 'ALL' && act.paymentStatus !== paymentStatusFilter) return false;
+        return true;
+      });
+
+      const totalConsultations = filteredActs.filter(a => a.type === 'CONSULTATION').length;
+      const totalActs = filteredActs.length;
+      const totalCommissionsEarned = filteredActs.reduce((sum, a) => sum + a.commissionAmount, 0);
+      const totalCommissionsPaid = filteredActs
+        .filter(a => a.paymentStatus === 'PAID')
+        .reduce((sum, a) => sum + a.commissionAmount, 0);
+
       setPerformanceData({
-        kpis: data.kpis || {
-          totalConsultations: 0,
-          totalActs: 0,
-          totalCommissionsEarned: 0,
-          totalCommissionsPaid: 0
+        kpis: {
+          totalConsultations,
+          totalActs,
+          totalCommissionsEarned,
+          totalCommissionsPaid
         },
-        acts: data.acts || []
+        acts: filteredActs
       });
     } catch (err: any) {
       console.warn('Error fetching personal performance:', err);
@@ -157,7 +327,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     }
   }, [isOpen, activeTab, startDate, endDate, typeFilter, paymentStatusFilter]);
 
-  // Update Profile
+  // Update Profile (0ms Optimistic UI + Offline-First Firestore sync)
   const handleSaveInfo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
@@ -179,22 +349,6 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         updatedAt: new Date().toISOString()
       };
 
-      // 1. Call API
-      const res = await fetch(`/api/staff/${user.id}/profile`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-id': user.id,
-          'x-user-role': user.role || 'MEDECIN'
-        },
-        body: JSON.stringify(updates)
-      });
-
-      if (!res.ok) {
-        // Fallback directly to Firestore
-        await updateDoc(doc(db, 'hospital_users', user.id), sanitizeData(updates));
-      }
-
       const updatedUser: User = {
         ...user,
         name: updates.name,
@@ -205,11 +359,23 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         profile_image_url: profilePhoto || undefined
       };
 
+      // Optimistically update local session and UI immediately (0ms delay)
       localStorage.setItem('hospital_session', JSON.stringify(updatedUser));
       onUserUpdated?.(updatedUser);
-
       setInfoMessage({ text: 'Profil mis à jour avec succès.', type: 'success' });
       setTimeout(() => setInfoMessage(null), 3500);
+
+      // Sync with client Firestore cache + server in background
+      updateDoc(doc(db, 'hospital_users', user.id), sanitizeData(updates)).catch(() => {});
+      fetch(`/api/staff/${user.id}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id,
+          'x-user-role': user.role || 'MEDECIN'
+        },
+        body: JSON.stringify(updates)
+      }).catch(() => {});
     } catch (err: any) {
       console.error('Error saving user profile:', err);
       setInfoMessage({ text: err?.message || 'Erreur lors de la mise à jour du profil.', type: 'error' });
@@ -334,6 +500,18 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           >
             <TrendingUp size={16} />
             <span>Mes Activités & Finances</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('WHATSAPP')}
+            className={`py-3.5 px-4 font-black text-xs uppercase tracking-wider flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === 'WHATSAPP'
+                ? 'border-emerald-600 text-emerald-600 dark:text-emerald-400'
+                : 'border-transparent text-slate-400 hover:text-slate-700 dark:hover:text-zinc-300'
+            }`}
+          >
+            <MessageSquare size={16} />
+            <span>Assistant WhatsApp IA</span>
           </button>
         </div>
 
@@ -796,6 +974,23 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* TAB 3: ASSISTANT WHATSAPP IA */}
+          {activeTab === 'WHATSAPP' && (
+            <div className="animate-in fade-in duration-200">
+              <WhatsAppAgentSettings
+                currentUser={user}
+                staffOnlyMode={true}
+                theme={theme}
+                onUserPhoneUpdated={(newPhone) => {
+                  setPhone(newPhone);
+                  if (onUserUpdated) {
+                    onUserUpdated({ ...user, phone: newPhone });
+                  }
+                }}
+              />
             </div>
           )}
         </div>

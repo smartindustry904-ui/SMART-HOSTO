@@ -460,39 +460,32 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      {/* 1. Header Banner & Security Notice */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-blue-950 p-8 md:p-10 rounded-[40px] text-white shadow-xl relative overflow-hidden">
-        <div className="absolute right-0 top-0 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="w-10 h-10 rounded-2xl bg-blue-600/30 border border-blue-400/30 flex items-center justify-center text-blue-400">
-                <History size={22} />
-              </div>
-              <span className="text-[10px] font-black uppercase tracking-[0.25em] text-blue-400 font-heading">
-                Accueil & Orientation • Parcours Antérieurs
-              </span>
+    <div className="space-y-4 animate-in fade-in duration-300">
+      {/* 1. Compact Header Banner & Security Notice */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-blue-950 p-4 sm:p-5 rounded-2xl text-white shadow-sm relative overflow-hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-blue-600/30 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0">
+              <History size={18} />
             </div>
-            <h1 className="text-3xl md:text-4xl font-extrabold font-heading tracking-tight italic">
-              Historique Médical & Visites Patient
-            </h1>
-            <p className="text-slate-300 text-sm font-medium mt-2 max-w-2xl">
-              Consultez l'historique complet des passages, consultations, séjours et prescriptions antérieures pour guider et orienter le patient efficacement.
-            </p>
+            <div>
+              <h1 className="text-base sm:text-lg font-extrabold tracking-tight leading-tight">
+                Historique Médical & Visites Patient
+              </h1>
+              <p className="text-slate-300 text-xs font-medium mt-0.5">
+                Consultez l'historique complet des passages, consultations et séjours antérieurs.
+              </p>
+            </div>
           </div>
 
           {/* Read-Only Confidentiality Badge */}
-          <div className="bg-slate-800/80 border border-blue-400/20 backdrop-blur-md px-5 py-4 rounded-3xl flex items-center gap-4 shrink-0 shadow-lg">
-            <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-              <Lock size={20} />
+          <div className="bg-slate-800/80 border border-blue-400/20 backdrop-blur-md px-3.5 py-2 rounded-xl flex items-center gap-2.5 shrink-0">
+            <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+              <Lock size={14} />
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-                <ShieldCheck size={12} /> Mode Lecture Seule (Confidentialité)
-              </p>
-              <p className="text-xs text-slate-300 font-medium">
-                Notes cliniques & résultats protégés par le secret médical
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                <ShieldCheck size={11} /> Lecture Seule (Secret Médical)
               </p>
             </div>
           </div>
@@ -500,44 +493,44 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
       </div>
 
       {/* 2. Patient Selector & Quick Context Header */}
-      <div className="bg-white p-6 md:p-8 rounded-[36px] border border-slate-200 shadow-sm">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
           {/* Patient Search & Dropdown Picker */}
-          <div className="lg:col-span-5 space-y-2">
-            <label className="text-[10px] font-black uppercase text-slate-400 tracking-wider block">
+          <div className="lg:col-span-5 space-y-1.5 relative">
+            <label className="text-xs font-bold text-slate-600 block">
               Dossier Patient Sélectionné
             </label>
             <div className="relative">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
               <input 
                 type="text"
                 value={patientSearchTerm}
                 onChange={(e) => setPatientSearchTerm(e.target.value)}
                 placeholder="Rechercher par nom, DME, téléphone..."
-                className="w-full pl-12 pr-10 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-medium outline-none focus:border-blue-500 focus:bg-white transition-all"
+                className="w-full pl-10 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-medium outline-none focus:border-blue-500 focus:bg-white transition-all"
               />
               {patientSearchTerm && (
                 <button 
                   onClick={() => setPatientSearchTerm('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
                 >
-                  <X size={16} />
+                  <X size={14} />
                 </button>
               )}
             </div>
 
             {/* Quick dropdown when typing search */}
             {patientSearchTerm && (
-              <div className="absolute z-30 mt-1 w-full max-w-md bg-white border border-slate-200 rounded-2xl shadow-2xl max-h-64 overflow-y-auto divide-y divide-slate-100 animate-in fade-in slide-in-from-top-2">
+              <div className="absolute z-30 mt-1 w-full max-w-md bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100 animate-in fade-in">
                 <button
                   onClick={() => {
                     setSelectedPatientId('ALL');
                     setPatientSearchTerm('');
                   }}
-                  className={`w-full p-3 text-left hover:bg-slate-50 text-xs font-black uppercase tracking-wider flex items-center justify-between ${selectedPatientId === 'ALL' ? 'bg-blue-50 text-blue-700' : 'text-slate-700'}`}
+                  className={`w-full p-2.5 text-left hover:bg-slate-50 text-xs font-bold flex items-center justify-between cursor-pointer ${selectedPatientId === 'ALL' ? 'bg-blue-50 text-blue-700' : 'text-slate-700'}`}
                 >
                   <span>Tous les patients (Historique Global)</span>
-                  {selectedPatientId === 'ALL' && <CheckCircle2 size={16} />}
+                  {selectedPatientId === 'ALL' && <CheckCircle2 size={14} />}
                 </button>
                 {filteredPatientsForDropdown.map((p, pIdx) => (
                   <button
@@ -546,13 +539,13 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
                       setSelectedPatientId(p.id);
                       setPatientSearchTerm('');
                     }}
-                    className={`w-full p-3 text-left hover:bg-slate-50 flex items-center justify-between ${selectedPatientId === p.id ? 'bg-blue-50' : ''}`}
+                    className={`w-full p-2.5 text-left hover:bg-slate-50 flex items-center justify-between cursor-pointer ${selectedPatientId === p.id ? 'bg-blue-50' : ''}`}
                   >
                     <div>
-                      <p className="font-extrabold text-slate-900 text-sm">{p.lastName} {p.firstName}</p>
-                      <p className="text-[10px] text-slate-400 font-mono font-bold">{p.id} • {p.phone || 'Pas de tél'}</p>
+                      <p className="font-bold text-slate-900 text-xs sm:text-sm">{p.lastName} {p.firstName}</p>
+                      <p className="text-[11px] text-slate-400 font-mono font-medium">{p.id} • {p.phone || 'Pas de tél'}</p>
                     </div>
-                    <ChevronRight size={16} className="text-slate-300" />
+                    <ChevronRight size={14} className="text-slate-300" />
                   </button>
                 ))}
               </div>
@@ -562,52 +555,52 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
           {/* Active Patient Summary Info */}
           <div className="lg:col-span-7">
             {currentActivePatient ? (
-              <div className="bg-blue-50/70 border border-blue-100 rounded-3xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-black text-xl shadow-md">
+              <div className="bg-blue-50/70 border border-blue-200/80 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-base shadow-xs shrink-0">
                     {currentActivePatient.lastName?.charAt(0) || 'P'}
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="font-extrabold text-lg text-slate-900">{currentActivePatient.lastName} {currentActivePatient.firstName}</h3>
-                      <span className="bg-blue-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full font-mono">
+                      <h3 className="font-extrabold text-sm sm:text-base text-slate-900">{currentActivePatient.lastName} {currentActivePatient.firstName}</h3>
+                      <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-md font-mono">
                         {currentActivePatient.id}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-600 font-semibold mt-0.5">
+                    <p className="text-xs text-slate-600 font-medium mt-0.5">
                       {currentActivePatient.gender === 'F' ? 'Féminin' : 'Masculin'} • Né(e) le {currentActivePatient.birthDate || 'N/A'} • Tél: {currentActivePatient.phone || 'Non renseigné'}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => setSelectedPatientId('ALL')}
-                    className="px-3.5 py-2 text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-xl text-xs font-bold transition-all shadow-sm"
+                    className="px-3 py-1.5 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-lg text-xs font-bold transition-all cursor-pointer"
                   >
                     Voir Tous
                   </button>
                   {onSelectPatientForAdmission && (
                     <button
                       onClick={() => onSelectPatientForAdmission(currentActivePatient)}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold shadow-md hover:shadow-blue-500/20 transition-all flex items-center gap-1.5"
+                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
                     >
                       <span>Nouvelle Orientation</span>
-                      <ArrowRight size={14} />
+                      <ArrowRight size={13} />
                     </button>
                   )}
                 </div>
               </div>
             ) : (
-              <div className="bg-slate-50 border border-slate-150 rounded-3xl p-5 flex items-center justify-between">
-                <div className="flex items-center gap-3 text-slate-600">
-                  <Layers size={22} className="text-blue-600" />
+              <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 flex items-center justify-between">
+                <div className="flex items-center gap-2.5 text-slate-600">
+                  <Layers size={18} className="text-blue-600 shrink-0" />
                   <div>
-                    <p className="font-bold text-sm text-slate-800">Vue globale des événements hospitaliers</p>
+                    <p className="font-bold text-xs sm:text-sm text-slate-800">Vue globale des événements hospitaliers</p>
                     <p className="text-xs text-slate-500 font-medium">Sélectionnez un patient spécifique pour isoler son parcours complet</p>
                   </div>
                 </div>
-                <span className="bg-slate-200 text-slate-700 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-wider">
+                <span className="bg-slate-200/80 text-slate-700 text-xs font-extrabold px-2.5 py-1 rounded-lg">
                   {filteredEvents.length} Entrées
                 </span>
               </div>
@@ -617,7 +610,7 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
       </div>
 
       {/* 3. Comprehensive Filter Bar */}
-      <div className="bg-white p-6 rounded-[36px] border border-slate-200 shadow-sm space-y-4">
+      <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
           <div className="flex items-center gap-2">
             <Filter size={18} className="text-blue-600" />

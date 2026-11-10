@@ -19,6 +19,21 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
+      },
+      build: {
+        target: 'esnext',
+        chunkSizeWarningLimit: 900,
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              'vendor-firebase': ['firebase/app', 'firebase/firestore', 'firebase/auth', 'firebase/storage'],
+              'vendor-icons': ['lucide-react'],
+              'vendor-charts': ['recharts'],
+              'vendor-pdf': ['jspdf', 'jspdf-autotable', 'html2canvas'],
+              'vendor-motion': ['motion']
+            }
+          }
+        }
       }
     };
 });

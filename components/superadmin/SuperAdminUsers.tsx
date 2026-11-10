@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 import { Role, User as UserType, Licence } from '../../types';
 import { ClinicTenant, SubscriptionInvoice } from '../../pages/ControlCenter';
-import { SAAS_PLANS, SaaSPlanId } from '../../src/config/plans';
+import { SAAS_PLANS, SaaSPlanId, calculateLicensePriceForUsers, recommendPlanForUserCount, buildClinicEntitlementMaps } from '../../src/config/plans';
 import { CANONICAL_MODULES, hasImplementedModule } from '../../src/config/modules';
 import { db, sanitizeData } from '../../src/firebase';
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, collection, onSnapshot } from 'firebase/firestore';
@@ -43,6 +43,7 @@ import { doc, setDoc, updateDoc, deleteDoc, addDoc, collection, onSnapshot } fro
 interface SuperAdminUsersProps {
   clinics: ClinicTenant[];
   hospitalUsers: UserType[];
+  plans?: Record<string, any>;
   currentUser: UserType | null;
   onRefreshData?: () => void;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
@@ -52,6 +53,7 @@ interface SuperAdminUsersProps {
 export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
   clinics,
   hospitalUsers,
+  plans: externalPlans,
   currentUser,
   showToast,
   onNavigateToServices
@@ -114,91 +116,28 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
     responsibleUser: '',
     adminUsername: '',
     adminPassword: generateAutoPassword(),
-    // License & Quota
-    licence_id: 'licence_basic',
+    // License & Per-User Quota
+    licence_id: 'licence_standard',
     plan: 'STANDARD' as SaaSPlanId,
+    maxUsers: 15,
+    invoiceStatus: 'PAID' as 'PAID' | 'PENDING',
     startDate: new Date().toISOString().split('T')[0],
     durationValue: 1,
     durationUnit: 'Années' as 'Mois' | 'Années',
     extraOptions: [] as string[]
   }));
 
-  // Catalog of Licenses & Quotas from Firestore licences collection
-  const [availableLicences, setAvailableLicences] = useState<Licence[]>([
-    {
-      id: 'licence_basic',
-      nom_licence: 'Basic',
-      max_users: 5,
-      monthlyPriceFCFA: 350000,
-      description: 'Pour cabinets et centres de proximité'
-    },
-    {
-      id: 'licence_pro',
-      nom_licence: 'Pro',
-      max_users: 25,
-      monthlyPriceFCFA: 950000,
-      description: 'Pour cliniques et polycliniques'
-    },
-    {
-      id: 'licence_enterprise',
-      nom_licence: 'Enterprise',
-      max_users: 100,
-      monthlyPriceFCFA: 2500000,
-      description: 'Pour grands hôpitaux et CHU'
+  // Dynamic Contractual Plans catalog from ControlCenter or SAAS_PLANS
+  const availablePlans = useMemo<Record<string, any>>(() => {
+    if (externalPlans && Object.keys(externalPlans).length > 0) {
+      return externalPlans;
     }
-  ]);
-
-  // Sync with Firestore licences collection
-  useEffect(() => {
-    const unsubLic = onSnapshot(collection(db, 'licences'), (snapshot) => {
-      if (!snapshot.empty) {
-        const licList: Licence[] = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        setAvailableLicences(licList);
-      }
-    }, (err) => {
-      console.warn('Note: licences snapshot in SuperAdminUsers:', err);
-    });
-    return () => unsubLic();
-  }, []);
-
-  // Dynamic Contractual Plans catalog from Firestore saas_plans
-  const [availablePlans, setAvailablePlans] = useState<Record<string, {
-    id: string;
-    label: string;
-    description?: string;
-    monthlyPriceFCFA: number;
-    includedServiceIds: string[];
-    badgeColor?: string;
-    status?: string;
-  }>>(() => {
     const initial: Record<string, any> = {};
     Object.keys(SAAS_PLANS).forEach(k => {
       initial[k] = SAAS_PLANS[k as SaaSPlanId];
     });
     return initial;
-  });
-
-  // Sync with Firestore saas_plans collection
-  useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'saas_plans'), (snapshot) => {
-      const dbPlans: Record<string, any> = {};
-      snapshot.forEach(doc => {
-        const data = doc.data();
-        if (data && data.id) {
-          dbPlans[data.id] = data;
-        }
-      });
-      if (Object.keys(dbPlans).length > 0) {
-        setAvailablePlans(prev => ({
-          ...prev,
-          ...dbPlans
-        }));
-      }
-    }, (err) => {
-      console.warn('Note: saas_plans snapshot in SuperAdminUsers:', err);
-    });
-    return () => unsub();
-  }, []);
+  }, [externalPlans]);
 
   // Computed total duration in months
   const totalMonths = useMemo(() => {
@@ -215,15 +154,23 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
     return end.toISOString().split('T')[0];
   }, [structureForm.startDate, totalMonths]);
 
-  // Selected Plan definition from database or catalog
+  // Selected Plan definition & Per-User Pricing Calculation
   const selectedPlanConfig = useMemo(() => {
     const p = availablePlans[structureForm.plan] || SAAS_PLANS[structureForm.plan as SaaSPlanId] || SAAS_PLANS.STANDARD;
+    const pricing = calculateLicensePriceForUsers(p, structureForm.maxUsers, totalMonths);
     return {
       label: p.label || 'Standard',
-      monthlyPriceFCFA: p.monthlyPriceFCFA || 950000,
+      max_users: p.max_users || 15,
+      pricePerExtraUserFCFA: p.pricePerExtraUserFCFA ?? 8500,
+      monthlyPriceFCFA: pricing.monthlyTotal,
+      basePriceFCFA: pricing.basePrice,
+      extraUsers: pricing.extraUsers,
+      extraUsersCostFCFA: pricing.extraUsersMonthlyCost,
+      periodTotalFCFA: pricing.periodTotal,
+      costPerUserMonthly: pricing.costPerUserMonthly,
       includedServiceIds: p.includedServiceIds || ['SRV-ACCUEIL', 'SRV-CONSULTATION', 'SRV-CAISSE']
     };
-  }, [availablePlans, structureForm.plan]);
+  }, [availablePlans, structureForm.plan, structureForm.maxUsers, totalMonths]);
 
   // Unified Accounts List (Super Admins + Hospital Users / Structures)
   const unifiedAccounts = useMemo(() => {
@@ -270,20 +217,32 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
 
     // 2. Hospital Client Structures
     clinics.forEach(c => {
+      const linkedAdmin = hospitalUsers.find(
+        u => (u as any).clinicId === c.id || (u as any).hospital_id === c.id || u.id === `usr_${c.id}_admin`
+      );
+      const loginUsername = linkedAdmin?.username || c.responsibleUser || `admin_${c.id.substring(0, 8)}`;
+      const activeUsersCount = c.usage?.activeUsers || 1;
+      const maxUsersQuota = c.quotas?.maxUsers || 15;
+
       list.push({
         id: c.id,
         name: c.name,
-        username: c.responsibleUser || `admin_${c.id.substring(0, 8)}`,
-        email: c.email || 'N/A',
+        username: loginUsername,
+        responsibleName: c.responsibleUser || linkedAdmin?.name || 'Responsable non défini',
+        email: c.email || linkedAdmin?.email || 'N/A',
         phone: c.phone || 'N/A',
         accountType: 'STRUCTURE',
         roleLabel: 'Administrateur d\'Établissement',
         structureName: `${c.name} (${c.structureType || 'Clinique'})`,
         createdAt: c.createdAt || 'N/A',
         status: c.status || 'ACTIVE',
-        licenseInfo: `Formule ${c.licenseType}`,
+        activeUsersCount,
+        maxUsersQuota,
+        monthlyPrice: c.licensePrice || 150000,
+        licenseInfo: `Formule ${c.licenseType} (${activeUsersCount}/${maxUsersQuota} util.)`,
         licenseExpiry: c.licenseEnd || 'Non spécifiée',
-        originalClinic: c
+        originalClinic: c,
+        linkedAdminUser: linkedAdmin || null
       });
     });
 
@@ -293,20 +252,14 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
   // Filtered Accounts
   const filteredAccounts = useMemo(() => {
     return unifiedAccounts.filter(acc => {
-      // Category filter
       if (activeCategory === 'SUPER_ADMINS' && acc.accountType !== 'SUPER_ADMIN') return false;
       if (activeCategory === 'HOSPITAL_STRUCTURES' && acc.accountType !== 'STRUCTURE') return false;
-
-      // Status filter
       if (filterStatus !== 'ALL' && acc.status !== filterStatus) return false;
-
-      // Plan filter (for structures)
       if (filterPlan !== 'ALL' && acc.accountType === 'STRUCTURE') {
         const clinicPlan = acc.originalClinic?.licenseType;
         if (clinicPlan !== filterPlan) return false;
       }
 
-      // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const matches = 
@@ -322,7 +275,7 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
     });
   }, [unifiedAccounts, activeCategory, filterStatus, filterPlan, searchQuery]);
 
-  // Handler: Toggle Account Status (Suspend / Reactivate)
+  // Handler: Toggle Account Status (Suspend / Reactivate) synced across all collections
   const handleToggleStatus = async (account: any) => {
     if (account.username === 'superadmin' || account.isMaster) {
       showToast('Impossible de suspendre le Super Administrateur racine', 'info');
@@ -332,20 +285,35 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
     const newStatus = account.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
     try {
       if (account.accountType === 'SUPER_ADMIN') {
-        // Update in hospital_users
         await updateDoc(doc(db, 'hospital_users', account.id), sanitizeData({
           status: newStatus,
           updatedAt: new Date().toISOString()
         }));
+        await setDoc(doc(db, 'users', account.id), sanitizeData({
+          status: newStatus,
+          updatedAt: new Date().toISOString()
+        }), { merge: true });
       } else if (account.accountType === 'STRUCTURE') {
-        // Update in saas_clinics
         await updateDoc(doc(db, 'saas_clinics', account.id), sanitizeData({
           status: newStatus,
           updatedAt: new Date().toISOString()
         }));
+        await setDoc(doc(db, 'hospitals', account.id), sanitizeData({
+          id: account.id,
+          status: newStatus,
+          updatedAt: new Date().toISOString()
+        }), { merge: true });
+        const adminId = account.linkedAdminUser?.id || `usr_${account.id}_admin`;
+        await setDoc(doc(db, 'hospital_users', adminId), sanitizeData({
+          status: newStatus,
+          updatedAt: new Date().toISOString()
+        }), { merge: true });
+        await setDoc(doc(db, 'users', adminId), sanitizeData({
+          status: newStatus,
+          updatedAt: new Date().toISOString()
+        }), { merge: true });
       }
 
-      // Audit log
       await addDoc(collection(db, 'saas_logs'), sanitizeData({
         timestamp: new Date().toISOString(),
         user: currentUser?.username || 'superadmin',
@@ -358,6 +326,229 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
     } catch (err) {
       console.error('Error toggling account status:', err);
       showToast('Erreur lors de la modification du statut', 'error');
+    }
+  };
+
+  // Handler: Open Edit / Password Reset / License Extension Modal
+  const handleOpenEditAccount = (account: any) => {
+    const isSuper = account.accountType === 'SUPER_ADMIN';
+    const currentPlanId = account.originalClinic?.licenseType || 'STANDARD';
+    const currentMaxUsers = account.originalClinic?.quotas?.maxUsers || availablePlans[currentPlanId]?.max_users || 15;
+    const calcPrice = calculateLicensePriceForUsers(availablePlans[currentPlanId], currentMaxUsers, 1).monthlyTotal;
+
+    setEditingAccount({
+      ...account,
+      editName: account.name || '',
+      editUsername: account.username || '',
+      editEmail: account.email !== 'N/A' ? account.email : '',
+      editPhone: account.phone !== 'N/A' ? (account.phone || '') : '',
+      editCity: account.originalClinic?.city || 'Dakar',
+      editResponsible: account.responsibleName || account.originalClinic?.responsibleUser || '',
+      editStatus: account.status || 'ACTIVE',
+      editPlan: currentPlanId,
+      editMaxUsers: currentMaxUsers,
+      editLicensePrice: account.originalClinic?.licensePrice || calcPrice,
+      editLicenseEnd: account.originalClinic?.licenseEnd || new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0],
+      newPassword: '',
+      forcePasswordChange: !isSuper
+    });
+  };
+
+  // Handler: Save Edited Account / Reset Password / Renew License (100% synced across DB & Services)
+  const handleSaveEditedAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAccount) return;
+
+    setIsSubmitting(true);
+    try {
+      const cleanNewPass = (editingAccount.newPassword || '').trim();
+      const cleanUsername = (editingAccount.editUsername || '').trim().toLowerCase();
+
+      if (editingAccount.accountType === 'SUPER_ADMIN') {
+        const updates: any = {
+          name: (editingAccount.editName || '').trim() || cleanUsername,
+          username: cleanUsername,
+          email: (editingAccount.editEmail || '').trim().toLowerCase(),
+          status: editingAccount.editStatus || 'ACTIVE',
+          updatedAt: new Date().toISOString()
+        };
+        if (cleanNewPass) {
+          updates.password = cleanNewPass;
+        }
+
+        await setDoc(doc(db, 'hospital_users', editingAccount.id), sanitizeData(updates), { merge: true });
+        await setDoc(doc(db, 'users', editingAccount.id), sanitizeData(updates), { merge: true });
+
+        await addDoc(collection(db, 'saas_logs'), sanitizeData({
+          timestamp: new Date().toISOString(),
+          user: currentUser?.username || 'superadmin',
+          action: cleanNewPass ? 'SUPER_ADMIN_PASSWORD_RESET' : 'SUPER_ADMIN_UPDATE',
+          details: `Compte Super Admin @${cleanUsername} mis à jour${cleanNewPass ? ' (mot de passe réinitialisé)' : ''}`,
+          category: 'SECURITY'
+        }));
+
+        if (cleanNewPass) {
+          setCreatedCredentials({
+            type: 'SUPER_ADMIN',
+            title: 'Identifiants Super Admin Mis à Jour',
+            name: updates.name,
+            username: cleanUsername,
+            password: cleanNewPass,
+            email: updates.email
+          });
+        }
+
+        showToast(`Compte Super Admin "${updates.name}" mis à jour avec succès`, 'success');
+      } else {
+        // Structure & Linked Admin update + Module & Quota sync
+        const clinic = editingAccount.originalClinic;
+        const nextPlanId = (editingAccount.editPlan || clinic.licenseType || 'STANDARD').toUpperCase();
+        const planDef = availablePlans[nextPlanId] || SAAS_PLANS[nextPlanId as SaaSPlanId] || SAAS_PLANS.STANDARD;
+        const maxUsersNum = Math.max(1, Number(editingAccount.editMaxUsers) || planDef.max_users || 15);
+        const computedPrice = Number(editingAccount.editLicensePrice) || calculateLicensePriceForUsers(planDef, maxUsersNum, 1).monthlyTotal;
+        const licenceId = `licence_${nextPlanId.toLowerCase()}`;
+
+        const { servicesConfig, activatedModules } = buildClinicEntitlementMaps(
+          nextPlanId,
+          clinic.servicesConfig || {},
+          availablePlans
+        );
+
+        const clinicUpdates: any = {
+          name: (editingAccount.editName || '').trim() || clinic.name,
+          city: (editingAccount.editCity || '').trim() || clinic.city,
+          phone: (editingAccount.editPhone || '').trim() || clinic.phone,
+          email: (editingAccount.editEmail || '').trim().toLowerCase() || clinic.email,
+          responsibleUser: (editingAccount.editResponsible || '').trim() || clinic.responsibleUser,
+          status: editingAccount.editStatus || 'ACTIVE',
+          licenseType: nextPlanId,
+          nom_licence: planDef.nom_licence || planDef.label || nextPlanId,
+          licence_id: licenceId,
+          licenceId: licenceId,
+          licensePrice: computedPrice,
+          licenseEnd: editingAccount.editLicenseEnd || clinic.licenseEnd,
+          quotas: {
+            ...(clinic.quotas || {}),
+            maxUsers: maxUsersNum
+          },
+          servicesConfig,
+          activatedModules,
+          updatedAt: new Date().toISOString()
+        };
+
+        await updateDoc(doc(db, 'saas_clinics', editingAccount.id), sanitizeData(clinicUpdates));
+        await setDoc(doc(db, 'hospitals', editingAccount.id), sanitizeData({
+          id: editingAccount.id,
+          name: clinicUpdates.name,
+          licence_id: licenceId,
+          licenceId: licenceId,
+          nom_licence: clinicUpdates.nom_licence,
+          licenseType: nextPlanId,
+          licensePrice: computedPrice,
+          max_users: maxUsersNum,
+          city: clinicUpdates.city,
+          phone: clinicUpdates.phone,
+          email: clinicUpdates.email,
+          responsibleUser: clinicUpdates.responsibleUser,
+          status: clinicUpdates.status,
+          updatedAt: new Date().toISOString()
+        }), { merge: true });
+
+        // Update or create linked local Admin account
+        const adminId = editingAccount.linkedAdminUser?.id || `usr_${editingAccount.id}_admin`;
+        const adminUpdates: any = {
+          id: adminId,
+          username: cleanUsername,
+          name: clinicUpdates.responsibleUser,
+          email: clinicUpdates.email,
+          role: Role.ADMIN,
+          roles: ['role_admin'],
+          status: clinicUpdates.status === 'ACTIVE' ? 'ACTIVE' : 'SUSPENDED',
+          clinicId: editingAccount.id,
+          hospital_id: editingAccount.id,
+          structureName: clinicUpdates.name,
+          isMainAdmin: true,
+          updatedAt: new Date().toISOString()
+        };
+
+        if (cleanNewPass) {
+          adminUpdates.password = cleanNewPass;
+          adminUpdates.forcePasswordChange = Boolean(editingAccount.forcePasswordChange);
+        }
+
+        await setDoc(doc(db, 'hospital_users', adminId), sanitizeData(adminUpdates), { merge: true });
+        await setDoc(doc(db, 'users', adminId), sanitizeData(adminUpdates), { merge: true });
+
+        await addDoc(collection(db, 'saas_logs'), sanitizeData({
+          timestamp: new Date().toISOString(),
+          user: currentUser?.username || 'superadmin',
+          action: cleanNewPass ? 'STRUCTURE_ADMIN_PASSWORD_RESET' : 'STRUCTURE_UPDATE',
+          details: `Structure "${clinicUpdates.name}" synchronisée (Formule: ${nextPlanId}, Quota: ${maxUsersNum} util., Tarif: ${computedPrice.toLocaleString('fr-FR')} FCFA/m, Exp: ${clinicUpdates.licenseEnd})${cleanNewPass ? ' + Mot de passe réinitialisé' : ''}`,
+          category: 'LICENSE',
+          clinicId: editingAccount.id,
+          clinicName: clinicUpdates.name
+        }));
+
+        if (cleanNewPass) {
+          setCreatedCredentials({
+            type: 'STRUCTURE',
+            title: `Nouveaux Identifiants (${clinicUpdates.name})`,
+            name: clinicUpdates.responsibleUser,
+            username: cleanUsername,
+            password: cleanNewPass,
+            email: clinicUpdates.email
+          });
+        }
+
+        showToast(`Structure "${clinicUpdates.name}", ses modules et son quota (${maxUsersNum} util.) synchronisés !`, 'success');
+      }
+
+      setEditingAccount(null);
+    } catch (err) {
+      console.error('Error updating account:', err);
+      showToast('Erreur lors de la mise à jour du compte', 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handler: Delete Account / Test Structure
+  const handleDeleteAccount = async (account: any) => {
+    if (account.isMaster || account.id === 'super_admin_id' || account.id === 'sa1_superadmin' || account.username === 'superadmin') {
+      showToast('Impossible de supprimer un compte Super Administrateur racine.', 'info');
+      return;
+    }
+
+    const confirmMsg = account.accountType === 'STRUCTURE'
+      ? `Voulez-vous vraiment supprimer la structure "${account.name}" et son compte administrateur (@${account.username}) ?`
+      : `Voulez-vous vraiment supprimer le Super Administrateur "${account.name}" (@${account.username}) ?`;
+
+    if (!window.confirm(confirmMsg)) return;
+
+    try {
+      if (account.accountType === 'SUPER_ADMIN') {
+        await deleteDoc(doc(db, 'hospital_users', account.id));
+        await deleteDoc(doc(db, 'users', account.id)).catch(() => {});
+      } else {
+        await deleteDoc(doc(db, 'saas_clinics', account.id));
+        await deleteDoc(doc(db, 'hospitals', account.id)).catch(() => {});
+        const adminId = account.linkedAdminUser?.id || `usr_${account.id}_admin`;
+        await deleteDoc(doc(db, 'hospital_users', adminId)).catch(() => {});
+        await deleteDoc(doc(db, 'users', adminId)).catch(() => {});
+      }
+
+      await addDoc(collection(db, 'saas_logs'), sanitizeData({
+        timestamp: new Date().toISOString(),
+        user: currentUser?.username || 'superadmin',
+        action: 'ACCOUNT_DELETION',
+        details: `Suppression de ${account.name} (@${account.username}, ID: ${account.id})`,
+        category: 'SECURITY'
+      }));
+
+      showToast(`Compte "${account.name}" supprimé avec succès.`, 'info');
+    } catch (err) {
+      console.error('Error deleting account:', err);
+      showToast('Erreur lors de la suppression', 'error');
     }
   };
 
@@ -391,6 +582,7 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
       };
 
       await setDoc(doc(db, 'hospital_users', newUserId), sanitizeData(newUser));
+      await setDoc(doc(db, 'users', newUserId), sanitizeData(newUser));
 
       // Audit Log
       await addDoc(collection(db, 'saas_logs'), sanitizeData({
@@ -452,27 +644,19 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
       const finalPhone = structureForm.phone.trim() || '+221 33 000 00 00';
       const finalAddress = structureForm.address.trim() || 'Adresse principale';
 
-      // 2. Fetch Selected Plan configuration (from DB availablePlans or default SAAS_PLANS)
+      // 2. Fetch Selected Plan configuration & Per-User Pricing
       const selectedPlan = availablePlans[structureForm.plan] || SAAS_PLANS[structureForm.plan as SaaSPlanId] || SAAS_PLANS.STANDARD;
-      const planMonthlyPrice = selectedPlan.monthlyPriceFCFA || 950000;
-      const planIncludedServices = selectedPlan.includedServiceIds || ['SRV-ACCUEIL', 'SRV-CONSULTATION', 'SRV-CAISSE'];
+      const selectedMaxUsers = Math.max(1, Number(structureForm.maxUsers) || selectedPlan.max_users || 15);
+      const pricing = calculateLicensePriceForUsers(selectedPlan, selectedMaxUsers, totalMonths);
+      const planMonthlyPrice = pricing.monthlyTotal;
+      const selectedLicenceId = `licence_${String(structureForm.plan).toLowerCase()}`;
 
       // Build Entitlements & Activated Modules from Catalog
-      const servicesConfig: Record<string, any> = {};
-      const activatedModulesMap: Record<string, boolean> = {};
-
-      // Mark all plan-included services as authorized & active
-      planIncludedServices.forEach(srvId => {
-        if (hasImplementedModule(srvId)) {
-          servicesConfig[srvId] = {
-            isAuthorized: true,
-            isCustomGranted: false,
-            status: 'active',
-            is_active: true
-          };
-          activatedModulesMap[srvId] = true;
-        }
-      });
+      const { servicesConfig, activatedModules: activatedModulesMap } = buildClinicEntitlementMaps(
+        structureForm.plan,
+        {},
+        availablePlans
+      );
 
       // Add extra options if selected
       structureForm.extraOptions.forEach(optId => {
@@ -486,13 +670,6 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
           activatedModulesMap[optId] = true;
         }
       });
-
-      // Fetch Selected Licence and Quota Limit
-      const selectedLicence = availableLicences.find(l => l.id === structureForm.licence_id) || 
-        availableLicences.find(l => l.nom_licence.toUpperCase() === String(structureForm.plan).toUpperCase()) || 
-        availableLicences[0];
-      const selectedMaxUsers = selectedLicence?.max_users || (structureForm.plan === 'ENTERPRISE' ? 100 : structureForm.plan === 'PREMIUM' ? 50 : 5);
-      const selectedLicenceId = selectedLicence?.id || structureForm.licence_id || 'licence_basic';
 
       // 3. Create Structure Tenant in saas_clinics & hospitals table
       const newClinic: ClinicTenant = {
@@ -508,7 +685,7 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
         status: 'ACTIVE',
         licence_id: selectedLicenceId,
         licenceId: selectedLicenceId,
-        nom_licence: selectedLicence?.nom_licence || structureForm.plan,
+        nom_licence: selectedPlan.nom_licence || selectedPlan.label || structureForm.plan,
         licenseType: structureForm.plan,
         licenseStart: structureForm.startDate,
         licenseEnd: computedExpirationDate,
@@ -532,7 +709,7 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
           monthlyHospitalizations: 0,
           monthlyPrescriptions: 0,
           totalExams: 0,
-          dailyConnections: 0
+          dailyConnections: 1
         },
         activatedModules: activatedModulesMap,
         activatedTools: {
@@ -541,20 +718,21 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
         }
       };
 
-      // Add servicesConfig to clinic document
       const clinicPayload = {
         ...newClinic,
         servicesConfig
       };
       await setDoc(doc(db, 'saas_clinics', clinicId), sanitizeData(clinicPayload));
 
-      // Update Hospital table with foreign key: licence_id
+      // Update Hospital table with foreign key: licence_id & max_users
       await setDoc(doc(db, 'hospitals', clinicId), sanitizeData({
         id: clinicId,
         name: finalStructureName,
         licence_id: selectedLicenceId,
         licenceId: selectedLicenceId,
-        nom_licence: selectedLicence?.nom_licence || structureForm.plan,
+        nom_licence: selectedPlan.nom_licence || selectedPlan.label || structureForm.plan,
+        licenseType: structureForm.plan,
+        licensePrice: planMonthlyPrice,
         max_users: selectedMaxUsers,
         address: finalAddress,
         city: finalCity,
@@ -567,7 +745,7 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
         updatedAt: new Date().toISOString()
       }));
 
-      // 4. Create Initial Hospital Admin User in hospital_users
+      // 4. Create Initial Hospital Admin User in hospital_users & users
       const newAdminUser: UserType = {
         id: adminUserId,
         username: cleanAdminUsername,
@@ -603,21 +781,23 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
         forcePasswordChange: true
       }));
 
-      // 5. Generate Initial Subscription Invoice in saas_invoices
+      // 5. Generate Initial Subscription Invoice in saas_invoices with matching doc ID
+      const invoiceId = `INV-${Date.now().toString().slice(-6)}`;
       const initialInvoice: SubscriptionInvoice = {
-        id: `INV-${Date.now().toString().slice(-6)}`,
+        id: invoiceId,
         clinicId,
         clinicName: finalStructureName,
         plan: structureForm.plan,
-        amount: planMonthlyPrice * (totalMonths || 1),
+        userCount: selectedMaxUsers,
+        amount: pricing.periodTotal,
         currency: 'FCFA',
         dueDate: computedExpirationDate,
-        paidDate: new Date().toISOString().split('T')[0],
-        status: 'PAID',
+        paidDate: structureForm.invoiceStatus === 'PAID' ? new Date().toISOString().split('T')[0] : undefined,
+        status: structureForm.invoiceStatus || 'PAID',
         paymentMethod: 'Virement bancaire'
       };
 
-      await addDoc(collection(db, 'saas_invoices'), sanitizeData({
+      await setDoc(doc(db, 'saas_invoices', invoiceId), sanitizeData({
         ...initialInvoice,
         createdAt: new Date().toISOString()
       }));
@@ -627,7 +807,7 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
         timestamp: new Date().toISOString(),
         user: currentUser?.username || 'superadmin',
         action: 'STRUCTURE_ONBOARDING',
-        details: `Nouvel établissement provisionné : "${finalStructureName}" (ID: ${clinicId}) avec formule ${structureForm.plan}. Admin créé : [${cleanAdminUsername}]`,
+        details: `Nouvel établissement provisionné : "${finalStructureName}" (ID: ${clinicId}) — Formule ${structureForm.plan} (${selectedMaxUsers} utilisateurs • ${planMonthlyPrice.toLocaleString('fr-FR')} FCFA/mois). Admin créé : [@${cleanAdminUsername}]`,
         category: 'LICENSE',
         clinicId,
         clinicName: finalStructureName
@@ -643,7 +823,7 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
         email: finalEmail
       });
 
-      showToast(`Structure "${finalStructureName}" et son compte administrateur provisionnés avec succès !`, 'success');
+      showToast(`Structure "${finalStructureName}" (${selectedMaxUsers} util. max) et son compte admin provisionnés !`, 'success');
       setShowCreateModal(false);
       // Reset form
       setStructureForm({
@@ -658,7 +838,10 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
         responsibleUser: '',
         adminUsername: '',
         adminPassword: generateAutoPassword(),
+        licence_id: 'licence_standard',
         plan: 'STANDARD',
+        maxUsers: 15,
+        invoiceStatus: 'PAID',
         startDate: new Date().toISOString().split('T')[0],
         durationValue: 1,
         durationUnit: 'Années',
@@ -673,25 +856,30 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
   };
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <div className="space-y-4 animate-in fade-in duration-300">
       
-      {/* HEADER & ACTION BAR */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/60 border border-white/10 p-5 rounded-3xl backdrop-blur-xl">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-purple-500/20 text-purple-400 border border-purple-500/30">
-              Gouvernance des Accès
-            </span>
-            <span className="text-xs text-slate-400 font-bold">• Super Administrateurs & Structures Clientes</span>
+      {/* COMPACT HEADER & ACTION BAR */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-gradient-to-b from-[#161a29] to-[#0f121d] border border-white/15 px-4 py-3 rounded-2xl shadow-[0_10px_28px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.16)]">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-400/30 flex items-center justify-center text-purple-300 shrink-0">
+            <Users size={18} />
           </div>
-          <h2 className="text-2xl font-black text-white mt-1">Gestion Centrale des Comptes</h2>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base sm:text-lg font-extrabold text-white tracking-tight">Gestion Centrale des Comptes</h2>
+              <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                Gouvernance des Accès
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 font-medium">Super Administrateurs, Structures Clientes, Mots de passe & Quotas</p>
+          </div>
         </div>
 
         <button
           onClick={() => setShowCreateModal(true)}
-          className="px-5 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-rose-900/30 transition-all cursor-pointer self-start sm:self-auto"
+          className="px-4 py-2 bg-gradient-to-b from-rose-500 to-rose-700 hover:from-rose-400 hover:to-rose-600 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-1.5 border border-rose-400/40 shadow-[0_6px_16px_rgba(225,29,72,0.4),inset_0_1px_0_0_rgba(255,255,255,0.3)] transition-all cursor-pointer self-start sm:self-auto"
         >
-          <Plus size={16} /> Créer un Utilisateur / Structure
+          <Plus size={15} /> Créer un Utilisateur / Structure
         </button>
       </div>
 
@@ -783,26 +971,31 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
                   return (
                     <tr key={account.id} className="hover:bg-white/[0.02] transition-colors">
                       {/* Name / Username */}
-                      <td className="py-4 pl-6">
+                      <td className="py-3.5 pl-6">
                         <div className="flex items-center gap-3">
                           <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs ${
                             isSuper 
                               ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' 
                               : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
                           }`}>
-                            {isSuper ? <ShieldCheck size={18} /> : <Building2 size={18} />}
+                            {isSuper ? <ShieldCheck size={17} /> : <Building2 size={17} />}
                           </div>
                           <div>
                             <p className="font-extrabold text-white">{account.name}</p>
-                            <p className="text-[11px] font-mono text-slate-400">@{account.username}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[11px] font-mono font-bold text-rose-300">@{account.username}</span>
+                              <span className="text-[10px] font-mono text-slate-500">({account.id})</span>
+                            </div>
                           </div>
                         </div>
                       </td>
 
                       {/* Associated Structure */}
-                      <td className="py-4">
+                      <td className="py-3.5">
                         <p className="font-bold text-slate-200">{account.structureName}</p>
-                        <p className="text-[10px] text-slate-500">{account.email}</p>
+                        <p className="text-[10px] text-slate-400">
+                          {account.responsibleName ? `${account.responsibleName} • ` : ''}{account.email}
+                        </p>
                       </td>
 
                       {/* Account Type */}
@@ -822,9 +1015,28 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
                       </td>
 
                       {/* License Info */}
-                      <td className="py-4">
+                      <td className="py-3.5">
                         <p className="font-bold text-slate-200">{account.licenseInfo}</p>
-                        <p className="text-[10px] text-slate-400">Exp: {account.licenseExpiry}</p>
+                        {!isSuper && account.maxUsersQuota && (
+                          <div className="mt-1 flex items-center gap-2">
+                            <div className="w-20 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${
+                                  account.activeUsersCount >= account.maxUsersQuota
+                                    ? 'bg-rose-500'
+                                    : account.activeUsersCount / account.maxUsersQuota >= 0.8
+                                    ? 'bg-amber-400'
+                                    : 'bg-emerald-400'
+                                }`}
+                                style={{ width: `${Math.min(100, Math.round((account.activeUsersCount / account.maxUsersQuota) * 100))}%` }}
+                              />
+                            </div>
+                            <span className="text-[10px] font-mono text-emerald-300">
+                              {(account.monthlyPrice || 0).toLocaleString('fr-FR')} FCFA/m
+                            </span>
+                          </div>
+                        )}
+                        <p className="text-[10px] text-slate-400 mt-0.5">Exp: {account.licenseExpiry}</p>
                       </td>
 
                       {/* Status Badge */}
@@ -840,24 +1052,33 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
                       </td>
 
                       {/* Actions */}
-                      <td className="py-4 text-right pr-6">
-                        <div className="flex items-center justify-end gap-2">
+                      <td className="py-3.5 text-right pr-6">
+                        <div className="flex items-center justify-end gap-1.5">
                           {/* Services management shortcut if structure */}
                           {!isSuper && onNavigateToServices && (
                             <button
                               onClick={() => onNavigateToServices(account.id)}
                               title="Gérer les services de cette structure"
-                              className="p-2 bg-white/5 hover:bg-rose-600 hover:text-white text-slate-400 rounded-xl transition-all"
+                              className="p-2 bg-white/5 hover:bg-rose-600 hover:text-white text-slate-300 rounded-xl transition-all cursor-pointer"
                             >
                               <Layers size={14} />
                             </button>
                           )}
 
+                          {/* Edit / Reset Password / Extend License */}
+                          <button
+                            onClick={() => handleOpenEditAccount(account)}
+                            title="Modifier / Réinitialiser mot de passe / Prolonger licence"
+                            className="p-2 bg-white/5 hover:bg-purple-600 hover:text-white text-slate-300 rounded-xl transition-all cursor-pointer"
+                          >
+                            <Edit size={14} />
+                          </button>
+
                           {/* View account details */}
                           <button
                             onClick={() => setViewingAccount(account)}
                             title="Voir la fiche détaillée"
-                            className="p-2 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl transition-all"
+                            className="p-2 bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white rounded-xl transition-all cursor-pointer"
                           >
                             <Eye size={14} />
                           </button>
@@ -867,13 +1088,24 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
                             <button
                               onClick={() => handleToggleStatus(account)}
                               title={isActive ? 'Suspendre ce compte' : 'Réactiver ce compte'}
-                              className={`p-2 rounded-xl transition-all ${
+                              className={`p-2 rounded-xl transition-all cursor-pointer ${
                                 isActive 
-                                  ? 'bg-white/5 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400' 
-                                  : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                                  ? 'bg-white/5 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300' 
+                                  : 'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25'
                               }`}
                             >
                               {isActive ? <Lock size={14} /> : <Unlock size={14} />}
+                            </button>
+                          )}
+
+                          {/* Delete Account / Structure */}
+                          {!account.isMaster && account.id !== 'super_admin_id' && account.id !== 'sa1_superadmin' && (
+                            <button
+                              onClick={() => handleDeleteAccount(account)}
+                              title="Supprimer ce compte / cette structure"
+                              className="p-2 bg-white/5 hover:bg-rose-500/25 text-slate-400 hover:text-rose-400 rounded-xl transition-all cursor-pointer"
+                            >
+                              <Trash2 size={14} />
                             </button>
                           )}
                         </div>
@@ -1146,43 +1378,92 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
                   </div>
                 </div>
 
-                {/* 3. Licence Commerciale & Quotas Utilisateurs */}
+                {/* 3. Licence Commerciale & Quotas par Nombre d'Utilisateurs */}
                 <div>
-                  <h4 className="text-xs font-black uppercase tracking-wider text-rose-400 mb-3">3. Licence & Quotas d'Utilisateurs (SaaS Multi-Tenant)</h4>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-rose-400 mb-3">
+                    3. Licence & Tarification par Nombre d'Utilisateurs (SaaS Multi-Tenant)
+                  </h4>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                     <div>
                       <label className="text-xs font-bold text-slate-400 flex items-center justify-between">
-                        <span>Licence du Centre (Quota) *</span>
-                        <span className="text-[10px] text-emerald-400 font-bold">Obligatoire</span>
+                        <span>Formule Commerciale *</span>
+                        <span className="text-[10px] text-emerald-400 font-bold">Palier</span>
                       </label>
                       <select 
                         required
-                        value={structureForm.licence_id}
+                        value={structureForm.plan}
                         onChange={(e: any) => {
-                          const licId = e.target.value;
-                          const found = availableLicences.find(l => l.id === licId);
-                          const planKey = (found?.nom_licence || 'STANDARD').toUpperCase();
+                          const planKey = e.target.value as SaaSPlanId;
+                          const p = availablePlans[planKey] || SAAS_PLANS[planKey] || SAAS_PLANS.STANDARD;
+                          const defaultMax = p.max_users || 15;
                           setStructureForm({
                             ...structureForm,
-                            licence_id: licId,
-                            plan: (availablePlans[planKey] ? planKey : structureForm.plan) as SaaSPlanId
+                            plan: planKey,
+                            licence_id: `licence_${planKey.toLowerCase()}`,
+                            maxUsers: defaultMax
                           });
                         }}
                         className="w-full mt-1 px-3 py-2 bg-slate-950 border border-emerald-500/40 rounded-xl text-xs font-bold text-emerald-300 focus:outline-none focus:border-rose-500"
                       >
-                        <option value="" disabled>-- Sélectionner une Licence --</option>
-                        {availableLicences.map(lic => (
-                          <option key={lic.id} value={lic.id}>
-                            {lic.nom_licence} (Max {lic.max_users} utilisateurs)
-                          </option>
-                        ))}
+                        {Object.keys(availablePlans).map(planKey => {
+                          const p = availablePlans[planKey];
+                          return (
+                            <option key={planKey} value={planKey}>
+                              {planKey} ({p.max_users || 15} util. inclus)
+                            </option>
+                          );
+                        })}
                       </select>
                       <p className="text-[10px] text-slate-400 mt-1">
-                        {availableLicences.find(l => l.id === structureForm.licence_id) 
-                          ? `Limite autorisée : ${availableLicences.find(l => l.id === structureForm.licence_id)?.max_users} utilisateurs`
-                          : 'Plafond strict pour ce centre'}
+                        Socle : {selectedPlanConfig.max_users} util. inclus
                       </p>
+                    </div>
+
+                    <div>
+                      <label className="text-xs font-bold text-slate-400 flex items-center justify-between">
+                        <span>Nombre d'Utilisateurs *</span>
+                        <span className="text-[10px] text-blue-400 font-mono font-bold">Quota</span>
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={1}
+                        max={500}
+                        value={structureForm.maxUsers}
+                        onChange={(e) => {
+                          const val = Math.max(1, parseInt(e.target.value) || 1);
+                          setStructureForm({
+                            ...structureForm,
+                            maxUsers: val
+                          });
+                        }}
+                        className="w-full mt-1 px-3 py-2 bg-slate-950 border border-blue-500/40 rounded-xl text-xs font-mono font-bold text-blue-300 focus:outline-none focus:border-rose-500"
+                      />
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {[5, 10, 15, 25, 35, 50, 100].map(uCount => (
+                          <button
+                            key={uCount}
+                            type="button"
+                            onClick={() => {
+                              const recPlan = recommendPlanForUserCount(uCount, availablePlans) as SaaSPlanId;
+                              setStructureForm({
+                                ...structureForm,
+                                maxUsers: uCount,
+                                plan: recPlan,
+                                licence_id: `licence_${recPlan.toLowerCase()}`
+                              });
+                            }}
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-bold cursor-pointer ${
+                              structureForm.maxUsers === uCount
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white/5 text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {uCount}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     <div>
@@ -1206,16 +1487,46 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
                           <option value="Années">Années</option>
                         </select>
                       </div>
+                      <p className="text-[10px] text-emerald-400 font-mono mt-1">
+                        Exp: {computedExpirationDate}
+                      </p>
                     </div>
 
                     <div>
-                      <label className="text-xs font-bold text-slate-400">Date d'Expiration Calculée</label>
-                      <input 
-                        type="text"
-                        disabled
-                        value={computedExpirationDate}
-                        className="w-full mt-1 px-3 py-2 bg-slate-950/40 border border-white/5 rounded-xl text-xs font-mono font-bold text-emerald-400"
-                      />
+                      <label className="text-xs font-bold text-slate-400">Statut Facture Initiale</label>
+                      <select
+                        value={structureForm.invoiceStatus}
+                        onChange={(e) => setStructureForm({ ...structureForm, invoiceStatus: e.target.value as 'PAID' | 'PENDING' })}
+                        className="w-full mt-1 px-3 py-2 bg-slate-950 border border-white/10 rounded-xl text-xs font-bold text-white focus:outline-none"
+                      >
+                        <option value="PAID">PAYÉE (Encaissée)</option>
+                        <option value="PENDING">EN ATTENTE</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Live Per-User Pricing Summary Box */}
+                  <div className="mt-3 p-3 bg-emerald-950/20 border border-emerald-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300">
+                        Calcul Tarifaire ({structureForm.maxUsers} utilisateurs • Formule {structureForm.plan})
+                      </span>
+                      <p className="text-[11px] text-slate-300 mt-0.5">
+                        Forfait socle ({selectedPlanConfig.max_users} util.) : <strong className="text-white">{selectedPlanConfig.basePriceFCFA.toLocaleString('fr-FR')} FCFA</strong>
+                        {selectedPlanConfig.extraUsers > 0 && (
+                          <span>
+                            {' '}+ {selectedPlanConfig.extraUsers} util. supp. × {selectedPlanConfig.pricePerExtraUserFCFA.toLocaleString('fr-FR')} FCFA = <strong className="text-blue-300">+{selectedPlanConfig.extraUsersCostFCFA.toLocaleString('fr-FR')} FCFA</strong>
+                          </span>
+                        )}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-black text-white">
+                        {selectedPlanConfig.monthlyPriceFCFA.toLocaleString('fr-FR')} <span className="text-emerald-400 text-xs">FCFA / mois</span>
+                      </p>
+                      <p className="text-[10px] font-bold text-emerald-300">
+                        Total ({totalMonths} mois) : {selectedPlanConfig.periodTotalFCFA.toLocaleString('fr-FR')} FCFA
+                      </p>
                     </div>
                   </div>
 
@@ -1266,21 +1577,32 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
       {/* MODAL: VIEW DETAILS */}
       {viewingAccount && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
-          <div className="bg-slate-900 border border-white/10 rounded-3xl max-w-lg w-full p-6 relative">
+          <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-lg w-full p-6 relative shadow-2xl">
             <div className="flex justify-between items-start mb-4">
               <div className="flex items-center gap-3">
-                <div className="p-3 bg-rose-500/10 text-rose-400 rounded-2xl">
-                  {viewingAccount.accountType === 'SUPER_ADMIN' ? <ShieldCheck size={24} /> : <Building2 size={24} />}
+                <div className="p-3 bg-rose-500/15 text-rose-400 border border-rose-500/30 rounded-2xl">
+                  {viewingAccount.accountType === 'SUPER_ADMIN' ? <ShieldCheck size={22} /> : <Building2 size={22} />}
                 </div>
                 <div>
                   <h3 className="text-lg font-black text-white">{viewingAccount.name}</h3>
-                  <p className="text-xs text-slate-400 font-mono">@{viewingAccount.username}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs text-rose-300 font-mono font-bold">@{viewingAccount.username}</span>
+                    <span className="text-[11px] text-slate-400 font-mono">• ID: {viewingAccount.id}</span>
+                  </div>
                 </div>
               </div>
-              <button onClick={() => setViewingAccount(null)} className="text-slate-400 hover:text-white">✕</button>
+              <button onClick={() => setViewingAccount(null)} className="text-slate-400 hover:text-white cursor-pointer">✕</button>
             </div>
 
-            <div className="space-y-3 bg-slate-950/60 border border-white/5 p-4 rounded-2xl text-xs">
+            <div className="space-y-2.5 bg-slate-950/70 border border-white/10 p-4 rounded-2xl text-xs">
+              <div className="flex justify-between py-1 border-b border-white/5">
+                <span className="text-slate-400">ID Système (Connexion directe) :</span>
+                <span className="font-mono font-bold text-purple-300">{viewingAccount.id}</span>
+              </div>
+              <div className="flex justify-between py-1 border-b border-white/5">
+                <span className="text-slate-400">Identifiant Login :</span>
+                <span className="font-mono font-bold text-white">@{viewingAccount.username}</span>
+              </div>
               <div className="flex justify-between py-1 border-b border-white/5">
                 <span className="text-slate-400">Catégorie :</span>
                 <span className="font-bold text-white">{viewingAccount.accountType}</span>
@@ -1289,32 +1611,286 @@ export const SuperAdminUsers: React.FC<SuperAdminUsersProps> = ({
                 <span className="text-slate-400">Structure rattachée :</span>
                 <span className="font-bold text-white">{viewingAccount.structureName}</span>
               </div>
+              {viewingAccount.responsibleName && (
+                <div className="flex justify-between py-1 border-b border-white/5">
+                  <span className="text-slate-400">Responsable :</span>
+                  <span className="font-bold text-white">{viewingAccount.responsibleName}</span>
+                </div>
+              )}
               <div className="flex justify-between py-1 border-b border-white/5">
                 <span className="text-slate-400">E-mail de contact :</span>
                 <span className="font-bold text-white">{viewingAccount.email}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-white/5">
                 <span className="text-slate-400">Statut :</span>
-                <span className="font-bold text-emerald-400">{viewingAccount.status}</span>
+                <span className={`font-bold ${viewingAccount.status === 'ACTIVE' ? 'text-emerald-400' : 'text-rose-400'}`}>{viewingAccount.status}</span>
               </div>
               <div className="flex justify-between py-1 border-b border-white/5">
-                <span className="text-slate-400">Licence :</span>
+                <span className="text-slate-400">Licence / Quota :</span>
                 <span className="font-bold text-white">{viewingAccount.licenseInfo}</span>
               </div>
               <div className="flex justify-between py-1">
                 <span className="text-slate-400">Expiration :</span>
-                <span className="font-bold text-white">{viewingAccount.licenseExpiry}</span>
+                <span className="font-bold text-emerald-300">{viewingAccount.licenseExpiry}</span>
               </div>
             </div>
 
-            <div className="mt-5 flex justify-end">
+            <div className="mt-5 flex justify-between items-center gap-3">
+              <button
+                onClick={() => {
+                  const target = viewingAccount;
+                  setViewingAccount(null);
+                  handleOpenEditAccount(target);
+                }}
+                className="px-4 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Key size={14} /> Modifier / Réinitialiser Mot de Passe
+              </button>
               <button 
                 onClick={() => setViewingAccount(null)}
-                className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all"
+                className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
               >
                 Fermer
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDIT ACCOUNT / RESET PASSWORD / EXTEND LICENSE */}
+      {editingAccount && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+          <div className="bg-slate-900 border border-white/15 rounded-3xl max-w-xl w-full p-6 relative shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-start mb-5">
+              <div>
+                <span className="text-[10px] uppercase font-black tracking-widest text-purple-400">
+                  {editingAccount.accountType === 'SUPER_ADMIN' ? 'Édition Super Administrateur' : 'Gestion Structure & Accès Admin'}
+                </span>
+                <h3 className="text-lg font-black text-white mt-0.5">{editingAccount.name}</h3>
+                <p className="text-[11px] font-mono text-slate-400">ID: {editingAccount.id}</p>
+              </div>
+              <button onClick={() => setEditingAccount(null)} className="p-1.5 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white rounded-xl cursor-pointer">✕</button>
+            </div>
+
+            <form onSubmit={handleSaveEditedAccount} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 font-bold">
+                    {editingAccount.accountType === 'SUPER_ADMIN' ? 'Nom Complet' : 'Nom de la Structure'}
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editingAccount.editName}
+                    onChange={e => setEditingAccount({ ...editingAccount, editName: e.target.value })}
+                    className="w-full mt-1 px-3.5 py-2 bg-slate-950 border border-white/10 rounded-xl text-white font-bold focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 font-bold">Identifiant Login (@username) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editingAccount.editUsername}
+                    onChange={e => setEditingAccount({ ...editingAccount, editUsername: e.target.value })}
+                    className="w-full mt-1 px-3.5 py-2 bg-slate-950 border border-white/10 rounded-xl text-rose-300 font-mono font-bold focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-slate-400 font-bold">Adresse E-mail</label>
+                  <input
+                    type="email"
+                    value={editingAccount.editEmail}
+                    onChange={e => setEditingAccount({ ...editingAccount, editEmail: e.target.value })}
+                    className="w-full mt-1 px-3.5 py-2 bg-slate-950 border border-white/10 rounded-xl text-white focus:outline-none focus:border-purple-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-slate-400 font-bold">Statut du Compte</label>
+                  <select
+                    value={editingAccount.editStatus}
+                    onChange={e => setEditingAccount({ ...editingAccount, editStatus: e.target.value })}
+                    className="w-full mt-1 px-3.5 py-2 bg-slate-950 border border-white/10 rounded-xl text-white font-bold focus:outline-none focus:border-purple-500"
+                  >
+                    <option value="ACTIVE">ACTIF (Autorisé)</option>
+                    <option value="SUSPENDED">SUSPENDU (Bloqué)</option>
+                  </select>
+                </div>
+              </div>
+
+              {editingAccount.accountType === 'STRUCTURE' && (
+                <div className="p-3.5 bg-slate-950/70 border border-white/10 rounded-2xl space-y-3">
+                  <p className="text-[11px] font-black uppercase tracking-wider text-rose-400">Licence par Nombre d'Utilisateurs & Responsable</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-400 font-bold">Responsable</label>
+                      <input
+                        type="text"
+                        value={editingAccount.editResponsible}
+                        onChange={e => setEditingAccount({ ...editingAccount, editResponsible: e.target.value })}
+                        className="w-full mt-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-xl text-white focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-400 font-bold">Formule Commerciale</label>
+                      <select
+                        value={editingAccount.editPlan}
+                        onChange={e => {
+                          const nextPlan = e.target.value;
+                          const planDef = availablePlans[nextPlan] || SAAS_PLANS[nextPlan as SaaSPlanId] || SAAS_PLANS.STANDARD;
+                          const nextUsers = Math.max(Number(editingAccount.editMaxUsers) || 1, Number(planDef.max_users) || 5);
+                          const nextPrice = calculateLicensePriceForUsers(planDef, nextUsers, 1).monthlyTotal;
+                          setEditingAccount({
+                            ...editingAccount,
+                            editPlan: nextPlan,
+                            editMaxUsers: nextUsers,
+                            editLicensePrice: nextPrice
+                          });
+                        }}
+                        className="w-full mt-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-xl text-white font-bold focus:outline-none"
+                      >
+                        {Object.keys(availablePlans).map(k => (
+                          <option key={k} value={k}>
+                            {k} ({availablePlans[k]?.max_users || 15} util. inclus)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-400 font-bold flex items-center justify-between">
+                        <span>Quota Max Utilisateurs</span>
+                        <span className="text-[10px] font-mono text-emerald-400">
+                          Actifs : {editingAccount.activeUsersCount || 1}
+                        </span>
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={editingAccount.editMaxUsers}
+                        onChange={e => {
+                          const nextUsers = Math.max(1, Number(e.target.value) || 1);
+                          const planDef = availablePlans[editingAccount.editPlan] || SAAS_PLANS[editingAccount.editPlan as SaaSPlanId] || SAAS_PLANS.STANDARD;
+                          const nextPrice = calculateLicensePriceForUsers(planDef, nextUsers, 1).monthlyTotal;
+                          setEditingAccount({
+                            ...editingAccount,
+                            editMaxUsers: nextUsers,
+                            editLicensePrice: nextPrice
+                          });
+                        }}
+                        className="w-full mt-1 px-3 py-2 bg-slate-900 border border-emerald-500/30 rounded-xl text-emerald-300 font-mono font-bold focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-400 font-bold">Tarif Mensuel Calculé (FCFA)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        step={5000}
+                        value={editingAccount.editLicensePrice ?? 150000}
+                        onChange={e => setEditingAccount({ ...editingAccount, editLicensePrice: Number(e.target.value) })}
+                        className="w-full mt-1 px-3 py-2 bg-slate-900 border border-blue-500/30 rounded-xl text-blue-300 font-mono font-bold focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <label className="text-slate-400 font-bold">Date d'Expiration de la Licence</label>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const base = editingAccount.editLicenseEnd ? new Date(editingAccount.editLicenseEnd) : new Date();
+                            base.setMonth(base.getMonth() + 1);
+                            setEditingAccount({ ...editingAccount, editLicenseEnd: base.toISOString().split('T')[0], editStatus: 'ACTIVE' });
+                          }}
+                          className="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-bold text-[10px] cursor-pointer"
+                        >
+                          +1 Mois
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const base = editingAccount.editLicenseEnd ? new Date(editingAccount.editLicenseEnd) : new Date();
+                            base.setFullYear(base.getFullYear() + 1);
+                            setEditingAccount({ ...editingAccount, editLicenseEnd: base.toISOString().split('T')[0], editStatus: 'ACTIVE' });
+                          }}
+                          className="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-bold text-[10px] cursor-pointer"
+                        >
+                          +1 An
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      type="date"
+                      value={editingAccount.editLicenseEnd}
+                      onChange={e => setEditingAccount({ ...editingAccount, editLicenseEnd: e.target.value })}
+                      className="w-full mt-1 px-3 py-2 bg-slate-900 border border-white/10 rounded-xl text-white font-mono font-bold focus:outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Password Reset Box */}
+              <div className="p-3.5 bg-purple-950/20 border border-purple-500/30 rounded-2xl space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="font-extrabold text-purple-200 flex items-center gap-1.5">
+                    <Key size={14} className="text-purple-400" />
+                    Réinitialiser le Mot de Passe <span className="text-[10px] text-slate-400 font-normal">(Laisser vide pour conserver l'actuel)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setEditingAccount({ ...editingAccount, newPassword: generateAutoPassword() })}
+                    className="px-2.5 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 border border-purple-400/30 text-purple-200 font-bold text-[10px] flex items-center gap-1 cursor-pointer"
+                  >
+                    <RefreshCw size={11} /> Générer un mot de passe
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  placeholder="Saisir ou générer un nouveau mot de passe..."
+                  value={editingAccount.newPassword}
+                  onChange={e => setEditingAccount({ ...editingAccount, newPassword: e.target.value })}
+                  className="w-full px-3.5 py-2 bg-slate-950 border border-purple-500/40 rounded-xl text-purple-200 font-mono font-bold focus:outline-none focus:border-purple-400"
+                />
+                {editingAccount.accountType === 'STRUCTURE' && editingAccount.newPassword && (
+                  <label className="flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      checked={editingAccount.forcePasswordChange}
+                      onChange={e => setEditingAccount({ ...editingAccount, forcePasswordChange: e.target.checked })}
+                      className="rounded border-white/20"
+                    />
+                    <span>Demander le changement obligatoire du mot de passe à la prochaine connexion</span>
+                  </label>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setEditingAccount(null)}
+                  className="px-4 py-2 rounded-xl font-bold text-slate-400 hover:text-white cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 bg-gradient-to-b from-purple-500 to-purple-700 hover:from-purple-400 hover:to-purple-600 text-white rounded-xl font-black uppercase tracking-wider flex items-center gap-1.5 border border-purple-400/40 shadow-lg cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmitting ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
+                  Enregistrer les Modifications
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

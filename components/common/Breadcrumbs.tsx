@@ -17,15 +17,15 @@ export const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ items, onHomeClick, cl
   return (
     <nav 
       aria-label="Fil d'Ariane" 
-      className={`flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-zinc-400 overflow-x-auto py-1 px-1 custom-scrollbar ${className}`}
+      className={`flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-zinc-300 overflow-x-auto py-0.5 px-0.5 custom-scrollbar ${className}`}
     >
       {onHomeClick && (
         <button
           onClick={onHomeClick}
-          className="inline-flex items-center gap-1.5 text-slate-400 hover:text-blue-500 dark:text-zinc-500 dark:hover:text-blue-400 transition-colors p-1 rounded-lg hover:bg-slate-100/80 dark:hover:bg-zinc-800 cursor-pointer"
+          className="inline-flex items-center gap-1 text-slate-500 hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-400 transition-colors p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 cursor-pointer"
           title="Accueil Dashboard"
         >
-          <Home size={14} />
+          <Home size={13} />
           <span className="sr-only">Accueil</span>
         </button>
       )}
@@ -35,20 +35,20 @@ export const Breadcrumbs: React.FC<BreadcrumbsProps> = ({ items, onHomeClick, cl
         return (
           <React.Fragment key={index}>
             {(index > 0 || onHomeClick) && (
-              <ChevronRight size={13} className="text-slate-300 dark:text-zinc-700 shrink-0" />
+              <ChevronRight size={13} className="text-slate-400 dark:text-zinc-600 shrink-0" />
             )}
             {item.onClick && !isLast ? (
               <button
                 onClick={item.onClick}
-                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-2 py-0.5 rounded-lg hover:bg-slate-100/80 dark:hover:bg-zinc-800 cursor-pointer whitespace-nowrap text-slate-600 dark:text-zinc-300 font-medium"
+                className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-2 py-0.5 rounded-lg hover:bg-slate-100/90 dark:hover:bg-white/5 cursor-pointer whitespace-nowrap text-slate-600 dark:text-zinc-300 font-bold text-xs"
               >
                 {item.label}
               </button>
             ) : (
-              <span className={`px-2 py-0.5 rounded-lg whitespace-nowrap ${
+              <span className={`px-2 py-0.5 rounded-lg whitespace-nowrap text-xs ${
                 isLast 
-                  ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-black border border-blue-100/80 dark:border-blue-800/60' 
-                  : 'text-slate-500 dark:text-zinc-400 font-medium'
+                  ? 'bg-blue-50 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 font-extrabold border border-blue-200/80 dark:border-blue-400/30 shadow-2xs dark:shadow-[0_0_12px_rgba(59,130,246,0.2)]' 
+                  : 'text-slate-600 dark:text-zinc-300 font-bold'
               }`}>
                 {item.label}
               </span>

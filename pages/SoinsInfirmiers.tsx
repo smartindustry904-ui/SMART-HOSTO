@@ -312,59 +312,34 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
         priorityAlerts: assessPriority.alerts,
         vitals: finalVitalsData,
         triagedAt: today.toISOString(),
-        triagedBy: nurseName
+        triagedBy: nurseName,
+        triagedById: user?.id || ''
       };
 
-      let updated = false;
+      const pId = activePatient.patientId || activePatient.dmeId || activePatient.id;
+      const fallbackDocId = targetDocId || (activePatient.id ? activePatient.id : doc(collection(db, 'service_queues')).id);
 
-      // Try direct doc update if exists
+      // 1. Optimistic Offline-First UI Update (0ms delay)
+      setGlobalWaitingQueue((prev: any[]) => prev.map(p =>
+        (p.id === pId || p.patientId === pId || p.queueDocId === directQueueDocId)
+          ? { ...p, ...queuePayload }
+          : p
+      ));
+      setActivePatient(null);
+      setIsSubmitting(false);
+
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: `🩺 Triage validé pour ${activePatient.lastName} ${activePatient.firstName} [Priorité: ${assessPriority.priority.toUpperCase()}] -> Transféré en file de consultation médecin.`
+      }));
+
+      // 2. Background Firestore persistence via local IndexedDB cache
       if (directQueueDocId) {
-        try {
-          const directDocRef = doc(db, 'service_queues', directQueueDocId);
-          const directSnap = await getDoc(directDocRef);
-          if (directSnap.exists()) {
-            await updateDoc(directDocRef, queuePayload);
-            updated = true;
-          }
-        } catch (e) {
-          console.warn("Direct queue doc lookup failed, fallback to query:", e);
-        }
-      }
-
-      // If not updated directly, try query by patientId
-      if (!updated) {
-        const pId = activePatient.patientId || activePatient.dmeId || activePatient.id;
-        if (pId) {
-          const q = query(collection(db, 'service_queues'), where('patientId', '==', pId));
-          const snap = await getDocs(q);
-          if (!snap.empty) {
-            targetDocId = snap.docs[0].id;
-            for (const d of snap.docs) {
-              await updateDoc(doc(db, 'service_queues', d.id), queuePayload);
-            }
-            updated = true;
-          } else {
-            const qDme = query(collection(db, 'service_queues'), where('dmeId', '==', pId));
-            const snapDme = await getDocs(qDme);
-            if (!snapDme.empty) {
-              targetDocId = snapDme.docs[0].id;
-              for (const d of snapDme.docs) {
-                await updateDoc(doc(db, 'service_queues', d.id), queuePayload);
-              }
-              updated = true;
-            }
-          }
-        }
-      }
-
-      // Fallback: If still not found, upsert
-      if (!updated) {
-        const fallbackDocId = targetDocId || (activePatient.id ? activePatient.id : doc(collection(db, 'service_queues')).id);
-        targetDocId = fallbackDocId;
-        await setDoc(doc(db, 'service_queues', fallbackDocId), sanitizeData({
+        setDoc(doc(db, 'service_queues', directQueueDocId), queuePayload, { merge: true }).catch(() => {});
+      } else {
+        setDoc(doc(db, 'service_queues', fallbackDocId), sanitizeData({
           ...activePatient,
-          patientId: activePatient.patientId || activePatient.dmeId || activePatient.id,
-          dmeId: activePatient.dmeId || activePatient.patientId || activePatient.id,
+          patientId: pId,
+          dmeId: activePatient.dmeId || pId,
           firstName: activePatient.firstName || '',
           lastName: activePatient.lastName || '',
           age: activePatient.age || 0,
@@ -373,25 +348,37 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
           service: activePatient.service || 'Médecine Générale',
           ...queuePayload,
           createdAt: activePatient.createdAt || today.toISOString()
-        }), { merge: true });
+        }), { merge: true }).catch(() => {});
       }
 
-      // 2. Write record in triage_records
+      if (pId) {
+        getDocs(query(collection(db, 'service_queues'), where('patientId', '==', pId)))
+          .then(snap => {
+            snap.docs.forEach(d => updateDoc(doc(db, 'service_queues', d.id), queuePayload).catch(() => {}));
+          })
+          .catch(() => {});
+      }
+
       const triageDocRef = doc(collection(db, 'triage_records'));
-      await setDoc(triageDocRef, sanitizeData({
+      setDoc(triageDocRef, sanitizeData({
         id: triageDocRef.id,
-        patientId: activePatient.patientId || activePatient.dmeId || activePatient.id,
+        patientId: pId,
         patientName: `${activePatient.lastName} ${activePatient.firstName}`,
-        queueId: targetDocId || '',
+        queueId: directQueueDocId || fallbackDocId,
         vitals: finalVitalsData,
         priority: assessPriority.priority,
         priorityAlerts: assessPriority.alerts,
         nurseName: nurseName,
+        nurseId: user?.id || '',
+        practitionerId: user?.id || '',
+        practitionerName: nurseName,
+        practitionerRole: user?.role || 'INFIRMIER',
+        isClotured: true,
+        cloturedAt: today.toISOString(),
         createdAt: today.toISOString()
-      }));
+      })).catch(() => {});
 
-      // 3. Write trace to audit_logs
-      await setDoc(doc(collection(db, 'audit_logs')), {
+      setDoc(doc(collection(db, 'audit_logs')), {
         user: nurseName,
         role: 'NURSE',
         date: today.toLocaleDateString('fr-FR'),
@@ -399,76 +386,89 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
         timestamp: today.toISOString(),
         action: `Triage infirmier validé (${assessPriority.priority.toUpperCase()}) -> Transféré vers la file médecin`,
         details: {
-          patientId: activePatient.patientId || activePatient.dmeId,
+          patientId: pId,
           patientName: `${activePatient.lastName} ${activePatient.firstName}`,
           priority: assessPriority.priority,
-          alerts: assessPriority.alerts
+          alerts: assessPriority.alerts,
+          practitionerId: user?.id || ''
         },
         module: 'Soins Infirmiers'
-      });
-
-      // 4. Trigger system notification
-      window.dispatchEvent(new CustomEvent('app-notification', {
-        detail: `🩺 Triage validé pour ${activePatient.lastName} ${activePatient.firstName} [Priorité: ${assessPriority.priority.toUpperCase()}] -> Transféré en file de consultation médecin.`
-      }));
-
-      setActivePatient(null);
+      }).catch(() => {});
     } catch (err: any) {
       console.error("Error finalizing nurse triage:", err);
-      alert(`Erreur lors du transfert : ${err.message}`);
-    } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Mark prescribed nursing care act as Done (FAIT) - Strictly Receive-Only Queue Execution
+  // Mark prescribed nursing care act as Done (FAIT) - Assigned to practitioner ONLY upon completion
   const handleMarkActAsDone = async (act: any) => {
     if (!act?.id) return;
     setIsExecutingAct(true);
     try {
       const today = new Date();
-      const nurseName = user?.name || user?.email || 'Infirmier(ère)';
+      const nurseName = user?.name || user?.username || user?.email || 'Infirmier(ère)';
+      const nurseId = user?.id || '';
       const actRef = doc(db, 'nursing_acts', act.id);
 
       const notesToSave = executionNotes.trim() || 'Soin réalisé conformément aux prescriptions médicales.';
+      const dateStr = today.toLocaleDateString('fr-FR');
+      const timeStr = today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const isoNow = today.toISOString();
 
-      await updateDoc(actRef, sanitizeData({
+      const completedActPayload = {
         status: 'FAIT',
+        isClotured: true,
+        cloturedAt: isoNow,
+        cloturedBy: nurseName,
+        cloturedById: nurseId,
+        practitionerId: nurseId,
+        practitionerName: nurseName,
+        practitionerRole: user?.role || 'INFIRMIER',
+        nurseId: nurseId,
         executedBy: nurseName,
+        executedById: nurseId,
         executedByRole: 'Infirmier(ère)',
         executionNotes: notesToSave,
-        executionDate: today.toLocaleDateString('fr-FR'),
-        executionTime: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-        executedAt: today.toISOString(),
-        updatedAt: today.toISOString()
-      }));
+        executionDate: dateStr,
+        executionTime: timeStr,
+        executedAt: isoNow,
+        updatedAt: isoNow
+      };
 
-      window.dispatchEvent(new CustomEvent('app-notification', {
-        detail: `✓ Soin « ${act.actType} » validé et marqué comme FAIT pour ${act.patientName}.`
-      }));
-
-      // Update local selection
+      // 1. Optimistic Offline-First UI Update (0ms delay)
       setSelectedActForExecution((prev: any) => prev ? {
         ...prev,
-        status: 'FAIT',
-        executedBy: nurseName,
-        executionNotes: notesToSave,
-        executionDate: today.toLocaleDateString('fr-FR'),
-        executionTime: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-        executedAt: today.toISOString()
+        ...completedActPayload
       } : null);
-
       setExecutionNotes('');
+      setIsExecutingAct(false);
+
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: `✓ Soin « ${act.actType} » validé, clôturé et assigné à ${nurseName} (${act.patientName}).`
+      }));
+
+      // 2. Background Firestore persistence via local IndexedDB cache
+      setDoc(actRef, sanitizeData(completedActPayload), { merge: true }).catch(() => {});
+
+      // Also assign any related payment request for this soin to the nurse who executed it
+      if (act.paymentRequestId) {
+        setDoc(doc(db, 'payment_requests', act.paymentRequestId), sanitizeData({
+          practitionerId: nurseId,
+          practitionerName: nurseName,
+          practitionerRole: user?.role || 'INFIRMIER',
+          isClotured: true,
+          cloturedAt: isoNow,
+          cloturedBy: nurseName
+        }), { merge: true }).catch(() => {});
+      }
     } catch (err: any) {
       console.error("Error marking nursing act as done:", err);
-      alert(`Erreur lors de la validation du soin : ${err.message}`);
-    } finally {
       setIsExecutingAct(false);
     }
   };
 
   return (
-    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#020617] text-white' : 'bg-[#F8FAFC] text-slate-900'}`}>
+    <div className={`h-screen flex flex-col overflow-hidden p-3 sm:p-5 font-sans ${theme === 'dark' ? 'bg-[#090d16] text-slate-100' : 'bg-[#F8FAFC] text-slate-900'}`}>
       <MicroHeader
         icon={Heart}
         breadcrumbs={[
@@ -488,131 +488,66 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
           <div className="flex items-center gap-1.5 overflow-x-auto">
             <button
               onClick={() => setActiveTab('triage')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'triage' || activeTab === 'dashboard'
                   ? 'bg-teal-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <Stethoscope size={13} />
-              <span>Tab 1 : Triage & Constantes ({waitingTriageList.length})</span>
+              <Stethoscope size={14} />
+              <span>Triage ({waitingTriageList.length})</span>
             </button>
             <button
               onClick={() => setActiveTab('soins')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-black text-xs transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'soins'
                   ? 'bg-indigo-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <Syringe size={13} />
-              <span>Tab 2 : Soins & Actes ({pendingActsCount})</span>
+              <Syringe size={14} />
+              <span>Soins & Actes ({pendingActsCount})</span>
               {urgPendingCount > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full text-[9px] font-black bg-red-600 text-white animate-pulse">
+                <span className="px-1.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-600 text-white animate-pulse">
                   {urgPendingCount} URG
                 </span>
               )}
             </button>
             <button
               onClick={() => setActiveTab('historique')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'historique'
-                  ? 'bg-slate-800 text-white shadow-xs'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <FileText size={13} />
+              <FileText size={14} />
               <span>Historique</span>
             </button>
             <button
               onClick={() => setActiveTab('hospitalisation')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs transition-all whitespace-nowrap cursor-pointer ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'hospitalisation'
                   ? 'bg-purple-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
               }`}
             >
-              <BedDouble size={13} />
+              <BedDouble size={14} />
               <span>Lits</span>
             </button>
           </div>
         }
       />
 
-      <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-6">
-        {/* TWO DISTINCT WORKFLOWS SWITCHER TABS */}
-        <div className="bg-white dark:bg-slate-900 p-2.5 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveTab('triage')}
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
-                activeTab === 'triage' || activeTab === 'dashboard'
-                  ? 'bg-teal-600 text-white shadow-md shadow-teal-600/20'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Stethoscope size={16} />
-              <span>Tab 1 : Triage & Constantes</span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                activeTab === 'triage' || activeTab === 'dashboard'
-                  ? 'bg-white/20 text-white'
-                  : 'bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300'
-              }`}>
-                {waitingTriageList.length} en attente
-              </span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('soins')}
-              className={`flex-1 sm:flex-none flex items-center justify-center gap-2.5 px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
-                activeTab === 'soins'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
-                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Syringe size={16} />
-              <span>Tab 2 : Soins & Actes Prescrits</span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                activeTab === 'soins'
-                  ? 'bg-white/20 text-white'
-                  : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
-              }`}>
-                {pendingActsCount}
-              </span>
-              {urgPendingCount > 0 && (
-                <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-red-600 text-white animate-pulse">
-                  {urgPendingCount} URG
-                </span>
-              )}
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between sm:justify-end gap-2 text-xs text-slate-500">
-            <span className="hidden lg:inline text-[11px] text-slate-400 font-medium">
-              Accueil ➔ Triage • Consultation & Urgences ➔ Soins
-            </span>
-            <button
-              onClick={() => setActiveTab('historique')}
-              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'historique'
-                  ? 'bg-slate-800 text-white'
-                  : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              Historique
-            </button>
-            <button
-              onClick={() => setActiveTab('hospitalisation')}
-              className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                activeTab === 'hospitalisation'
-                  ? 'bg-purple-600 text-white'
-                  : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              Lits
-            </button>
-          </div>
-        </div>
+      <main className="flex-1 min-h-0 overflow-y-auto custom-scrollbar space-y-5">
 
       {/* TAB 1: TRIAGE & CONSTANTES */}
       {(activeTab === 'triage' || activeTab === 'dashboard') && (

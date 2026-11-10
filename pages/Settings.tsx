@@ -42,6 +42,7 @@ import { THEMES, ThemeColor } from '../constants/themes';
 import RolesPermissions from './settings/RolesPermissions';
 import ServicesDepartments from './settings/ServicesDepartments';
 import ProtocolsManagement from './settings/ProtocolsManagement';
+import WhatsAppAgentSettings from './settings/WhatsAppAgentSettings';
 import AddMedicationForm from './settings/AddMedicationForm';
 import RestockModal from './settings/RestockModal';
 import StockMovementsModal from './settings/StockMovementsModal';
@@ -57,8 +58,8 @@ import { db, sanitizeData, handleFirestoreError, OperationType } from '../src/fi
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, where, addDoc, updateDoc, getDocs, limit, getDoc } from 'firebase/firestore';
 
 interface SettingsProps {
-  activeTab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols';
-  setActiveTab: (tab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols') => void;
+  activeTab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent';
+  setActiveTab: (tab: 'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent') => void;
   user: User | null;
   onBackToDashboard?: () => void;
 }
@@ -865,28 +866,44 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
   }, [users, user]);
 
   const currentLicence = useMemo<Licence | null>(() => {
+    const customMaxUsers = Number(activeHospitalRecord?.quotas?.maxUsers || activeHospitalRecord?.max_users || 0);
+    const customPrice = Number(activeHospitalRecord?.licensePrice || 0);
     const targetLicId = activeHospitalRecord?.licence_id || activeHospitalRecord?.licenceId || establishment.licence_id || establishment.licenceId;
     if (targetLicId && licencesCatalog.length > 0) {
       const found = licencesCatalog.find(l => 
         l.id.toLowerCase() === String(targetLicId).toLowerCase() || 
         l.id.toLowerCase().includes(String(targetLicId).toLowerCase())
       );
-      if (found) return found;
+      if (found) {
+        return {
+          ...found,
+          max_users: customMaxUsers > 0 ? customMaxUsers : found.max_users,
+          monthlyPriceFCFA: customPrice > 0 ? customPrice : found.monthlyPriceFCFA
+        };
+      }
     }
     const planName = (activeHospitalRecord?.nom_licence || activeHospitalRecord?.licenseType || 'Basic').toUpperCase();
-    const foundByName = licencesCatalog.find(l => l.nom_licence.toUpperCase() === planName);
-    if (foundByName) return foundByName;
+    const foundByName = licencesCatalog.find(l => l.nom_licence.toUpperCase() === planName || l.id.toUpperCase().includes(planName));
+    if (foundByName) {
+      return {
+        ...foundByName,
+        max_users: customMaxUsers > 0 ? customMaxUsers : foundByName.max_users,
+        monthlyPriceFCFA: customPrice > 0 ? customPrice : foundByName.monthlyPriceFCFA
+      };
+    }
 
     return {
       id: 'licence_basic',
       nom_licence: activeHospitalRecord?.nom_licence || activeHospitalRecord?.licenseType || 'Basic',
-      max_users: activeHospitalRecord?.quotas?.maxUsers || (activeHospitalRecord?.licenseType === 'ENTERPRISE' ? 100 : activeHospitalRecord?.licenseType === 'PREMIUM' ? 50 : 5),
-      monthlyPriceFCFA: 350000
+      max_users: customMaxUsers > 0 ? customMaxUsers : (activeHospitalRecord?.licenseType === 'ENTERPRISE' ? 100 : activeHospitalRecord?.licenseType === 'PREMIUM' ? 35 : activeHospitalRecord?.licenseType === 'STANDARD' ? 15 : 5),
+      monthlyPriceFCFA: customPrice > 0 ? customPrice : 60000
     };
   }, [licencesCatalog, activeHospitalRecord, establishment]);
 
   const maxUsersAllowed = useMemo(() => {
-    return currentLicence?.max_users || activeHospitalRecord?.quotas?.maxUsers || 5;
+    const customQuota = Number(activeHospitalRecord?.quotas?.maxUsers || activeHospitalRecord?.max_users || 0);
+    if (customQuota > 0) return customQuota;
+    return currentLicence?.max_users || 5;
   }, [currentLicence, activeHospitalRecord]);
 
   const isQuotaReached = useMemo(() => {
@@ -924,7 +941,8 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
     referentials: 'Référentiels',
     cashier_settings: 'Caisse',
     services: 'Services',
-    protocols: 'Protocoles'
+    protocols: 'Protocoles',
+    whatsapp_agent: 'Agent WhatsApp IA'
   };
 
   return (
@@ -945,14 +963,15 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
           { label: 'Rôles', value: roles.length, onClick: () => setActiveTab('roles'), active: activeTab === 'roles' }
         ]}
         actions={
-          <div className="flex items-center gap-1.5 overflow-x-auto max-w-[500px]">
+          <div className="flex items-center gap-1.5 overflow-x-auto max-w-[620px]">
             {[
               { id: 'users', label: 'Utilisateurs' },
               { id: 'roles', label: 'Rôles' },
               { id: 'establishment', label: 'Établissement' },
               { id: 'referentials', label: 'Référentiels' },
               { id: 'cashier_settings', label: 'Caisse' },
-              { id: 'protocols', label: 'Protocoles' }
+              { id: 'protocols', label: 'Protocoles' },
+              { id: 'whatsapp_agent', label: '💬 WhatsApp IA' }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -2385,6 +2404,14 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 </button>
               </div>
             </div>
+          )}
+
+          {activeTab === 'whatsapp_agent' && (
+            <WhatsAppAgentSettings
+              currentUser={user}
+              usersList={users}
+              staffOnlyMode={false}
+            />
           )}
         </div>
       </main>
