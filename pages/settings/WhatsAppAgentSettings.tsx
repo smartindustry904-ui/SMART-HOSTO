@@ -506,10 +506,14 @@ async function generateClientSideAgentReply(
   const apiKey = (config.geminiApiKey || (process.env as any).GEMINI_API_KEY || '').trim();
 
   if (apiKey) {
-    const primaryModel = (config.geminiModel || 'gemini-2.5-pro').trim();
-    const modelsToTry = primaryModel === 'gemini-2.5-pro'
-      ? ['gemini-2.5-pro', 'gemini-2.5-flash']
-      : [primaryModel, 'gemini-2.5-flash'];
+    const primaryModel = (config.geminiModel || 'gemini-3.5-flash').trim();
+    const modelsToTry = [
+      primaryModel,
+      'gemini-3.5-flash',
+      'gemini-3-flash-preview',
+      'gemini-3.1-pro-preview',
+      'gemini-2.5-flash'
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
 
     for (const model of modelsToTry) {
       try {
@@ -567,7 +571,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
     accessToken: '',
     verifyToken: 'smarthosto_meta_verify_2026',
     geminiApiKey: '',
-    geminiModel: 'gemini-2.5-pro',
+    geminiModel: 'gemini-3.5-flash',
     allowUnregisteredPreview: true,
     systemPrompt: DEFAULT_SYSTEM_PROMPT
   });
@@ -1364,9 +1368,10 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
                   onChange={e => setConfig({ ...config, geminiModel: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 text-xs font-bold"
                 >
-                  <option value="gemini-2.5-pro">gemini-2.5-pro (Flagship • Raisonnement & Synthèse Maximale)</option>
-                  <option value="gemini-2.5-flash">gemini-2.5-flash (Ultra rapide • Équilibré)</option>
-                  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                  <option value="gemini-3.5-flash">gemini-3.5-flash (Nouvelle Génération • Recommandé)</option>
+                  <option value="gemini-3.1-pro-preview">gemini-3.1-pro-preview (Flagship Pro • Raisonnement maximal)</option>
+                  <option value="gemini-3-flash-preview">gemini-3-flash-preview (Haute performance)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash (Classique stable)</option>
                 </select>
               </div>
             </div>

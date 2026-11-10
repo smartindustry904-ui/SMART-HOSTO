@@ -2129,10 +2129,14 @@ async function generateDynamicReportSpec(
   const staff = ctx.staff || {};
 
   if (apiKey) {
-    const primaryModel = (config.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-pro').trim();
-    const modelsToTry = primaryModel === 'gemini-2.5-pro'
-      ? ['gemini-2.5-pro', 'gemini-2.5-flash']
-      : [primaryModel, 'gemini-2.5-flash'];
+    const primaryModel = (config.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-3.5-flash').trim();
+    const modelsToTry = [
+      primaryModel,
+      'gemini-3.5-flash',
+      'gemini-3-flash-preview',
+      'gemini-3.1-pro-preview',
+      'gemini-2.5-flash'
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
 
     const systemInstruction = `Tu es l'analyste en chef et auditeur médical du Système d'Information Hospitalier SMART-HOSTO.
 Ta mission est de concevoir la spécification d'un rapport certifié officiel SUR-MESURE (JSON).
@@ -2766,10 +2770,14 @@ async function generateStaffAgentReply(
   const apiKey = (config.geminiApiKey || process.env.GEMINI_API_KEY || '').trim();
 
   if (apiKey) {
-    const primaryModel = (config.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-pro').trim();
-    const modelsToTry = primaryModel === 'gemini-2.5-pro'
-      ? ['gemini-2.5-pro', 'gemini-2.5-flash']
-      : [primaryModel, 'gemini-2.5-flash'];
+    const primaryModel = (config.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-3.5-flash').trim();
+    const modelsToTry = [
+      primaryModel,
+      'gemini-3.5-flash',
+      'gemini-3-flash-preview',
+      'gemini-3.1-pro-preview',
+      'gemini-2.5-flash'
+    ].filter((v, i, a) => v && a.indexOf(v) === i);
 
     // Build multi-turn conversational history for continuous contextual memory
     const historyTurns = await getRecentConversationHistory(staffDoc?.phone || staffDoc?.id || '', 8);
