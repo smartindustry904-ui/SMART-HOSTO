@@ -2483,8 +2483,8 @@ async function generateStaffAgentReply(
           }
         ],
         generationConfig: {
-          temperature: 0.3,
-          maxOutputTokens: 700
+          temperature: 0.25,
+          maxOutputTokens: 2048
         }
       };
 
@@ -2791,22 +2791,10 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
             };
           }
 
-          const { reply, modelUsed } = await generateStaffAgentReply(textBody, staffDoc, config);
-          const sendRes = await sendMetaWhatsAppMessage(fromPhone, reply, config);
+          // 1. Build live staff & hospital context once
+          const staffContext = await buildStaffHospitalContext(staffDoc);
 
-          await logWhatsAppMessage({
-            direction: 'OUTBOUND',
-            staffId: staffDoc.id,
-            staffName: staffDoc.name,
-            staffRole: staffDoc.role,
-            phone: fromPhone,
-            message: reply,
-            source: 'META_WEBHOOK',
-            aiModel: modelUsed,
-            metaMessageId: sendRes.metaMessageId
-          });
-
-          // Check if user requested a downloadable document (PDF / Excel)
+          // 2. Check if user requested a downloadable document (PDF / Excel)
           const lowerReq = textBody.toLowerCase();
           const isDocRequest =
             lowerReq.includes('pdf') ||
@@ -2822,19 +2810,37 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
 
           if (isDocRequest && config.phoneNumberId && config.accessToken) {
             try {
-              // 1. Generate tailored Dynamic Report Spec using Gemini & live staff/hospital context
-              const spec = await generateDynamicReportSpec(textBody, staffDoc, config);
+              // Generate conversational summary and dynamic report spec simultaneously in parallel
+              const [agentReply, reportSpec] = await Promise.all([
+                generateStaffAgentReply(textBody, staffDoc, config, staffContext),
+                generateDynamicReportSpec(textBody, staffContext, config)
+              ]);
 
+              // Send conversational summary first
+              const sendRes = await sendMetaWhatsAppMessage(fromPhone, agentReply.reply, config);
+              await logWhatsAppMessage({
+                direction: 'OUTBOUND',
+                staffId: staffDoc.id,
+                staffName: staffDoc.name,
+                staffRole: staffDoc.role,
+                phone: fromPhone,
+                message: agentReply.reply,
+                source: 'META_WEBHOOK',
+                aiModel: agentReply.modelUsed,
+                metaMessageId: sendRes.metaMessageId
+              });
+
+              // Prepare & dispatch document immediately right after
               const isExcel = lowerReq.includes('excel') || lowerReq.includes('csv') || lowerReq.includes('tableur');
               const format = isExcel ? 'excel' : 'pdf';
               const ext = isExcel ? 'csv' : 'pdf';
               const contentType = isExcel ? 'text/csv; charset=utf-8' : 'application/pdf';
 
               const buffer = isExcel
-                ? Buffer.from(generateReportExcelFromSpec(spec), 'utf-8')
-                : generateReportPdfFromSpec(spec);
+                ? Buffer.from(generateReportExcelFromSpec(reportSpec), 'utf-8')
+                : generateReportPdfFromSpec(reportSpec);
 
-              const cleanTitle = (spec.title || 'RAPPORT')
+              const cleanTitle = (reportSpec.title || 'RAPPORT')
                 .normalize('NFD')
                 .replace(/[\u0300-\u036f]/g, '')
                 .replace(/[^a-zA-Z0-9]/g, '_')
@@ -2842,9 +2848,8 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
                 .slice(0, 32);
 
               const filename = `SMART-HOSTO_${cleanTitle}_${new Date().toISOString().slice(0, 10)}.${ext}`;
-              const caption = `📄 ${spec.title} — SMART-HOSTO SIH (Certifié)`;
+              const caption = `📄 ${reportSpec.title} — SMART-HOSTO SIH (Certifié)`;
 
-              // 2. Cache dynamic report in memory for Meta WhatsApp download
               const reportId = 'rep_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
               dynamicReportsMap.set(reportId, {
                 id: reportId,
@@ -2875,6 +2880,21 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
             } catch (docErr) {
               console.error('Error dispatching dynamic WhatsApp document:', docErr);
             }
+          } else {
+            const { reply, modelUsed } = await generateStaffAgentReply(textBody, staffDoc, config, staffContext);
+            const sendRes = await sendMetaWhatsAppMessage(fromPhone, reply, config);
+
+            await logWhatsAppMessage({
+              direction: 'OUTBOUND',
+              staffId: staffDoc.id,
+              staffName: staffDoc.name,
+              staffRole: staffDoc.role,
+              phone: fromPhone,
+              message: reply,
+              source: 'META_WEBHOOK',
+              aiModel: modelUsed,
+              metaMessageId: sendRes.metaMessageId
+            });
           }
         }
       }
