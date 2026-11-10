@@ -159,48 +159,51 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
         {activeTab === 'WAITING' && (
           <>
             {waitingQueue.map((p, idx) => (
-              <div key={`${p.queueDocId || p.id || 'patient'}-waiting-${idx}`} className="bg-white rounded-2xl border border-slate-200/90 hover:border-blue-500 hover:shadow-xl transition-all group relative overflow-hidden flex flex-col justify-between p-4.5">
-                <div className="absolute top-1 right-1 p-2 opacity-5 group-hover:scale-110 transition-transform pointer-events-none">
-                  <Clock size={48} />
+              <div 
+                key={`${p.queueDocId || p.id || 'patient'}-waiting-${idx}`} 
+                className="bg-white rounded-3xl border border-slate-200/80 shadow-md shadow-slate-200/60 hover:shadow-2xl hover:shadow-blue-500/15 hover:-translate-y-1 hover:border-blue-500 transition-all duration-300 group relative overflow-hidden flex flex-col justify-between p-6"
+              >
+                <div className="absolute top-2 right-2 p-3 opacity-5 group-hover:scale-110 transition-transform pointer-events-none">
+                  <Clock size={56} />
                 </div>
                 
                 <div>
-                  <div className="flex justify-between items-start mb-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors">
-                        <Users size={16} />
+                  <div className="flex justify-between items-start mb-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors shadow-2xs">
+                        <Users size={18} />
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-[9px] font-black text-slate-400 font-mono tracking-wider uppercase">{p.id}</span>
+                        <span className="text-[10px] font-black text-slate-400 font-mono tracking-wider uppercase">{p.id}</span>
                         {p.hospitalizedOrigin && (
-                          <span className="text-[8px] font-black text-blue-600 uppercase tracking-tight bg-blue-50 px-1 py-0.5 rounded border border-blue-100 mt-0.5 flex items-center gap-1">
-                            <Activity size={9} /> {p.hospitalizedOrigin}
+                          <span className="text-[8.5px] font-black text-blue-600 uppercase tracking-tight bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 mt-0.5 flex items-center gap-1">
+                            <Activity size={10} /> {p.hospitalizedOrigin}
                           </span>
                         )}
                       </div>
                     </div>
-                    <div className={`px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider border ${getPriorityColor(p.priority || 'normal')}`}>
+                    <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border shadow-2xs ${getPriorityColor(p.priority || 'normal')}`}>
                       {p.priority || 'NORMAL'}
                     </div>
                   </div>
 
-                  <h3 className="text-base font-black mb-0.5 text-slate-900 truncate tracking-tight">{p.lastName} {p.firstName}</h3>
-                  <p className="text-xs text-slate-500 font-medium mb-2.5">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
+                  <h3 className="text-lg font-black mb-1 text-slate-900 truncate tracking-tight">{p.lastName} {p.firstName}</h3>
+                  <p className="text-xs text-slate-500 font-medium mb-3.5">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
 
-                  <div className="bg-slate-50 rounded-xl p-2.5 mb-2.5 border border-slate-100">
-                    <p className="text-[8.5px] font-black text-slate-400 uppercase mb-0.5">Motif & Aperçu</p>
-                    <p className="text-xs font-bold text-slate-700 truncate mb-1.5">{p.motifLabel || p.motif}</p>
+                  <div className="bg-slate-50/90 rounded-2xl p-3 mb-3.5 border border-slate-100 shadow-2xs">
+                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Motif & Aperçu</p>
+                    <p className="text-xs font-bold text-slate-700 truncate mb-2">{p.motifLabel || p.motif}</p>
                     <div className="flex flex-wrap gap-1.5">
                       {p.allergies && p.allergies.length > 0 && (
-                        <span className="bg-rose-50 text-rose-600 px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase border border-rose-100 flex items-center gap-1">
-                          <AlertCircle size={9} /> Allergies
+                        <span className="bg-rose-50 text-rose-600 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase border border-rose-100 flex items-center gap-1">
+                          <AlertCircle size={10} /> Allergies
                         </span>
                       )}
-                      <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase border border-blue-100">
+                      <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase border border-blue-100">
                         Passage: 12/03
                       </span>
                     </div>
@@ -213,67 +216,67 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
 
                     return (
                       <>
-                        <div className="flex flex-wrap gap-1.5 mb-2.5">
+                        <div className="flex flex-wrap gap-1.5 mb-3.5">
                           {isPaid ? (
-                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs">
-                              <Check size={10} className="text-emerald-600" />
+                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs">
+                              <Check size={11} className="text-emerald-600" />
                               <span>Ticket Réglé</span>
                             </span>
                           ) : isEmergency ? (
-                            <span className="bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs animate-pulse">
-                              <Zap size={10} className="text-rose-600" />
+                            <span className="bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs animate-pulse">
+                              <Zap size={11} className="text-rose-600" />
                               <span>Urgence Vitale</span>
                             </span>
                           ) : (
-                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs">
-                              <AlertTriangle size={10} className="text-amber-600" />
+                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs">
+                              <AlertTriangle size={11} className="text-amber-600" />
                               <span>Ticket Non Encaissé</span>
                             </span>
                           )}
 
                           {p.status === 'waiting_triage' && (
-                            <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-lg text-[8.5px] font-black uppercase tracking-wider flex items-center gap-1">
-                              <Activity size={10} className="text-indigo-600" />
+                            <span className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                              <Activity size={11} className="text-indigo-600" />
                               <span>Attente Triage</span>
                             </span>
                           )}
                         </div>
 
-                        <div className="grid grid-cols-3 gap-1.5 mb-3">
-                          <div className="bg-slate-50 p-1.5 rounded-xl text-center border border-slate-100">
-                            <p className="text-[7.5px] font-black text-slate-400 uppercase">T°</p>
+                        <div className="grid grid-cols-3 gap-2 mb-4">
+                          <div className="bg-slate-50/90 p-2 rounded-xl text-center border border-slate-100 shadow-2xs">
+                            <p className="text-[8px] font-black text-slate-400 uppercase">T°</p>
                             <p className="text-xs font-black text-rose-600">{p.vitals?.temp || '--'}°C</p>
                           </div>
-                          <div className="bg-slate-50 p-1.5 rounded-xl text-center border border-slate-100">
-                            <p className="text-[7.5px] font-black text-slate-400 uppercase">TA</p>
+                          <div className="bg-slate-50/90 p-2 rounded-xl text-center border border-slate-100 shadow-2xs">
+                            <p className="text-[8px] font-black text-slate-400 uppercase">TA</p>
                             <p className="text-xs font-black text-slate-900">{p.vitals?.bp || (p.vitals?.bpSys && p.vitals?.bpDia ? `${p.vitals.bpSys}/${p.vitals.bpDia}` : '--')}</p>
                           </div>
-                          <div className="bg-slate-50 p-1.5 rounded-xl text-center border border-slate-100">
-                            <p className="text-[7.5px] font-black text-slate-400 uppercase">SPO2</p>
+                          <div className="bg-slate-50/90 p-2 rounded-xl text-center border border-slate-100 shadow-2xs">
+                            <p className="text-[8px] font-black text-slate-400 uppercase">SPO2</p>
                             <p className="text-xs font-black text-emerald-600">{p.vitals?.spo2 || '--'}%</p>
                           </div>
                         </div>
 
-                        <div className="flex flex-col gap-2 pt-2.5 border-t border-slate-100">
+                        <div className="flex flex-col gap-2.5 pt-3.5 border-t border-slate-100">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-1.5">
-                              <div className={`w-1.5 h-1.5 rounded-full ${getPriorityDot(p.priority || 'normal')} animate-pulse`}></div>
-                              <span className="text-[8.5px] font-bold uppercase tracking-wider text-slate-400">Arrivé {p.time}</span>
+                              <div className={`w-2 h-2 rounded-full ${getPriorityDot(p.priority || 'normal')} animate-pulse`}></div>
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Arrivé à {p.time}</span>
                             </div>
-                            <div className="flex gap-1">
+                            <div className="flex gap-1.5">
                               <button 
                                 onClick={() => setSummaryPatient(p)}
-                                className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all cursor-pointer" 
+                                className="p-1.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all cursor-pointer shadow-2xs" 
                                 title="Voir résumé"
                               >
-                                <Eye size={13} />
+                                <Eye size={14} />
                               </button>
                               <button 
                                 onClick={() => setReorientPatient(p)}
-                                className="p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-blue-600 hover:text-white transition-all cursor-pointer" 
+                                className="p-1.5 bg-slate-100 text-slate-600 rounded-xl hover:bg-blue-600 hover:text-white transition-all cursor-pointer shadow-2xs" 
                                 title="Réorienter"
                               >
-                                <RefreshCw size={13} />
+                                <RefreshCw size={14} />
                               </button>
                               <button 
                                 onClick={() => {
@@ -281,10 +284,10 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
                                   setCancelReason('');
                                   setCancelError('');
                                 }}
-                                className="p-1.5 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-600 hover:text-white transition-all cursor-pointer" 
+                                className="p-1.5 bg-rose-50 text-rose-600 rounded-xl hover:bg-rose-600 hover:text-white transition-all cursor-pointer shadow-2xs" 
                                 title="Annuler"
                               >
-                                <X size={13} />
+                                <X size={14} />
                               </button>
                             </div>
                           </div>
@@ -293,30 +296,30 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
                           {isPaid ? (
                             <button 
                               onClick={() => onStartConsultation(p)}
-                              className="w-full bg-slate-900 text-white px-3 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-wider hover:bg-blue-600 transition-all flex items-center justify-center gap-1.5 shadow-sm hover:shadow-blue-600/20 cursor-pointer"
+                              className="w-full bg-slate-900 text-white px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-wider hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-blue-600/25 cursor-pointer"
                             >
-                              <Stethoscope size={13} />
-                              <span>Démarrer</span>
-                              <ChevronRight size={13} />
+                              <Stethoscope size={14} />
+                              <span>Démarrer consultation</span>
+                              <ChevronRight size={14} />
                             </button>
                           ) : isEmergency ? (
                             <button 
                               onClick={() => onStartConsultation(p)}
-                              className="w-full bg-gradient-to-r from-rose-600 to-amber-600 text-white px-3 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-wider hover:brightness-110 transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-rose-600/25 cursor-pointer"
+                              className="w-full bg-gradient-to-r from-rose-600 to-amber-600 text-white px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-wider hover:brightness-110 transition-all flex items-center justify-center gap-2 shadow-md shadow-rose-600/25 cursor-pointer"
                             >
-                              <Zap size={13} className="animate-pulse" />
+                              <Zap size={14} className="animate-pulse" />
                               <span>Prise en charge Immédiate</span>
-                              <ChevronRight size={13} />
+                              <ChevronRight size={14} />
                             </button>
                           ) : (
                             <button 
                               onClick={() => onStartConsultation(p)}
-                              className="w-full bg-slate-900 hover:bg-amber-600 text-white px-3 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-sm hover:shadow-amber-600/20 cursor-pointer"
+                              className="w-full bg-slate-900 hover:bg-amber-600 text-white px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-amber-600/25 cursor-pointer"
                               title="Ouvrir la consultation (ticket en attente d'encaissement à la Caisse)"
                             >
-                              <AlertTriangle size={13} className="text-amber-400" />
+                              <AlertTriangle size={14} className="text-amber-400" />
                               <span>Démarrer (Non Encaissé)</span>
-                              <ChevronRight size={13} />
+                              <ChevronRight size={14} />
                             </button>
                           )}
                         </div>
@@ -328,7 +331,7 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
             ))}
 
             {waitingQueue.length === 0 && (
-              <div className="col-span-full py-20 text-center bg-slate-100 rounded-3xl border-2 border-dashed border-slate-200">
+              <div className="col-span-full py-24 text-center bg-slate-50/80 rounded-3xl border-2 border-dashed border-slate-200">
                 <Users size={48} className="mx-auto text-slate-300 mb-4 opacity-30" />
                 <h3 className="text-base font-black text-slate-400 uppercase tracking-wider">Aucun patient en attente</h3>
                 <p className="text-xs text-slate-500 mt-1 font-medium italic">Reposez-vous docteur, la file est vide.</p>
@@ -340,20 +343,23 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
         {activeTab === 'IN_PROGRESS' && (
           <>
             {inProgressQueue.map((p, idx) => (
-              <div key={`${p.queueDocId || p.appointmentId || p.id || 'patient'}-inprog-${idx}`} className="bg-white rounded-2xl border border-slate-200/90 hover:border-blue-500 hover:shadow-xl transition-all group relative overflow-hidden flex flex-col justify-between p-4.5">
+              <div 
+                key={`${p.queueDocId || p.appointmentId || p.id || 'patient'}-inprog-${idx}`} 
+                className="bg-white rounded-3xl border border-slate-200/80 shadow-md shadow-slate-200/60 hover:shadow-2xl hover:shadow-blue-500/15 hover:-translate-y-1 hover:border-blue-500 transition-all duration-300 group relative overflow-hidden flex flex-col justify-between p-6"
+              >
                 <div>
-                  <div className="absolute top-1 right-1 p-2 opacity-5 group-hover:scale-110 transition-transform pointer-events-none">
-                    <Activity size={48} />
+                  <div className="absolute top-2 right-2 p-3 opacity-5 group-hover:scale-110 transition-transform pointer-events-none">
+                    <Activity size={56} />
                   </div>
                   
-                  <div className="flex justify-between items-start mb-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors">
-                        <Users size={16} />
+                  <div className="flex justify-between items-start mb-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors shadow-2xs">
+                        <Users size={18} />
                       </div>
-                      <span className="text-[9px] font-black text-slate-400 font-mono tracking-wider uppercase">{p.id}</span>
+                      <span className="text-[10px] font-black text-slate-400 font-mono tracking-wider uppercase">{p.id}</span>
                     </div>
-                    <div className={`px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider border ${
+                    <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border shadow-2xs ${
                       p.status === 'ready_for_discharge' 
                         ? 'bg-emerald-100 text-emerald-600 border-emerald-200' 
                         : 'bg-blue-100 text-blue-600 border-blue-200'
@@ -362,14 +368,14 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
                     </div>
                   </div>
 
-                  <h3 className="text-base font-black mb-0.5 text-slate-900 truncate tracking-tight">{p.lastName} {p.firstName}</h3>
-                  <p className="text-xs text-slate-500 font-medium mb-2.5">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
+                  <h3 className="text-lg font-black mb-1 text-slate-900 truncate tracking-tight">{p.lastName} {p.firstName}</h3>
+                  <p className="text-xs text-slate-500 font-medium mb-3.5">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
 
-                  <div className="bg-slate-50 rounded-xl p-2.5 mb-2.5 border border-slate-100">
-                    <p className="text-[8.5px] font-black text-slate-400 uppercase mb-0.5">Motif d'admission</p>
-                    <p className="text-xs font-bold text-slate-700 truncate mb-1.5">{p.motifLabel || p.motif}</p>
+                  <div className="bg-slate-50/90 rounded-2xl p-3 mb-3.5 border border-slate-100 shadow-2xs">
+                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Motif d'admission</p>
+                    <p className="text-xs font-bold text-slate-700 truncate mb-2">{p.motifLabel || p.motif}</p>
                     <div className="flex flex-wrap gap-1.5">
-                      <span className={`px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase border ${
+                      <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase border ${
                         p.status === 'ready_for_discharge'
                           ? 'bg-emerald-50 border-emerald-100 text-emerald-600'
                           : 'bg-blue-50 border-blue-100 text-blue-600'
@@ -379,36 +385,36 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-1.5 mb-3">
-                    <div className="bg-slate-50 p-1.5 rounded-xl text-center border border-slate-100">
-                      <p className="text-[7.5px] font-black text-slate-400 uppercase">T°</p>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    <div className="bg-slate-50/90 p-2 rounded-xl text-center border border-slate-100 shadow-2xs">
+                      <p className="text-[8px] font-black text-slate-400 uppercase">T°</p>
                       <p className="text-xs font-black text-rose-600">{p.vitals?.temp || '--'}°C</p>
                     </div>
-                    <div className="bg-slate-50 p-1.5 rounded-xl text-center border border-slate-100">
-                      <p className="text-[7.5px] font-black text-slate-400 uppercase">TA</p>
+                    <div className="bg-slate-50/90 p-2 rounded-xl text-center border border-slate-100 shadow-2xs">
+                      <p className="text-[8px] font-black text-slate-400 uppercase">TA</p>
                       <p className="text-xs font-black text-slate-900">{p.vitals?.bp || '--'}</p>
                     </div>
-                    <div className="bg-slate-50 p-1.5 rounded-xl text-center border border-slate-100">
-                      <p className="text-[7.5px] font-black text-slate-400 uppercase">SPO2</p>
+                    <div className="bg-slate-50/90 p-2 rounded-xl text-center border border-slate-100 shadow-2xs">
+                      <p className="text-[8px] font-black text-slate-400 uppercase">SPO2</p>
                       <p className="text-xs font-black text-emerald-600">{p.vitals?.spo2 || '--'}%</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="pt-2.5 border-t border-slate-100">
+                <div className="pt-3.5 border-t border-slate-100">
                   {p.status === 'ready_for_discharge' ? (
                     <button 
                       onClick={() => onManageDischarge && onManageDischarge(p)}
-                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-wider shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-wider shadow-md hover:shadow-emerald-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      <Check size={13} /> Gérer sortie <ChevronRight size={13} />
+                      <Check size={14} /> Gérer la sortie (Décharge) <ChevronRight size={14} />
                     </button>
                   ) : (
                     <button 
                       onClick={() => onResumeConsultation && onResumeConsultation(p)}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white px-3 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-wider shadow-sm transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-wider shadow-md hover:shadow-blue-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
-                      <Activity size={13} /> Reprendre <ChevronRight size={13} />
+                      <Activity size={14} /> Reprendre Consultation <ChevronRight size={14} />
                     </button>
                   )}
                 </div>
@@ -416,7 +422,7 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
             ))}
 
             {inProgressQueue.length === 0 && (
-              <div className="col-span-full py-20 text-center bg-slate-100 rounded-3xl border-2 border-dashed border-slate-200">
+              <div className="col-span-full py-24 text-center bg-slate-50/80 rounded-3xl border-2 border-dashed border-slate-200">
                 <Activity size={48} className="mx-auto text-slate-300 mb-4 opacity-30 animate-pulse" />
                 <h3 className="text-base font-black text-slate-400 uppercase tracking-wider">Aucune consultation en cours</h3>
                 <p className="text-xs text-slate-500 font-medium italic mt-1">Tous les patients appelés ont été libérés.</p>
@@ -428,71 +434,74 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
         {activeTab === 'HOSPITALIZED' && (
           <>
             {hospitalizedQueue.map((p, idx) => (
-              <div key={`${p.id || 'hosp'}-hosp-${idx}`} className="bg-white rounded-2xl border border-slate-200/90 hover:border-blue-500 hover:shadow-xl transition-all group relative overflow-hidden flex flex-col justify-between p-4.5">
+              <div 
+                key={`${p.id || 'hosp'}-hosp-${idx}`} 
+                className="bg-white rounded-3xl border border-slate-200/80 shadow-md shadow-slate-200/60 hover:shadow-2xl hover:shadow-blue-500/15 hover:-translate-y-1 hover:border-blue-500 transition-all duration-300 group relative overflow-hidden flex flex-col justify-between p-6"
+              >
                 <div>
-                  <div className="absolute top-1 right-1 p-2 opacity-5 group-hover:scale-110 transition-transform pointer-events-none">
-                    <BedDouble size={48} />
+                  <div className="absolute top-2 right-2 p-3 opacity-5 group-hover:scale-110 transition-transform pointer-events-none">
+                    <BedDouble size={56} />
                   </div>
                   
-                  <div className="flex justify-between items-start mb-2.5">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors">
-                        <Users size={16} />
+                  <div className="flex justify-between items-start mb-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 group-hover:text-blue-600 transition-colors shadow-2xs">
+                        <Users size={18} />
                       </div>
                       <div className="flex flex-col">
-                        <span className="text-[9px] font-black text-slate-400 font-mono tracking-wider uppercase">{p.id}</span>
-                        <span className="text-[8px] font-black text-blue-600 uppercase tracking-tight bg-blue-50 px-1 py-0.5 rounded border border-blue-100 mt-0.5 flex items-center gap-1">
-                          <Activity size={9} /> {p.hospitalizedOrigin}
+                        <span className="text-[10px] font-black text-slate-400 font-mono tracking-wider uppercase">{p.id}</span>
+                        <span className="text-[8.5px] font-black text-blue-600 uppercase tracking-tight bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 mt-0.5 flex items-center gap-1">
+                          <Activity size={10} /> {p.hospitalizedOrigin}
                         </span>
                       </div>
                     </div>
-                    <div className={`px-2 py-0.5 rounded-full text-[8.5px] font-black uppercase tracking-wider border ${getPriorityColor(p.priority || 'normal')}`}>
+                    <div className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border shadow-2xs ${getPriorityColor(p.priority || 'normal')}`}>
                       {p.priority || 'NORMAL'}
                     </div>
                   </div>
 
-                  <h3 className="text-base font-black mb-0.5 text-slate-900 truncate tracking-tight">{p.lastName} {p.firstName}</h3>
-                  <p className="text-xs text-slate-500 font-medium mb-2.5">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
+                  <h3 className="text-lg font-black mb-1 text-slate-900 truncate tracking-tight">{p.lastName} {p.firstName}</h3>
+                  <p className="text-xs text-slate-500 font-medium mb-3.5">{p.age} ans • {p.gender === 'M' ? 'Masculin' : 'Féminin'}</p>
 
-                  <div className="bg-slate-50 rounded-xl p-2.5 mb-2.5 border border-slate-100">
-                    <p className="text-[8.5px] font-black text-slate-400 uppercase mb-0.5">Motif d'hospitalisation</p>
-                    <p className="text-xs font-bold text-slate-700 mb-1.5 truncate">{p.motif}</p>
+                  <div className="bg-slate-50/90 rounded-2xl p-3 mb-3.5 border border-slate-100 shadow-2xs">
+                    <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Motif d'hospitalisation</p>
+                    <p className="text-xs font-bold text-slate-700 mb-2 truncate">{p.motif}</p>
                     <div className="flex flex-wrap gap-1.5">
-                      <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-md text-[8.5px] font-black uppercase border border-blue-100">
+                      <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase border border-blue-100">
                         Admis: {p.time}
                       </span>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-3 gap-1.5 mb-3">
-                    <div className="bg-slate-50 p-1.5 rounded-xl text-center border border-slate-100">
-                      <p className="text-[7.5px] font-black text-slate-400 uppercase">T°</p>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    <div className="bg-slate-50/90 p-2 rounded-xl text-center border border-slate-100 shadow-2xs">
+                      <p className="text-[8px] font-black text-slate-400 uppercase">T°</p>
                       <p className="text-xs font-black text-rose-600">{p.vitals?.temp || '--'}°C</p>
                     </div>
-                    <div className="bg-slate-50 p-1.5 rounded-xl text-center border border-slate-100">
-                      <p className="text-[7.5px] font-black text-slate-400 uppercase">TA</p>
+                    <div className="bg-slate-50/90 p-2 rounded-xl text-center border border-slate-100 shadow-2xs">
+                      <p className="text-[8px] font-black text-slate-400 uppercase">TA</p>
                       <p className="text-xs font-black text-slate-900">{p.vitals?.bp || '--'}</p>
                     </div>
-                    <div className="bg-slate-50 p-1.5 rounded-xl text-center border border-slate-100">
-                      <p className="text-[7.5px] font-black text-slate-400 uppercase">Pouls</p>
+                    <div className="bg-slate-50/90 p-2 rounded-xl text-center border border-slate-100 shadow-2xs">
+                      <p className="text-[8px] font-black text-slate-400 uppercase">Pouls</p>
                       <p className="text-xs font-black text-emerald-600">{p.vitals?.pulse || '--'} bpm</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="pt-2.5 border-t border-slate-100">
+                <div className="pt-3.5 border-t border-slate-100">
                   <button 
                     onClick={() => onStartConsultation(p)}
-                    className="w-full bg-slate-900 text-white px-3 py-2.5 rounded-xl font-black text-[11px] uppercase tracking-wider hover:bg-blue-600 transition-all flex items-center justify-center gap-1.5 shadow-sm hover:shadow-blue-600/20"
+                    className="w-full bg-slate-900 text-white px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-wider hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-blue-600/25 cursor-pointer"
                   >
-                    Visite médicale <ChevronRight size={13} />
+                    Visite médicale <ChevronRight size={14} />
                   </button>
                 </div>
               </div>
             ))}
 
             {hospitalizedQueue.length === 0 && (
-              <div className="col-span-full py-20 text-center bg-slate-100 rounded-3xl border-2 border-dashed border-slate-200">
+              <div className="col-span-full py-24 text-center bg-slate-50/80 rounded-3xl border-2 border-dashed border-slate-200">
                 <BedDouble size={48} className="mx-auto text-slate-300 mb-4 opacity-30" />
                 <h3 className="text-base font-black text-slate-400 uppercase tracking-wider">Aucun patient hospitalisé</h3>
                 <p className="text-xs text-slate-500 font-medium italic mt-1">Le service est actuellement vide.</p>
