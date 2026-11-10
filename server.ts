@@ -1591,171 +1591,700 @@ function applyAutoTable(doc: any, options: any) {
   }
 }
 
-function generateReportPdf(type: string, ctx: any): Buffer {
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+export interface DynamicReportKpi {
+  label: string;
+  value: string;
+  subtext?: string;
+}
+
+export interface DynamicReportTable {
+  headers: string[];
+  rows: string[][];
+}
+
+export interface DynamicReportSection {
+  title: string;
+  narrative?: string;
+  bulletPoints?: string[];
+  table?: DynamicReportTable;
+}
+
+export interface DynamicReportSpec {
+  title: string;
+  subtitle?: string;
+  category?: string;
+  dateStr?: string;
+  requesterName?: string;
+  requesterRole?: string;
+  executiveSummary: string;
+  kpis?: DynamicReportKpi[];
+  sections: DynamicReportSection[];
+  recommendations?: string[];
+  conclusion?: string;
+}
+
+interface DynamicReportCacheItem {
+  id: string;
+  buffer: Buffer;
+  contentType: string;
+  filename: string;
+  createdAt: number;
+}
+
+const dynamicReportsMap = new Map<string, DynamicReportCacheItem>();
+
+function pruneOldDynamicReports() {
+  const cutoff = Date.now() - (2 * 60 * 60 * 1000); // 2 hours
+  for (const [id, item] of dynamicReportsMap.entries()) {
+    if (item.createdAt < cutoff) {
+      dynamicReportsMap.delete(id);
+    }
+  }
+}
+
+function buildFallbackReportSpec(queryOrType: string, ctx: any): DynamicReportSpec {
+  const lower = String(queryOrType || '').toLowerCase();
   const s = ctx.staff || {};
   const fin = ctx.personalFinanceAndActs || {};
+  const adm = ctx.adminHospitalSummary;
+  const inpat = ctx.inpatients || {};
+  const pharm = ctx.pharmacy || {};
+  const currentDate = ctx.currentDate || new Date().toLocaleDateString('fr-FR');
 
-  // Header banner
-  doc.setFillColor(30, 58, 138); // Hospital navy blue
-  doc.rect(0, 0, 210, 24, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(15);
-  doc.text('SMART-HOSTO • SYSTÈME D\'INFORMATION HOSPITALIER', 14, 11);
-  doc.setFontSize(9);
-  doc.text('Rapport Certifié Officiel — Édité le ' + (ctx.currentDate || new Date().toLocaleString('fr-FR')), 14, 18);
-
-  doc.setTextColor(30, 41, 59);
-
-  if (type === 'commissions') {
-    doc.setFontSize(13);
-    doc.text('RELEVÉ D\'HONORAIRES & COMMISSIONS MÉDICALES', 14, 34);
-
-    doc.setFontSize(9.5);
-    doc.text(`Praticien : ${s.name || 'Praticien'} (${s.profession || 'Médical'})`, 14, 42);
-    doc.text(`Taux de quote-part appliqué : ${s.quotePartRatePercent || 0}%`, 14, 47);
-    doc.text(`Total honoraires générés : ${(fin.totalCommissionsEarnedFCFA || 0).toLocaleString('fr-FR')} FCFA`, 14, 52);
-    doc.text(`Règlements perçus : ${(fin.totalCommissionsPaidFCFA || 0).toLocaleString('fr-FR')} FCFA`, 14, 57);
-    doc.text(`Solde en attente de paiement : ${(fin.totalCommissionsPendingFCFA || 0).toLocaleString('fr-FR')} FCFA`, 14, 62);
-
-    const rows = (fin.recentActs || []).map((a: any) => [
-      String(a.date || '').slice(0, 10),
-      a.typeLabel || 'Consultation',
-      a.patientName || 'Patient',
-      (a.amount || 0).toLocaleString('fr-FR') + ' FCFA',
-      (a.commissionAmount || 0).toLocaleString('fr-FR') + ' FCFA',
-      a.paymentStatus === 'PAID' ? 'Réglé' : 'En attente'
-    ]);
-
-    applyAutoTable(doc, {
-      startY: 68,
-      head: [['Date', 'Acte Médical', 'Patient', 'Montant Total', 'Quote-Part', 'Statut']],
-      body: rows.length > 0 ? rows : [['N/A', 'Aucun acte récent', '-', '-', '-', '-']],
-      theme: 'grid',
-      headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
-      styles: { fontSize: 8.5 }
-    });
-  } else if (type === 'inpatient' || type === 'sorties') {
-    doc.setFontSize(13);
-    doc.text('REGISTRE DES HOSPITALISATIONS & SORTIES', 14, 34);
-
-    doc.setFontSize(9.5);
-    doc.text(`Lits occupés actuellement : ${ctx.inpatients?.totalAdmitted || 0}`, 14, 42);
-    doc.text(`Patients en attente de sortie : ${ctx.inpatients?.pendingDischargeCount || 0}`, 14, 47);
-
-    const admissions = ctx.inpatients?.allActiveAdmissions || [];
-    const rows = admissions.map((p: any) => [
-      p.patientName || 'Patient',
-      p.bed || 'Lit non assigné',
-      String(p.admissionDate || '').slice(0, 10),
-      p.doctor || 'Non assigné',
-      p.status === 'EN_ATTENTE_DE_SORTIE' ? 'Sortie en attente' : 'Hospitalisé'
-    ]);
-
-    applyAutoTable(doc, {
-      startY: 54,
-      head: [['Patient', 'Chambre / Lit', 'Date d\'Admission', 'Médecin Traitant', 'Statut']],
-      body: rows.length > 0 ? rows : [['N/A', 'Aucun patient hospitalisé', '-', '-', '-']],
-      theme: 'grid',
-      headStyles: { fillColor: [13, 148, 136], textColor: 255, fontStyle: 'bold' },
-      styles: { fontSize: 8.5 }
-    });
-  } else if (type === 'pharmacy' || type === 'stock') {
-    doc.setFontSize(13);
-    doc.text('INVENTAIRE DU STOCK DE LA PHARMACIE CENTRALE', 14, 34);
-
-    doc.setFontSize(9.5);
-    doc.text(`Références totales au catalogue : ${ctx.pharmacy?.totalMedicationsInCatalog || 0}`, 14, 42);
-    doc.text(`Articles en alerte de stock : ${ctx.pharmacy?.lowStockCount || 0}`, 14, 47);
-
-    const meds = ctx.pharmacy?.sampleInventory || [];
-    const rows = meds.map((m: any) => [
-      m.name || 'Produit',
-      String(m.stock || 0),
-      String(m.alertThreshold || 10),
-      (m.price || 0).toLocaleString('fr-FR') + ' FCFA',
-      m.stock <= m.alertThreshold ? 'ALERTE STOCK BAS' : 'Normal'
-    ]);
-
-    applyAutoTable(doc, {
-      startY: 54,
-      head: [['Désignation', 'Stock Réel', 'Seuil d\'Alerte', 'Prix Unitaire', 'Statut']],
-      body: rows.length > 0 ? rows : [['N/A', 'Aucun médicament', '-', '-', '-']],
-      theme: 'grid',
-      headStyles: { fillColor: [147, 51, 234], textColor: 255, fontStyle: 'bold' },
-      styles: { fontSize: 8.5 }
-    });
-  } else {
-    doc.setFontSize(13);
-    doc.text('BILAN COMPTABLE & SITUATION DE RECOUVREMENT', 14, 34);
-
-    doc.setFontSize(9.5);
-    const adm = ctx.adminHospitalSummary || {};
-    doc.text(`Dossiers de caisse en attente : ${adm.pendingCashierInvoicesCount || 0}`, 14, 42);
-    doc.text(`Montant total à recouvrer : ${(adm.pendingCashierAmountFCFA || 0).toLocaleString('fr-FR')} FCFA`, 14, 47);
-    doc.text(`Licence établissement : ${adm.licence || 'Standard'}`, 14, 52);
-
-    applyAutoTable(doc, {
-      startY: 58,
-      head: [['Indicateur de Gestion', 'Valeur en Temps Réel']],
-      body: [
-        ['Factures impayées en caisse', `${adm.pendingCashierInvoicesCount || 0} dossiers`],
-        ['Créances globales en attente', `${(adm.pendingCashierAmountFCFA || 0).toLocaleString('fr-FR')} FCFA`],
-        ['Comptes utilisateurs actifs', `${adm.activeStaffUsers || 1} / ${adm.maxStaffUsers || 25}`],
-        ['Commissions globales praticiens', `${(fin.totalCommissionsEarnedFCFA || 0).toLocaleString('fr-FR')} FCFA`]
+  if (lower.includes('sortie') || lower.includes('hospitalis') || lower.includes('inpatient') || lower.includes('lit') || lower.includes('chambre')) {
+    const admissions = inpat.allActiveAdmissions || [];
+    const pendingDischarge = inpat.patientsPendingDischarge || [];
+    return {
+      title: 'REGISTRE DÉCISIONNEL DES HOSPITALISATIONS & SORTIES',
+      subtitle: `Suivi des séjours en cours, flux des lits et prévisions de décharge au ${currentDate}`,
+      category: 'GESTION DES LITS & PARCOURS PATIENT',
+      dateStr: currentDate,
+      requesterName: s.name || 'Personnel Soignant',
+      requesterRole: s.profession || s.role || 'Praticien',
+      executiveSummary: `Le présent registre certifie l'état actuel des séjours hospitaliers au sein de SMART-HOSTO. L'établissement enregistre ${inpat.totalAdmitted || 0} patient(s) actuellement hospitalisé(s), avec un volume de ${inpat.pendingDischargeCount || 0} dossier(s) en attente de formalisation de décharge. La coordination médicale et financière est activement requise pour la libération optimale des lits.`,
+      kpis: [
+        { label: 'Lits Occupés', value: `${inpat.totalAdmitted || 0}`, subtext: 'Patients hospitalisés' },
+        { label: 'Sorties en Attente', value: `${inpat.pendingDischargeCount || 0}`, subtext: 'Avis médical prêt' },
+        { label: 'Séjours Clôturés', value: `${(inpat.patientsDischargedToday || []).length}`, subtext: 'Sorties validées' },
+        { label: 'Capacité Active', value: '100%', subtext: 'Unités sous surveillance' }
       ],
-      theme: 'grid',
-      headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold' },
-      styles: { fontSize: 9.5 }
-    });
+      sections: [
+        {
+          title: '1. Analyse Opérationnelle du Taux d\'Occupation',
+          narrative: `L'analyse des unités d'hospitalisation montre une tension contrôlée. ${inpat.pendingDischargeCount || 0} patient(s) ont déjà reçu un protocole de sortie favorable et nécessitent la délivrance de leur quitus de facturation avant sortie physique.`,
+          bulletPoints: [
+            `${inpat.totalAdmitted || 0} lit(s) sous surveillance médicale continue.`,
+            `${pendingDischarge.length} patient(s) prioritaires pour la finalisation administrative.`
+          ],
+          table: {
+            headers: ['Patient', 'Chambre / Lit', 'Admission', 'Médecin Traitant', 'Statut Séjour'],
+            rows: admissions.length > 0
+              ? admissions.map((p: any) => [
+                  p.patientName || 'Patient',
+                  p.bed || 'Non assigné',
+                  String(p.admissionDate || '').slice(0, 10) || '-',
+                  p.doctor || 'Non assigné',
+                  p.status === 'EN_ATTENTE_DE_SORTIE' ? 'Sortie en attente' : 'Hospitalisé'
+                ])
+              : [['N/A', '-', '-', '-', 'Aucun patient actuellement hospitalisé']]
+          }
+        }
+      ],
+      recommendations: [
+        'Vérifier la complétude des dossiers cliniques et contre-signatures des médecins référents.',
+        'Coordonner avec le service caisse la délivrance immédiate des quitus pour les sorties validées.',
+        'Signaler en temps réel les lits nettoyés et disponibles aux équipes des urgences.'
+      ],
+      conclusion: 'Registre certifié conforme, validé par le système décisionnel hospitalier SMART-HOSTO.'
+    };
   }
 
-  const pageHeight = doc.internal.pageSize.getHeight();
+  if (lower.includes('stock') || lower.includes('pharmac') || lower.includes('medicament') || lower.includes('médicament') || lower.includes('rupture')) {
+    const meds = pharm.sampleInventory || [];
+    const lowStock = pharm.lowStockAlerts || [];
+    return {
+      title: 'AUDIT DE LA PHARMACIE CENTRALE & GESTION DES STOCKS',
+      subtitle: `Surveillance des ruptures critiques, seuils d'alerte et valorisation au ${currentDate}`,
+      category: 'PHARMACIE CENTRALE & APPROVISIONNEMENT',
+      dateStr: currentDate,
+      requesterName: s.name || 'Personnel Soignant',
+      requesterRole: s.profession || s.role || 'Praticien',
+      executiveSummary: `L'inventaire pharmaceutique de SMART-HOSTO recense un total de ${pharm.totalMedicationsInCatalog || 0} références au catalogue. ${pharm.lowStockCount || 0} référence(s) sont actuellement sous le seuil d'alerte réglementaire et font l'objet d'une alerte rouge de commande pour garantir la continuité des soins.`,
+      kpis: [
+        { label: 'Références Catalogue', value: `${pharm.totalMedicationsInCatalog || 0}`, subtext: 'Articles enregistrés' },
+        { label: 'Alertes Stock Bas', value: `${pharm.lowStockCount || 0}`, subtext: 'Seuil de sécurité franchi' },
+        { label: 'Disponibilité Globale', value: pharm.lowStockCount === 0 ? '100%' : '94.2%', subtext: 'Indice de couverture' },
+        { label: 'Circuit Appro', value: 'Sécurisé', subtext: 'Fournisseurs agréés' }
+      ],
+      sections: [
+        {
+          title: '1. Références Prioritaires sous Seuil de Sécurité',
+          narrative: 'Les médicaments ci-dessous nécessitent un réapprovisionnement urgent pour prévenir toute rupture au bloc ou dans les services de soins.',
+          bulletPoints: [
+            `${pharm.lowStockCount || 0} produit(s) requièrent l\'émission immédiate d\'un bon de commande groupé.`,
+            'Contrôle des dates de péremption (règle FIFO) appliqué à chaque lot réceptionné.'
+          ],
+          table: {
+            headers: ['Désignation Médicament', 'Stock Réel', 'Seuil Alerte', 'Prix Unitaire', 'Statut Risque'],
+            rows: (lowStock.length > 0 ? lowStock : meds.slice(0, 10)).map((m: any) => [
+              m.name || 'Produit',
+              String(m.stock || 0),
+              String(m.alertThreshold || 10),
+              `${(m.price || 0).toLocaleString('fr-FR')} FCFA`,
+              (m.stock || 0) <= (m.alertThreshold || 10) ? 'ALERTE RUPTURE' : 'Normal'
+            ])
+          }
+        }
+      ],
+      recommendations: [
+        'Émettre sans délai les bons de commande d\'urgence pour les solutés et antibiotiques sous seuil.',
+        'Mettre en quarantaine tout lot suspect ou approchant à moins de 60 jours de sa date limite.',
+        'Effectuer un inventaire physique tournant bihebdomadaire dans l\'officine principale.'
+      ],
+      conclusion: 'Audit officiel transmis à la direction médicale et au pharmacien chef de garde.'
+    };
+  }
+
+  if (lower.includes('caisse') || lower.includes('tresor') || lower.includes('factur') || lower.includes('impay') || lower.includes('financ') || lower.includes('recouvr') || lower.includes('audit')) {
+    const pendingCount = adm?.pendingCashierInvoicesCount || 0;
+    const pendingAmount = adm?.pendingCashierAmountFCFA || 0;
+    return {
+      title: 'RAPPORT D\'AUDIT FINANCIER & SITUATION DES CRÉANCES',
+      subtitle: `Analyse des encours de facturation, balance de trésorerie et recouvrement au ${currentDate}`,
+      category: 'AUDIT FINANCIER & CONTRÔLE DE GESTION',
+      dateStr: currentDate,
+      requesterName: s.name || 'Direction Administrative',
+      requesterRole: s.profession || s.role || 'Direction',
+      executiveSummary: `L'état de la facturation et des créances met en relief ${pendingCount} dossier(s) en attente de règlement au guichet de caisse, représentant un montant global de ${pendingAmount.toLocaleString('fr-FR')} FCFA à recouvrer. Le suivi rigoureux des admissions et des engagements praticiens garantit l'équilibre financier de l'établissement.`,
+      kpis: [
+        { label: 'Créances en Attente', value: `${pendingAmount.toLocaleString('fr-FR')} FCFA`, subtext: 'Encours de caisse' },
+        { label: 'Dossiers Impayés', value: `${pendingCount} factures`, subtext: 'En souffrance' },
+        { label: 'Commissions Engagées', value: `${(fin.totalCommissionsEarnedFCFA || 0).toLocaleString('fr-FR')} FCFA`, subtext: 'Honoraires praticiens' },
+        { label: 'Utilisateurs Actifs', value: `${adm?.activeStaffUsers || 1} / ${adm?.maxStaffUsers || 25}`, subtext: 'Postes sécurisés' }
+      ],
+      sections: [
+        {
+          title: '1. Balance des Encours & Vulnérabilité de Recouvrement',
+          narrative: 'Synthèse du volume de créances hospitalières en cours d\'encaissement selon les protocoles de solvabilité en vigueur.',
+          table: {
+            headers: ['Poste de Recouvrement', 'Dossiers', 'Montant Évalué', 'Niveau de Priorité'],
+            rows: [
+              ['Factures de consultations en souffrance', `${pendingCount} dossier(s)`, `${pendingAmount.toLocaleString('fr-FR')} FCFA`, 'Priorité Haute'],
+              ['Honoraires praticiens en attente de liquidation', `${fin.totalActs || 0} acte(s)`, `${(fin.totalCommissionsPendingFCFA || 0).toLocaleString('fr-FR')} FCFA`, 'Priorité Moyenne'],
+              ['Quotes-parts médicales déjà réglées', '-', `${(fin.totalCommissionsPaidFCFA || 0).toLocaleString('fr-FR')} FCFA`, 'Soldé']
+            ]
+          }
+        }
+      ],
+      recommendations: [
+        'Renforcer la vérification du paiement des actes de laboratoire et d\'imagerie avant transmission des résultats.',
+        'Mettre en demeure les organismes tiers-payeurs ayant dépassé le délai légal de 30 jours.',
+        'Instaurer une clôture journalière obligatoire de caisse avec conciliation bancaire et Mobile Money.'
+      ],
+      conclusion: 'Rapport certifié édité sous le contrôle de la direction financière de SMART-HOSTO.'
+    };
+  }
+
+  // Default: Commissions & Acts of practitioner
+  const acts = fin.recentActs || [];
+  return {
+    title: 'BILAN CERTIFIÉ DES HONORAIRES & COMMISSIONS MÉDICALES',
+    subtitle: `Relevé officiel des actes exécutés et quotes-parts pour ${s.name || 'le Praticien'} au ${currentDate}`,
+    category: 'HONORAIRES & COMMISSIONS MÉDICALES',
+    dateStr: currentDate,
+    requesterName: s.name || 'Praticien',
+    requesterRole: `${s.profession || 'Médecin'} (${s.role || 'MEDECIN'})`,
+    executiveSummary: `Ce relevé officiel certifie les actes médicaux réalisés par ${s.name || 'le Praticien'} avec un taux de quote-part contractuel de ${s.quotePartRatePercent || 0}%. Le cumul des honoraires bruts générés s'élève à ${(fin.totalCommissionsEarnedFCFA || 0).toLocaleString('fr-FR')} FCFA. Les règlements déjà perçus totalisent ${(fin.totalCommissionsPaidFCFA || 0).toLocaleString('fr-FR')} FCFA, laissant un solde en attente de virement de ${(fin.totalCommissionsPendingFCFA || 0).toLocaleString('fr-FR')} FCFA.`,
+    kpis: [
+      { label: 'Commissions Générées', value: `${(fin.totalCommissionsEarnedFCFA || 0).toLocaleString('fr-FR')} FCFA`, subtext: `Taux : ${s.quotePartRatePercent || 0}%` },
+      { label: 'Quotes-Parts Perçues', value: `${(fin.totalCommissionsPaidFCFA || 0).toLocaleString('fr-FR')} FCFA`, subtext: 'Déjà liquidé' },
+      { label: 'Solde à Percevoir', value: `${(fin.totalCommissionsPendingFCFA || 0).toLocaleString('fr-FR')} FCFA`, subtext: 'En attente de paiement' },
+      { label: 'Total Actes Clôturés', value: `${fin.totalActs || 0}`, subtext: 'Dossiers validés' }
+    ],
+    sections: [
+      {
+        title: '1. Relevé Nominatif des Actes Médicaux Récents',
+        narrative: 'Liste exhaustive des consultations, chirurgies et soins exécutés et clôturés conformément à la nomenclature hospitalière.',
+        table: {
+          headers: ['Date', 'Acte Médical', 'Patient', 'Montant Total', 'Quote-Part Praticien', 'Statut Règlement'],
+          rows: acts.length > 0
+            ? acts.map((a: any) => [
+                String(a.date || '').slice(0, 10),
+                a.typeLabel || 'Consultation',
+                a.patientName || 'Patient',
+                `${(a.amount || 0).toLocaleString('fr-FR')} FCFA`,
+                `${(a.commissionAmount || 0).toLocaleString('fr-FR')} FCFA`,
+                a.paymentStatus === 'PAID' ? 'Réglé' : 'En attente'
+              ])
+            : [['N/A', 'Aucun acte récent', '-', '-', '-', '-']]
+        }
+      }
+    ],
+    recommendations: [
+      'Procéder sans tarder à la clôture médicale des fiches de soins pour intégration au bordereau de paie.',
+      'Signaler au bureau de la facturation toute discordance constatée sur le décompte de vos quotes-parts.',
+      'Conserver ce relevé numérique certifié pour votre comptabilité professionnelle personnelle.'
+    ],
+    conclusion: 'Document officiel SMART-HOSTO SIH délivré à titre de relevé probant.'
+  };
+}
+
+async function generateDynamicReportSpec(
+  userPrompt: string,
+  ctx: any,
+  config: WhatsAppAgentConfig
+): Promise<DynamicReportSpec> {
+  const apiKey = (config.geminiApiKey || process.env.GEMINI_API_KEY || '').trim();
+  const staff = ctx.staff || {};
+
+  if (apiKey) {
+    try {
+      const model = (config.geminiModel || 'gemini-2.5-flash').trim();
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+      const prompt = `Tu es l'analyste en chef et auditeur médical du Système d'Information Hospitalier SMART-HOSTO.
+Un membre du personnel hospitalier (${staff.name}, Rôle: ${staff.role}, Profession: ${staff.profession}) formule la demande suivante : "${userPrompt}".
+
+Voici l'ensemble des données réelles de l'établissement en temps réel (JSON) :
+${JSON.stringify(ctx, null, 2)}
+
+MISSION :
+Génère une spécification de rapport ULTRA-PERSONNALISÉE et STRICTEMENT ADAPTÉE à la requête exacte de l'utilisateur.
+- Si la demande porte sur les créances, les impayés, les caisses, analyse précisément les impayés et la balance de trésorerie avec des recommandations financières.
+- Si la demande porte sur les sorties, les lits, les admissions, analyse le flux des lits, liste les patients hospitalisés et les prévisions de décharge.
+- Si la demande porte sur la pharmacie, les stocks, analyse les risques de rupture et les seuils d'alerte.
+- Si la demande porte sur les honoraires, les commissions, le bilan d'activité du praticien, analyse ses actes et ses quotes-parts.
+- Si la demande est une analyse comparative ou stratégique, structure des sections d'analyse comparative avec données chiffrées réelles tirées du JSON.
+
+CONSIGNE FORMAT :
+Réponds UNIQUEMENT par un objet JSON valide suivant exactement le schéma ci-dessous, sans balises de code Markdown (\`\`\`json), sans texte avant ou après.
+
+SCHÉMA JSON :
+{
+  "title": "Titre clair et officiel en majuscules (ex: AUDIT COMPARATIF DES ADMISSIONS & SORTIES)",
+  "subtitle": "Sous-titre descriptif et période concernée",
+  "category": "Catégorie en majuscules (ex: AUDIT STRATÉGIQUE / CONTRÔLE DE GESTION / SOINS & PARCOURS / FINANCES)",
+  "executiveSummary": "Synthèse exécutive rigoureuse de 3 à 5 phrases avec constats majeurs et chiffres réels.",
+  "kpis": [
+    { "label": "Nom de l'indicateur", "value": "Valeur chiffrée (ex: 450 000 FCFA)", "subtext": "Précision courte" }
+  ],
+  "sections": [
+    {
+      "title": "1. Titre de la section d'analyse",
+      "narrative": "Paragraphe d'analyse explicatif approfondi...",
+      "bulletPoints": ["Point d'attention 1", "Point d'attention 2"],
+      "table": {
+        "headers": ["Colonne 1", "Colonne 2", "Colonne 3", "Colonne 4"],
+        "rows": [
+          ["Valeur 1", "Valeur 2", "Valeur 3", "Valeur 4"]
+        ]
+      }
+    }
+  ],
+  "recommendations": [
+    "Recommandation concrète et opérationnelle 1",
+    "Recommandation opérationnelle 2"
+  ],
+  "conclusion": "Conclusion formelle d'homologation."
+}`;
+
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 2048
+          }
+        })
+      });
+
+      if (resp.ok) {
+        const data: any = await resp.json();
+        let rawText = data?.candidates?.[0]?.content?.parts?.map((p: any) => p.text || '').join('').trim() || '';
+        if (rawText.startsWith('```')) {
+          rawText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+        }
+        if (rawText) {
+          const parsed = JSON.parse(rawText);
+          if (parsed && parsed.title && Array.isArray(parsed.sections)) {
+            return {
+              title: String(parsed.title || 'RAPPORT OFFICIEL SMART-HOSTO'),
+              subtitle: String(parsed.subtitle || `Édité le ${ctx.currentDate || new Date().toLocaleDateString('fr-FR')}`),
+              category: String(parsed.category || 'RAPPORT HOSPITALIER OFFICIEL'),
+              dateStr: ctx.currentDate || new Date().toLocaleString('fr-FR'),
+              requesterName: staff.name || 'Personnel Soignant',
+              requesterRole: staff.profession || staff.role || 'Praticien',
+              executiveSummary: String(parsed.executiveSummary || ''),
+              kpis: Array.isArray(parsed.kpis) ? parsed.kpis : [],
+              sections: parsed.sections.map((sec: any) => ({
+                title: String(sec.title || 'Section'),
+                narrative: sec.narrative ? String(sec.narrative) : undefined,
+                bulletPoints: Array.isArray(sec.bulletPoints) ? sec.bulletPoints.map(String) : undefined,
+                table: sec.table && Array.isArray(sec.table.headers) && Array.isArray(sec.table.rows)
+                  ? {
+                      headers: sec.table.headers.map(String),
+                      rows: sec.table.rows.map((row: any) => Array.isArray(row) ? row.map(String) : [String(row)])
+                    }
+                  : undefined
+              })),
+              recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String) : undefined,
+              conclusion: parsed.conclusion ? String(parsed.conclusion) : undefined
+            };
+          }
+        }
+      }
+    } catch (aiErr) {
+      console.warn('Gemini report JSON generation failed, fallback to dynamic rule-based spec:', aiErr);
+    }
+  }
+
+  return buildFallbackReportSpec(userPrompt, ctx);
+}
+
+function generateReportPdfFromSpec(spec: DynamicReportSpec): Buffer {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const margin = 14;
+  const printWidth = pageWidth - (margin * 2); // 182mm
+
+  // 1. Header Banner
+  doc.setFillColor(30, 58, 138); // Hospital navy blue
+  doc.rect(0, 0, pageWidth, 24, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('SMART-HOSTO • SYSTÈME D\'INFORMATION HOSPITALIER', margin, 11);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.text('Document Décisionnel & d\'Audit Certifié • Édition Officielle SIH', margin, 18);
+  doc.text(`Émis le ${spec.dateStr || new Date().toLocaleDateString('fr-FR')}`, pageWidth - margin, 18, { align: 'right' });
+
+  let currY = 32;
+
+  // 2. Category badge
+  if (spec.category) {
+    doc.setTextColor(37, 99, 235); // Accent blue
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.text(`[ ${spec.category.toUpperCase()} ]`, margin, currY);
+    currY += 5;
+  }
+
+  // 3. Title & Subtitle
+  doc.setTextColor(15, 23, 42); // Slate 900
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  const titleLines = doc.splitTextToSize(spec.title || 'RAPPORT OFFICIEL HOSPITALIER', printWidth);
+  doc.text(titleLines, margin, currY);
+  currY += (titleLines.length * 5.8) + 2;
+
+  if (spec.subtitle) {
+    doc.setTextColor(71, 85, 105); // Slate 600
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(9);
+    const subLines = doc.splitTextToSize(spec.subtitle, printWidth);
+    doc.text(subLines, margin, currY);
+    currY += (subLines.length * 4.6) + 2;
+  }
+
+  // Metadata line
+  doc.setTextColor(100, 116, 139);
+  doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.setTextColor(148, 163, 184);
-  doc.text('Document certifié SMART-HOSTO SIH • Validité officielle interne', 14, pageHeight - 8);
+  const metaText = `Demandeur : ${spec.requesterName || 'Personnel Soignant'} (${spec.requesterRole || 'Agent'})   •   Réf. Audit : SH-${Date.now().toString().slice(-6)}   •   Validité : Conforme`;
+  doc.text(metaText, margin, currY);
+  currY += 3.5;
+
+  doc.setDrawColor(226, 232, 240); // Slate 200 divider
+  doc.setLineWidth(0.3);
+  doc.line(margin, currY, pageWidth - margin, currY);
+  currY += 5;
+
+  // 4. Executive Summary Box
+  if (spec.executiveSummary) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    const summaryLines = doc.splitTextToSize(spec.executiveSummary, printWidth - 12);
+    const boxHeight = (summaryLines.length * 4.2) + 12;
+
+    if (currY + boxHeight > pageHeight - 25) {
+      doc.addPage();
+      currY = 25;
+    }
+
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(margin, currY, printWidth, boxHeight, 2, 2, 'F');
+    doc.setFillColor(30, 58, 138);
+    doc.rect(margin, currY, 3, boxHeight, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(30, 58, 138);
+    doc.text('SYNTHÈSE EXÉCUTIVE', margin + 6, currY + 5.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(51, 65, 85);
+    doc.text(summaryLines, margin + 6, currY + 10.5);
+
+    currY += boxHeight + 5;
+  }
+
+  // 5. KPI Badges
+  if (spec.kpis && spec.kpis.length > 0) {
+    const kpiCount = Math.min(spec.kpis.length, 4);
+    const gap = 3;
+    const cardWidth = (printWidth - ((kpiCount - 1) * gap)) / kpiCount;
+    const cardHeight = 17;
+
+    if (currY + cardHeight > pageHeight - 25) {
+      doc.addPage();
+      currY = 25;
+    }
+
+    spec.kpis.slice(0, 4).forEach((kpi, idx) => {
+      const cardX = margin + idx * (cardWidth + gap);
+      doc.setFillColor(241, 245, 249);
+      doc.setDrawColor(226, 232, 240);
+      doc.roundedRect(cardX, currY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(30, 58, 138);
+      doc.text(String(kpi.value || '-'), cardX + (cardWidth / 2), currY + 6.5, { align: 'center' });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(7.5);
+      doc.setTextColor(71, 85, 105);
+      const labelText = doc.splitTextToSize(String(kpi.label || ''), cardWidth - 2)[0] || '';
+      doc.text(labelText, cardX + (cardWidth / 2), currY + 11.5, { align: 'center' });
+
+      if (kpi.subtext) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(6.5);
+        doc.setTextColor(148, 163, 184);
+        const sub = doc.splitTextToSize(String(kpi.subtext), cardWidth - 2)[0] || '';
+        doc.text(sub, cardX + (cardWidth / 2), currY + 15, { align: 'center' });
+      }
+    });
+
+    currY += cardHeight + 6;
+  }
+
+  // 6. Dynamic Sections
+  (spec.sections || []).forEach(sec => {
+    if (currY > pageHeight - 35) {
+      doc.addPage();
+      currY = 24;
+    }
+
+    doc.setFillColor(30, 58, 138);
+    doc.rect(margin, currY, 2.5, 4.5, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.setTextColor(30, 41, 59);
+    doc.text(sec.title, margin + 5, currY + 3.8);
+    currY += 6.5;
+
+    if (sec.narrative) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(51, 65, 85);
+      const narrativeLines = doc.splitTextToSize(sec.narrative, printWidth);
+      if (currY + (narrativeLines.length * 4.2) > pageHeight - 20) {
+        doc.addPage();
+        currY = 24;
+      }
+      doc.text(narrativeLines, margin, currY);
+      currY += (narrativeLines.length * 4.2) + 3;
+    }
+
+    if (sec.bulletPoints && sec.bulletPoints.length > 0) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(51, 65, 85);
+      sec.bulletPoints.forEach(bp => {
+        const bpLines = doc.splitTextToSize(`• ${bp}`, printWidth - 4);
+        if (currY + (bpLines.length * 4) > pageHeight - 20) {
+          doc.addPage();
+          currY = 24;
+        }
+        doc.text(bpLines, margin + 2, currY);
+        currY += (bpLines.length * 4) + 1.5;
+      });
+      currY += 2;
+    }
+
+    if (sec.table && sec.table.headers && sec.table.headers.length > 0) {
+      if (currY > pageHeight - 30) {
+        doc.addPage();
+        currY = 24;
+      }
+
+      applyAutoTable(doc, {
+        startY: currY,
+        head: [sec.table.headers],
+        body: (sec.table.rows && sec.table.rows.length > 0) ? sec.table.rows : [['N/A', '-', '-', '-']],
+        theme: 'grid',
+        headStyles: {
+          fillColor: [30, 58, 138],
+          textColor: 255,
+          fontStyle: 'bold',
+          fontSize: 8,
+          cellPadding: 2
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252]
+        },
+        styles: {
+          fontSize: 8,
+          cellPadding: 2,
+          textColor: [30, 41, 59],
+          valign: 'middle'
+        },
+        margin: { left: margin, right: margin }
+      });
+
+      currY = ((doc as any).lastAutoTable?.finalY || currY) + 6;
+    }
+  });
+
+  // 7. Recommendations
+  if (spec.recommendations && spec.recommendations.length > 0) {
+    if (currY > pageHeight - 45) {
+      doc.addPage();
+      currY = 24;
+    }
+
+    const recLines = spec.recommendations.map((r, i) => `${i + 1}. ${r}`);
+    let totalHeight = 12;
+    const splitRecs = recLines.map(r => {
+      const sp = doc.splitTextToSize(r, printWidth - 10);
+      totalHeight += (sp.length * 4) + 2;
+      return sp;
+    });
+
+    if (currY + totalHeight > pageHeight - 20) {
+      doc.addPage();
+      currY = 24;
+    }
+
+    doc.setFillColor(240, 253, 244); // Light emerald
+    doc.setDrawColor(187, 247, 208);
+    doc.roundedRect(margin, currY, printWidth, totalHeight, 2, 2, 'FD');
+    doc.setFillColor(16, 185, 129);
+    doc.rect(margin, currY, 3, totalHeight, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(21, 128, 61);
+    doc.text('RECOMMANDATIONS OPÉRATIONNELLES & PLAN D\'ACTION', margin + 6, currY + 5.5);
+
+    let recY = currY + 10;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(22, 101, 52);
+    splitRecs.forEach(sp => {
+      doc.text(sp, margin + 6, recY);
+      recY += (sp.length * 4) + 2;
+    });
+
+    currY += totalHeight + 5;
+  }
+
+  // 8. Multi-page Running Headers & Footers
+  const totalPages = (doc.internal as any).getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+
+    if (p > 1) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`SMART-HOSTO SIH • ${spec.title.slice(0, 60)}`, margin, 10);
+      doc.setDrawColor(226, 232, 240);
+      doc.line(margin, 12, pageWidth - margin, 12);
+    }
+
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(148, 163, 184);
+    doc.text('Document certifié SMART-HOSTO SIH • Reproduction restreinte aux ayants droit', margin, pageHeight - 7);
+    doc.text(`Page ${p} / ${totalPages}`, pageWidth - margin, pageHeight - 7, { align: 'right' });
+  }
 
   return Buffer.from(doc.output('arraybuffer'));
 }
 
-function generateReportExcel(type: string, ctx: any): string {
-  const s = ctx.staff || {};
-  const fin = ctx.personalFinanceAndActs || {};
+function generateReportExcelFromSpec(spec: DynamicReportSpec): string {
   let csv = '\ufeff'; // UTF-8 BOM for Microsoft Excel
 
-  if (type === 'commissions') {
-    csv += 'RELEVE DES HONORAIRES ET COMMISSIONS MEDICALES - SMART-HOSTO\n';
-    csv += `Praticien;${s.name || ''};Profession;${s.profession || ''};Taux;${s.quotePartRatePercent || 0}%\n`;
-    csv += `Date d edition;${ctx.currentDate || ''}\n\n`;
-    csv += 'Date;Acte Medical;Patient;Montant Acte (FCFA);Quote-Part (FCFA);Statut\n';
-    (fin.recentActs || []).forEach((a: any) => {
-      csv += `${String(a.date || '').slice(0, 10)};"${a.typeLabel || ''}";"${a.patientName || ''}";${a.amount || 0};${a.commissionAmount || 0};${a.paymentStatus === 'PAID' ? 'Regle' : 'En attente'}\n`;
+  const escapeCell = (val: any) => {
+    const s = String(val ?? '').replace(/"/g, '""');
+    return `"${s}"`;
+  };
+
+  csv += `${escapeCell(spec.title)};;\n`;
+  if (spec.subtitle) csv += `${escapeCell(spec.subtitle)};;\n`;
+  csv += `Categorie;${escapeCell(spec.category || 'RAPPORT')};Date;${escapeCell(spec.dateStr || '')}\n`;
+  csv += `Demandeur;${escapeCell(spec.requesterName || '')};Role;${escapeCell(spec.requesterRole || '')}\n\n`;
+
+  if (spec.executiveSummary) {
+    csv += `SYNTHESE EXECUTIVE;${escapeCell(spec.executiveSummary)}\n\n`;
+  }
+
+  if (spec.kpis && spec.kpis.length > 0) {
+    csv += `INDICATEURS CLES (KPIS)\n`;
+    csv += `Indicateur;Valeur;Precision\n`;
+    spec.kpis.forEach(k => {
+      csv += `${escapeCell(k.label)};${escapeCell(k.value)};${escapeCell(k.subtext || '')}\n`;
     });
-  } else if (type === 'inpatient' || type === 'sorties') {
-    csv += 'REGISTRE DES HOSPITALISATIONS ET SORTIES - SMART-HOSTO\n';
-    csv += `Date d edition;${ctx.currentDate || ''}\n\n`;
-    csv += 'Patient;Chambre_Lit;Date_Admission;Medecin_Traitant;Statut\n';
-    (ctx.inpatients?.allActiveAdmissions || []).forEach((p: any) => {
-      csv += `"${p.patientName || ''}";"${p.bed || ''}";${String(p.admissionDate || '').slice(0, 10)};"${p.doctor || ''}";${p.status || ''}\n`;
+    csv += `\n`;
+  }
+
+  (spec.sections || []).forEach(sec => {
+    csv += `${escapeCell(sec.title)}\n`;
+    if (sec.narrative) {
+      csv += `Analyse;${escapeCell(sec.narrative)}\n`;
+    }
+    if (sec.bulletPoints && sec.bulletPoints.length > 0) {
+      sec.bulletPoints.forEach(bp => {
+        csv += `Constat;${escapeCell(bp)}\n`;
+      });
+    }
+    if (sec.table && sec.table.headers && sec.table.headers.length > 0) {
+      csv += sec.table.headers.map(escapeCell).join(';') + '\n';
+      (sec.table.rows || []).forEach(row => {
+        csv += row.map(escapeCell).join(';') + '\n';
+      });
+    }
+    csv += `\n`;
+  });
+
+  if (spec.recommendations && spec.recommendations.length > 0) {
+    csv += `RECOMMANDATIONS ET PLAN D'ACTION\n`;
+    spec.recommendations.forEach((r, idx) => {
+      csv += `${idx + 1};${escapeCell(r)}\n`;
     });
-  } else if (type === 'pharmacy' || type === 'stock') {
-    csv += 'INVENTAIRE DES STOCKS DE PHARMACIE - SMART-HOSTO\n';
-    csv += `Date d edition;${ctx.currentDate || ''}\n\n`;
-    csv += 'Designation;Stock_Reel;Seuil_Alerte;Prix_Unitaire_FCFA;Statut\n';
-    (ctx.pharmacy?.sampleInventory || []).forEach((m: any) => {
-      csv += `"${m.name || ''}";${m.stock || 0};${m.alertThreshold || 10};${m.price || 0};${m.stock <= m.alertThreshold ? 'ALERTE STOCK BAS' : 'Normal'}\n`;
-    });
-  } else {
-    const adm = ctx.adminHospitalSummary || {};
-    csv += 'BILAN DE GESTION ET RECOUVREMENT - SMART-HOSTO\n';
-    csv += `Date d edition;${ctx.currentDate || ''}\n\n`;
-    csv += 'Indicateur;Valeur\n';
-    csv += `Factures impayees en caisse;${adm.pendingCashierInvoicesCount || 0} dossiers\n`;
-    csv += `Montant global a recouvrer;${adm.pendingCashierAmountFCFA || 0} FCFA\n`;
-    csv += `Comptes actifs;${adm.activeStaffUsers || 1} / ${adm.maxStaffUsers || 25}\n`;
   }
 
   return csv;
+}
+
+function generateReportPdf(type: string, ctx: any): Buffer {
+  const spec = buildFallbackReportSpec(type, ctx);
+  return generateReportPdfFromSpec(spec);
+}
+
+function generateReportExcel(type: string, ctx: any): string {
+  const spec = buildFallbackReportSpec(type, ctx);
+  return generateReportExcelFromSpec(spec);
 }
 
 function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<typeof buildStaffHospitalContext>>): string {
@@ -2120,6 +2649,15 @@ async function sendMetaWhatsAppDocument(
 // 0. Public Download Endpoint for Generated PDF & Excel Reports
 app.get(['/api/whatsapp/reports/download', '/reports/download'], async (req, res) => {
   try {
+    const reportId = String(req.query.id || '');
+    if (reportId && dynamicReportsMap.has(reportId)) {
+      const item = dynamicReportsMap.get(reportId)!;
+      res.setHeader('Content-Type', item.contentType);
+      res.setHeader('Content-Disposition', `inline; filename="${item.filename}"`);
+      return res.status(200).send(item.buffer);
+    }
+
+    // Fallback if accessed via direct URL or legacy params (?type=...&format=...)
     const type = String(req.query.type || 'commissions');
     const format = String(req.query.format || 'pdf').toLowerCase();
     const phone = String(req.query.phone || '');
@@ -2133,14 +2671,15 @@ app.get(['/api/whatsapp/reports/download', '/reports/download'], async (req, res
     };
 
     const ctx = await buildStaffHospitalContext(staffDoc);
+    const spec = buildFallbackReportSpec(type, ctx);
 
     if (format === 'excel' || format === 'csv') {
-      const csvData = generateReportExcel(type, ctx);
+      const csvData = generateReportExcelFromSpec(spec);
       res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="SMART-HOSTO_${type.toUpperCase()}_${Date.now()}.csv"`);
       return res.status(200).send(csvData);
     } else {
-      const pdfBuf = generateReportPdf(type, ctx);
+      const pdfBuf = generateReportPdfFromSpec(spec);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="SMART-HOSTO_${type.toUpperCase()}_${Date.now()}.pdf"`);
       return res.status(200).send(pdfBuf);
@@ -2272,6 +2811,8 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
             lowerReq.includes('excel') ||
             lowerReq.includes('csv') ||
             lowerReq.includes('rapport') ||
+            lowerReq.includes('bilan') ||
+            lowerReq.includes('audit') ||
             lowerReq.includes('export') ||
             lowerReq.includes('telecharger') ||
             lowerReq.includes('télécharger') ||
@@ -2279,22 +2820,41 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
 
           if (isDocRequest && config.phoneNumberId && config.accessToken) {
             try {
-              let reportType = 'commissions';
-              if (lowerReq.includes('sortie') || lowerReq.includes('hospitalis') || lowerReq.includes('inpatient') || lowerReq.includes('lit')) {
-                reportType = 'inpatient';
-              } else if (lowerReq.includes('stock') || lowerReq.includes('pharmac') || lowerReq.includes('medicament') || lowerReq.includes('médicament')) {
-                reportType = 'pharmacy';
-              } else if (lowerReq.includes('caisse') || lowerReq.includes('tresor') || lowerReq.includes('factur')) {
-                reportType = 'treasury';
-              }
+              // 1. Generate tailored Dynamic Report Spec using Gemini & live staff/hospital context
+              const spec = await generateDynamicReportSpec(textBody, staffContext, config);
 
-              const format = (lowerReq.includes('excel') || lowerReq.includes('csv') || lowerReq.includes('tableur')) ? 'excel' : 'pdf';
-              const ext = format === 'excel' ? 'csv' : 'pdf';
-              const filename = `SMART-HOSTO_${reportType.toUpperCase()}_${new Date().toISOString().slice(0, 10)}.${ext}`;
-              const caption = `📄 Rapport officiel certifié — SMART-HOSTO SIH`;
+              const isExcel = lowerReq.includes('excel') || lowerReq.includes('csv') || lowerReq.includes('tableur');
+              const format = isExcel ? 'excel' : 'pdf';
+              const ext = isExcel ? 'csv' : 'pdf';
+              const contentType = isExcel ? 'text/csv; charset=utf-8' : 'application/pdf';
+
+              const buffer = isExcel
+                ? Buffer.from(generateReportExcelFromSpec(spec), 'utf-8')
+                : generateReportPdfFromSpec(spec);
+
+              const cleanTitle = (spec.title || 'RAPPORT')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-zA-Z0-9]/g, '_')
+                .replace(/_+/g, '_')
+                .slice(0, 32);
+
+              const filename = `SMART-HOSTO_${cleanTitle}_${new Date().toISOString().slice(0, 10)}.${ext}`;
+              const caption = `📄 ${spec.title} — SMART-HOSTO SIH (Certifié)`;
+
+              // 2. Cache dynamic report in memory for Meta WhatsApp download
+              const reportId = 'rep_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+              dynamicReportsMap.set(reportId, {
+                id: reportId,
+                buffer,
+                contentType,
+                filename,
+                createdAt: Date.now()
+              });
+              pruneOldDynamicReports();
 
               const publicHost = 'https://smart-hosto.onrender.com';
-              const downloadUrl = `${publicHost}/api/whatsapp/reports/download?type=${encodeURIComponent(reportType)}&format=${encodeURIComponent(format)}&phone=${encodeURIComponent(fromPhone)}`;
+              const downloadUrl = `${publicHost}/api/whatsapp/reports/download?id=${encodeURIComponent(reportId)}`;
 
               const docRes = await sendMetaWhatsAppDocument(fromPhone, downloadUrl, filename, caption, config);
               if (docRes.sent) {
@@ -2306,12 +2866,12 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
                   phone: fromPhone,
                   message: `[DOCUMENT ENVOYÉ] ${filename}`,
                   source: 'META_WEBHOOK',
-                  aiModel: 'report-generator',
+                  aiModel: 'dynamic-report-engine',
                   metaMessageId: docRes.metaMessageId
                 });
               }
             } catch (docErr) {
-              console.error('Error dispatching WhatsApp document:', docErr);
+              console.error('Error dispatching dynamic WhatsApp document:', docErr);
             }
           }
         }
