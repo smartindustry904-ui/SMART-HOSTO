@@ -1175,12 +1175,67 @@ interface WhatsAppAgentConfig {
   updatedAt?: string;
 }
 
-const DEFAULT_WHATSAPP_SYSTEM_PROMPT = `Tu es l'Assistant IA officiel du personnel médical et administratif sur WhatsApp pour la plateforme hospitalière SMART-HOSTO.
-Règles de réponse :
-1. Réponds de manière concise, professionnelle, chaleureuse et structurée pour WhatsApp (utilise le formatage WhatsApp : *gras*, listes à puces et emojis pertinents).
-2. Base tes réponses EXCLUSIVEMENT sur le contexte en temps réel fourni (statistiques personnelles du praticien, commissions et actes clôturés, file d'attente du jour, stock de pharmacie, catalogue des tarifs, etc.).
-3. Respecte strictement la confidentialité : un membre du personnel (Médecin, Infirmier, etc.) ne voit que ses propres commissions/actes financiers, sauf s'il a le rôle ADMIN ou SUPER_ADMIN.
-4. Utilise la devise FCFA pour tous les montants financiers.`;
+const DEFAULT_WHATSAPP_SYSTEM_PROMPT = `Tu es l'Assistant Exécutif Hospitalier officiel sur WhatsApp pour la plateforme hospitalière SMART-HOSTO.
+Tu t'adresses aux praticiens, cadres de santé et directeurs médicaux/administratifs de l'établissement.
+
+DIRECTIVES MAJEURES DE STYLE ET MISE EN FORME PROFESSIONNELLE :
+1. TON EXÉCUTIF & MÉDICAL :
+   - Adopte une posture formelle, courtoise, rigoureuse et institutionnelle d'un Système d'Information Hospitalier (SIH) de référence.
+   - Évite formellement les accumulations d'emojis informels ou enfantins. Utilise uniquement des marqueurs fonctionnels sobres (ex: [PAYÉ], [EN ATTENTE], [URGENT], ▪, ▫, 🏥).
+   - Salutation protocolaire : "Bonjour Dr [Nom]" pour les praticiens, "Bonjour [Nom] — Direction Administrative" pour les administrateurs.
+
+2. CARTES ET EN-TÊTES DE MODULES :
+   - Structure tes messages avec des cartes délimitées par des séparateurs horizontaux propres :
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+     🏥 *SMART-HOSTO* • *[TITRE DU RAPPORT]*
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3. TABLEAUX & GRILLES ALIGNÉES EN MONOSPACE (Triple Backticks \`\`\`) :
+   - WhatsApp prend parfaitement en charge les blocs de texte monospace grâce aux triples apostrophes inverses (\`\`\`).
+   - Pour TOUTE liste de 2 éléments ou plus (patients, lits, factures, tarifs, stocks), utilise OBLIGATOIREMENT un bloc monospace pour afficher un tableau à colonnes alignées :
+   Exemple pour les patients / hospitalisations :
+   \`\`\`
+   PATIENT          LIT       DATE ADM.   STATUT
+   ───────────────────────────────────────────
+   DERAIN DJOFANG   Lit 1    17/07/2026  Attente
+   nkounadji DJOF.  Lit 3    17/07/2026  Attente
+   DERA DJOFANG     Lit 2    04/08/2026  Attente
+   \`\`\`
+   Exemple pour la trésorerie / facturation :
+   \`\`\`
+   DOSSIER          PATIENT        MONTANT     STATUT
+   ──────────────────────────────────────────────────
+   FAC-2026-089     Paul KAMGA     15 000 F   Impayé
+   FAC-2026-090     Alice NGONO    25 000 F   Impayé
+   \`\`\`
+   Exemple pour les commissions et actes :
+   \`\`\`
+   DATE     ACTE            HONORAIRES  STATUT
+   ───────────────────────────────────────────
+   09/11    Consultation      +750 F    Attente
+   06/11    Consultation      +750 F    Attente
+   \`\`\`
+   Exemple pour la pharmacie :
+   \`\`\`
+   ARTICLE             STOCK  SEUIL  STATUT
+   ───────────────────────────────────────────
+   Doliprane 1000mg       2     10   CRITIQUE
+   Amoxicilline 500mg    45     15   Normal
+   \`\`\`
+
+4. ENCADRÉS KPI & CHIFFRES CLÉS :
+   - Présente les métriques financières ou capacitaires sous forme de fiches synthétiques encadrées :
+   ┌────────────────────────────────────────┐
+   │ COMMISSIONS EN ATTENTE : 1 500 FCFA    │
+   │ DOSSIERS CLÔTURÉS      : 3             │
+   └────────────────────────────────────────┘
+
+5. RÈGLES MÉTIER :
+   - Devise obligatoire : FCFA.
+   - Respect absolu de la confidentialité et du rôle : seul le profil ADMIN a accès aux agrégats de caisse et finances globales de l'établissement.
+   - Signature en pied de page :
+     ─────────────────────────────
+     _SMART-HOSTO SIH • Données certifiées en temps réel_`;
 
 // In-memory cache & fallback logs so the agent works seamlessly even during brief Firestore latency
 let cachedWhatsAppConfig: WhatsAppAgentConfig | null = null;
@@ -1221,18 +1276,24 @@ async function getWhatsAppConfig(): Promise<WhatsAppAgentConfig> {
     } catch {}
   }
 
-  const config: WhatsAppAgentConfig = {
-    enabled: stored.enabled ?? true,
-    phoneNumberId: stored.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || '',
-    businessAccountId: stored.businessAccountId || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
-    accessToken: stored.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
-    verifyToken: stored.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || 'smarthosto_meta_verify_2026',
-    geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || '',
-    geminiModel: stored.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-flash',
-    allowUnregisteredPreview: stored.allowUnregisteredPreview ?? true,
-    systemPrompt: stored.systemPrompt || DEFAULT_WHATSAPP_SYSTEM_PROMPT,
-    updatedAt: stored.updatedAt
-  };
+    const isOldPrompt =
+      !stored.systemPrompt ||
+      stored.systemPrompt.includes("utilise le formatage WhatsApp : *gras*, listes à puces et emojis pertinents") ||
+      stored.systemPrompt.length < 500;
+    const systemPrompt = isOldPrompt ? DEFAULT_WHATSAPP_SYSTEM_PROMPT : stored.systemPrompt;
+
+    const config: WhatsAppAgentConfig = {
+      enabled: stored.enabled ?? true,
+      phoneNumberId: stored.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+      businessAccountId: stored.businessAccountId || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
+      accessToken: stored.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
+      verifyToken: stored.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || 'smarthosto_meta_verify_2026',
+      geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || '',
+      geminiModel: stored.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-flash',
+      allowUnregisteredPreview: stored.allowUnregisteredPreview ?? true,
+      systemPrompt,
+      updatedAt: stored.updatedAt
+    };
   cachedWhatsAppConfig = config;
   return config;
 }
@@ -1544,6 +1605,18 @@ async function buildStaffHospitalContext(staffDoc: any) {
   };
 }
 
+function padRight(str: string | number, len: number): string {
+  const s = String(str ?? '').slice(0, len);
+  return s + ' '.repeat(Math.max(0, len - s.length));
+}
+
+function renderAsciiTable(headers: string[], rows: string[][], colWidths: number[]): string {
+  const headerLine = headers.map((h, i) => padRight(h, colWidths[i])).join('  ');
+  const sepLine = '─'.repeat(colWidths.reduce((a, b) => a + b, 0) + (headers.length - 1) * 2);
+  const dataLines = rows.map(r => r.map((c, i) => padRight(c, colWidths[i])).join('  '));
+  return '```\n' + headerLine + '\n' + sepLine + '\n' + dataLines.join('\n') + '\n```';
+}
+
 function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<typeof buildStaffHospitalContext>>): string {
   const lower = messageText.trim().toLowerCase();
   const s = ctx.staff;
@@ -1551,16 +1624,28 @@ function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<ty
 
   if (lower.includes('aide') || lower.includes('menu') || lower.includes('help') || lower === '/start' || lower === 'bonjour' || lower === 'salut') {
     return (
-      `👋 *Bonjour ${s.name}* (${s.profession})\n` +
-      `Bienvenue sur l'Assistant WhatsApp IA *SMART-HOSTO*.\n\n` +
-      `Voici ce que vous pouvez me demander en langage naturel ou par commande :\n` +
-      `• 📊 *"Mes commissions"* ou */stats* : Vos actes clôturés et quotes-parts gagnées\n` +
-      `• 🏥 *"File d'attente"* ou */file* : Patients en attente aujourd'hui\n` +
-      `• 🛏️ *"Patients en attente de sortie"* ou */sorties* : Lits & sorties prévues\n` +
-      `• 💊 *"Stock [médicament]"* ou */stock* : Disponibilité et alertes pharmacie\n` +
-      `• 💰 *"Tarif [acte]"* ou */tarif* : Prix des consultations et examens\n` +
-      (ctx.adminHospitalSummary ? `• 🛡️ *"Bilan admin"* ou */admin* : Quota licence & caisse en attente\n` : '') +
-      `\n_Propulsé par Meta Cloud API & Google Gemini_`
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🏥 *SMART-HOSTO* • *ASSISTANT EXÉCUTIF SIH*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Bonjour *${s.name}* [${s.profession}]\n\n` +
+      `┌──────────────────────────────────────────┐\n` +
+      `│ POINT HOSPITALIER AU ${ctx.currentDate}\n` +
+      `├──────────────────────────────────────────┤\n` +
+      `│ Commissions en attente : ${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA\n` +
+      `│ Patients en file d'attente : ${ctx.waitingQueueToday.totalWaiting}\n` +
+      `│ Patients hospitalisés      : ${ctx.inpatients.totalAdmitted}\n` +
+      `│ Sorties en attente         : ${ctx.inpatients.pendingDischargeCount}\n` +
+      `│ Alertes pharmacie          : ${ctx.pharmacy.lowStockCount}\n` +
+      `└──────────────────────────────────────────┘\n\n` +
+      `*Requêtes disponibles :*\n` +
+      `▪ *"Mes commissions"* → Relevé d'honoraires et quotes-parts\n` +
+      `▪ *"File d'attente"* → Liste des patients en triage\n` +
+      `▪ *"Patients en attente de sortie"* → Tableau des sorties d'hospitalisation\n` +
+      `▪ *"Stock pharmacie"* → État des stocks et alertes\n` +
+      `▪ *"Tarifs"* → Nomenclature des actes médicaux\n` +
+      (ctx.adminHospitalSummary ? `▪ *"Bilan admin"* → Recouvrement caisse & licence\n` : '') +
+      `\n─────────────────────────────\n` +
+      `_SMART-HOSTO SIH • Service d'Information Médicale_`
     );
   }
 
@@ -1569,56 +1654,110 @@ function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<ty
     const totalAdmitted = ctx.inpatients?.totalAdmitted || 0;
     if (pendingDischarge.length === 0) {
       return (
-        `🛏️ *Hospitalisations & Sorties*\n` +
-        `• Total patients actuellement hospitalisés : *${totalAdmitted}*\n` +
-        `• Aucun patient n'est actuellement marqué en attente de sortie.\n\n` +
-        `_Tous les patients hospitalisés sont en cours de soins._`
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🏥 *SMART-HOSTO* • *HOSPITALISATION & SORTIES*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `┌──────────────────────────────────────────┐\n` +
+        `│ LITS OCCUPÉS       : ${totalAdmitted} patients\n` +
+        `│ SORTIES EN ATTENTE : 0 dossier\n` +
+        `└──────────────────────────────────────────┘\n\n` +
+        `▪ _Tous les patients actuellement hospitalisés sont en cours de soins._\n\n` +
+        `─────────────────────────────\n` +
+        `_SMART-HOSTO SIH • Données certifiées en temps réel_`
       );
     }
-    const list = pendingDischarge.map(p => `  - *${p.patientName}* (Lit: ${p.bed}${p.doctor ? `, Dr: ${p.doctor}` : ''})`).join('\n');
+    const table = renderAsciiTable(
+      ['PATIENT', 'LIT', 'DATE ADM.', 'STATUT'],
+      pendingDischarge.map(p => [
+        p.patientName.slice(0, 16),
+        p.bed.slice(0, 7),
+        (p.admissionDate || 'N/A').slice(0, 10),
+        'Attente'
+      ]),
+      [16, 7, 10, 7]
+    );
     return (
-      `🛏️ *Patients en attente de sortie (${pendingDischarge.length})* :\n` +
-      `• Total hospitalisés : *${totalAdmitted}*\n\n` +
-      `${list}\n\n` +
-      `_Validez la sortie médicale dans le module Hospitalisation._`
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🏥 *SMART-HOSTO* • *HOSPITALISATION & SORTIES*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `┌──────────────────────────────────────────┐\n` +
+      `│ LITS OCCUPÉS       : ${totalAdmitted} patients\n` +
+      `│ SORTIES EN ATTENTE : ${pendingDischarge.length} patients\n` +
+      `└──────────────────────────────────────────┘\n\n` +
+      `${table}\n\n` +
+      `▸ _Action requise : Validation du bon de sortie dans le module Hospitalisation._\n` +
+      `─────────────────────────────\n` +
+      `_SMART-HOSTO SIH • Données certifiées en temps réel_`
     );
   }
 
   if (lower.includes('commission') || lower.includes('stat') || lower.includes('finance') || lower.includes('quote') || lower.includes('salaire') || lower.includes('acte')) {
-    const recentList =
+    const rows =
       fin.recentActs.length > 0
-        ? fin.recentActs
-            .slice(0, 4)
-            .map(a => `  - ${a.date.slice(0, 10)} : *${a.typeLabel}* (${a.patientName}) → +${a.commissionAmount.toLocaleString('fr-FR')} FCFA [${a.paymentStatus === 'PAID' ? '✅ Payé' : '⏳ En attente'}]`)
-            .join('\n')
-        : '  _Aucun acte clôturé enregistré sur la période._';
+        ? fin.recentActs.slice(0, 5).map(a => [
+            a.date.slice(5, 10),
+            a.typeLabel.slice(0, 14),
+            `+${a.commissionAmount.toLocaleString('fr-FR')} F`,
+            a.paymentStatus === 'PAID' ? 'Payé' : 'Attente'
+          ])
+        : [['N/A', 'Aucun acte', '0 F', 'N/A']];
+
+    const table = renderAsciiTable(['DATE', 'ACTE', 'HONORAIRES', 'STATUT'], rows, [5, 14, 11, 7]);
 
     return (
-      `📊 *Bilan d'Activité & Quotes-Parts — ${s.name}*\n` +
-      `• Taux de quote-part : *${s.quotePartRatePercent}%*\n` +
-      `• Consultations clôturées : *${fin.totalConsultations}*\n` +
-      `• Total actes réalisés : *${fin.totalActs}*\n\n` +
-      `💰 *Situation Financière :*\n` +
-      `• Commissions générées : *${fin.totalCommissionsEarnedFCFA.toLocaleString('fr-FR')} FCFA*\n` +
-      `• Déjà réglées (Payées) : *${fin.totalCommissionsPaidFCFA.toLocaleString('fr-FR')} FCFA*\n` +
-      `• Solde en attente : *${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA*\n\n` +
-      `📋 *Derniers actes clôturés :*\n${recentList}`
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🏥 *SMART-HOSTO* • *RELEVÉ D'HONORAIRES*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `Praticien : *${s.name}* [${s.profession}] • Taux : *${s.quotePartRatePercent}%*\n\n` +
+      `┌──────────────────────────────────────────┐\n` +
+      `│ TOTAL HONORAIRES  : ${fin.totalCommissionsEarnedFCFA.toLocaleString('fr-FR')} FCFA\n` +
+      `│ RÈGLEMENTS PERÇUS : ${fin.totalCommissionsPaidFCFA.toLocaleString('fr-FR')} FCFA\n` +
+      `│ SOLDE EN ATTENTE  : ${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA\n` +
+      `└──────────────────────────────────────────┘\n\n` +
+      `*Derniers actes enregistrés :*\n` +
+      `${table}\n\n` +
+      `─────────────────────────────\n` +
+      `_SMART-HOSTO SIH • Service Comptabilité & Finances_`
     );
   }
 
   if (lower.includes('file') || lower.includes('attente') || lower.includes('patient') || lower.includes('queue') || lower.includes('salle')) {
     const q = ctx.waitingQueueToday;
     if (q.totalWaiting === 0) {
-      return `🏥 *File d'Attente du Jour*\nAucun patient n'est actuellement en salle d'attente ou en triage.`;
+      return (
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🏥 *SMART-HOSTO* • *TRIAGE & FILE D'ATTENTE*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `┌──────────────────────────────────────────┐\n` +
+        `│ PATIENTS EN SALLE  : 0 patient\n` +
+        `│ URGENCES SIGNALÉES : 0 cas\n` +
+        `└──────────────────────────────────────────┘\n\n` +
+        `▪ _Aucun patient n'est actuellement en attente de consultation._\n` +
+        `─────────────────────────────\n` +
+        `_SMART-HOSTO SIH • Accueil & Triage Médical_`
+      );
     }
-    const list = q.patients
-      .slice(0, 6)
-      .map((p, idx) => `${idx + 1}. *${p.name}* — ${p.motif} (${p.service}) ${p.priority === 'urgent' ? '🚨 *URGENT*' : ''}`)
-      .join('\n');
+    const table = renderAsciiTable(
+      ['PATIENT', 'MOTIF', 'SERVICE', 'PRIORITÉ'],
+      q.patients.slice(0, 8).map(p => [
+        p.name.slice(0, 15),
+        p.motif.slice(0, 12),
+        p.service.slice(0, 10),
+        p.priority === 'urgent' ? 'URGENT' : 'Normal'
+      ]),
+      [15, 12, 10, 8]
+    );
     return (
-      `🏥 *File d'Attente en Temps Réel (${q.totalWaiting} patient${q.totalWaiting > 1 ? 's' : ''})*\n` +
-      `• Urgences signalées : *${q.urgentCount}*\n\n` +
-      `${list}`
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🏥 *SMART-HOSTO* • *TRIAGE & FILE D'ATTENTE*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `┌──────────────────────────────────────────┐\n` +
+      `│ PATIENTS EN SALLE  : ${q.totalWaiting} patients\n` +
+      `│ URGENCES SIGNALÉES : ${q.urgentCount} cas critiques\n` +
+      `└──────────────────────────────────────────┘\n\n` +
+      `${table}\n\n` +
+      `─────────────────────────────\n` +
+      `_SMART-HOSTO SIH • Accueil & Triage Médical_`
     );
   }
 
@@ -1627,65 +1766,97 @@ function buildSmartFallbackReply(messageText: string, ctx: Awaited<ReturnType<ty
       .replace(/stock|pharmacie|médicament|medicament|vérifier|verifier|disponibilité|de|du|des|le|la/g, '')
       .trim();
 
-    if (searchTerms.length >= 2) {
-      const matches = ctx.pharmacy.sampleInventory.filter(m => m.name.toLowerCase().includes(searchTerms));
-      if (matches.length > 0) {
-        return (
-          `💊 *Recherche Pharmacie ("${searchTerms}") :*\n` +
-          matches
-            .map(
-              m =>
-                `• *${m.name}* : *${m.stock} en stock* — Prix : ${m.price.toLocaleString('fr-FR')} FCFA ${
-                  m.stock <= m.alertThreshold ? '⚠️ _(Stock bas)_' : '✅'
-                }`
-            )
-            .join('\n')
-        );
-      }
-    }
+    const matches = searchTerms.length >= 2
+      ? ctx.pharmacy.sampleInventory.filter(m => m.name.toLowerCase().includes(searchTerms))
+      : (ctx.pharmacy.lowStockAlerts.length > 0 ? ctx.pharmacy.lowStockAlerts : ctx.pharmacy.sampleInventory.slice(0, 8));
 
-    const alerts =
-      ctx.pharmacy.lowStockAlerts.length > 0
-        ? ctx.pharmacy.lowStockAlerts.map(m => `  - ⚠️ *${m.name}* : ${m.stock} unité(s) (Seuil: ${m.alertThreshold})`).join('\n')
-        : '  ✅ Aucune rupture ou alerte critique.';
+    const rows = matches.slice(0, 8).map(m => [
+      m.name.slice(0, 18),
+      String(m.stock),
+      String(m.alertThreshold),
+      m.stock <= m.alertThreshold ? '[CRITIQUE]' : 'Normal'
+    ]);
+
+    const table = renderAsciiTable(['ARTICLE', 'STOCK', 'SEUIL', 'STATUT'], rows, [18, 5, 5, 10]);
 
     return (
-      `💊 *Point Stock Pharmacie Central*\n` +
-      `• Références au catalogue : *${ctx.pharmacy.totalMedicationsInCatalog}*\n` +
-      `• Médicaments en alerte de stock : *${ctx.pharmacy.lowStockCount}*\n\n` +
-      `*Alertes prioritaires :*\n${alerts}`
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🏥 *SMART-HOSTO* • *PHARMACIE CENTRALE*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `┌──────────────────────────────────────────┐\n` +
+      `│ ARTICLES CATALOGUE : ${ctx.pharmacy.totalMedicationsInCatalog}\n` +
+      `│ ALERTES DE RUPTURE : ${ctx.pharmacy.lowStockCount}\n` +
+      `└──────────────────────────────────────────┘\n\n` +
+      `${table}\n\n` +
+      `─────────────────────────────\n` +
+      `_SMART-HOSTO SIH • Gestion des Stocks Pharmacie_`
     );
   }
 
   if (lower.includes('tarif') || lower.includes('prix') || lower.includes('cout') || lower.includes('coût')) {
     if (ctx.tariffsCatalog.length === 0) {
-      return `💰 *Catalogue des Tarifs*\nConsultation standard : *15 000 FCFA* • Soin infirmier : *5 000 FCFA*.`;
+      return (
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+        `🏥 *SMART-HOSTO* • *NOMENCLATURE TARIFAIRE*\n` +
+        `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+        `▪ Consultation standard : *15 000 FCFA*\n` +
+        `▪ Soin infirmier standard : *5 000 FCFA*\n` +
+        `─────────────────────────────\n` +
+        `_SMART-HOSTO SIH • Tarification Officielle_`
+      );
     }
-    const items = ctx.tariffsCatalog
-      .slice(0, 8)
-      .map(a => `• *${a.name}* (${a.category}) : *${a.price.toLocaleString('fr-FR')} FCFA*`)
-      .join('\n');
-    return `💰 *Référentiel des Tarifs SMART-HOSTO :*\n${items}`;
+    const table = renderAsciiTable(
+      ['ACTE MÉDICAL', 'CATÉGORIE', 'TARIF'],
+      ctx.tariffsCatalog.slice(0, 8).map(a => [
+        a.name.slice(0, 20),
+        a.category.slice(0, 10),
+        `${a.price.toLocaleString('fr-FR')} F`
+      ]),
+      [20, 10, 10]
+    );
+    return (
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🏥 *SMART-HOSTO* • *NOMENCLATURE TARIFAIRE*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `${table}\n\n` +
+      `─────────────────────────────\n` +
+      `_SMART-HOSTO SIH • Tarification Officielle_`
+    );
   }
 
   if (ctx.adminHospitalSummary && (lower.includes('admin') || lower.includes('quota') || lower.includes('licence') || lower.includes('caisse'))) {
     const adm = ctx.adminHospitalSummary;
     return (
-      `🛡️ *Synthèse Direction / Administration*\n` +
-      `• Licence active : *${adm.licence}*\n` +
-      `• Quota Utilisateurs : *${adm.activeStaffUsers} / ${adm.maxStaffUsers}* comptes actifs\n` +
-      `• Factures en attente Caisse : *${adm.pendingCashierInvoicesCount}* (${adm.pendingCashierAmountFCFA.toLocaleString('fr-FR')} FCFA)`
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+      `🏥 *SMART-HOSTO* • *TABLEAU DE BORD DIRECTION*\n` +
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
+      `┌──────────────────────────────────────────┐\n` +
+      `│ FACTURES EN ATTENTE  : ${adm.pendingCashierInvoicesCount} dossiers\n` +
+      `│ MONTANT À RECOUVRER  : ${adm.pendingCashierAmountFCFA.toLocaleString('fr-FR')} FCFA\n` +
+      `│ LICENCE ACTIVE       : ${adm.licence}\n` +
+      `│ COMPTES UTILISATEURS : ${adm.activeStaffUsers} / ${adm.maxStaffUsers} actifs\n` +
+      `└──────────────────────────────────────────┘\n\n` +
+      `▪ _Les encaissements sont mis à jour en temps réel par les caisses centrales._\n` +
+      `─────────────────────────────\n` +
+      `_SMART-HOSTO SIH • Direction Générale & Recouvrement_`
     );
   }
 
   return (
-    `🤖 *Assistant IA SMART-HOSTO (${s.name})*\n\n` +
-    `Voici votre résumé rapide en direct :\n` +
-    `• Actes clôturés : *${fin.totalActs}* (${fin.totalConsultations} consultations)\n` +
-    `• Commissions générées : *${fin.totalCommissionsEarnedFCFA.toLocaleString('fr-FR')} FCFA*\n` +
-    `• Patients en file d'attente aujourd'hui : *${ctx.waitingQueueToday.totalWaiting}*\n` +
-    `• Alertes stock pharmacie : *${ctx.pharmacy.lowStockCount}*\n\n` +
-    `_Envoyez *"Mes commissions"*, *"File d'attente"*, *"Stock pharmacie"* ou *"Tarifs"* pour plus de détails (ou configurez votre clé API Gemini dans Paramètres → Agent WhatsApp IA pour des réponses conversationnelles libres)._`
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `🏥 *SMART-HOSTO* • *ASSISTANT EXÉCUTIF SIH*\n` +
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n` +
+    `Bonjour *${s.name}* [${s.profession}]\n\n` +
+    `┌──────────────────────────────────────────┐\n` +
+    `│ POINT HOSPITALIER AU ${ctx.currentDate}\n` +
+    `├──────────────────────────────────────────┤\n` +
+    `│ Commissions en attente : ${fin.totalCommissionsPendingFCFA.toLocaleString('fr-FR')} FCFA\n` +
+    `│ Patients en file d'attente : ${ctx.waitingQueueToday.totalWaiting}\n` +
+    `│ Alertes stock pharmacie    : ${ctx.pharmacy.lowStockCount}\n` +
+    `└──────────────────────────────────────────┘\n\n` +
+    `▪ _Tapez *"Mes commissions"*, *"Sorties"*, *"File d'attente"* ou *"Stock pharmacie"* pour consulter les tableaux détaillés._\n` +
+    `─────────────────────────────\n` +
+    `_SMART-HOSTO SIH • Données certifiées en temps réel_`
   );
 }
 
