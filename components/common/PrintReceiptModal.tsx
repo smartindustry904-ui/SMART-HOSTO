@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Printer, X, Receipt, FileText, CheckCircle2, Building2, Phone, Mail, MapPin, User, ShieldCheck } from 'lucide-react';
 import { EstablishmentConfig } from '../../types';
 
@@ -61,6 +62,13 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
 
   const currency = establishment.currency || 'FCFA';
 
+  useEffect(() => {
+    document.body.classList.add('has-print-modal');
+    return () => {
+      document.body.classList.remove('has-print-modal');
+    };
+  }, []);
+
   const formatMoney = (val?: number) => {
     return (val || 0).toLocaleString('fr-FR');
   };
@@ -69,10 +77,32 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
     window.print();
   };
 
-  return (
-    <div className={`fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto ${
-      selectedFormat === 'THERMAL_80MM' ? 'print-format-thermal' : 'print-format-a4'
-    }`}>
+  return createPortal(
+    <div id="print-modal-portal">
+      {/* Format-specific dynamic @page CSS rule for browser print preview */}
+      {selectedFormat === 'THERMAL_80MM' ? (
+        <style>{`
+          @media print {
+            @page {
+              size: 80mm auto !important;
+              margin: 2mm 1mm !important;
+            }
+          }
+        `}</style>
+      ) : (
+        <style>{`
+          @media print {
+            @page {
+              size: A4 portrait !important;
+              margin: 8mm 10mm !important;
+            }
+          }
+        `}</style>
+      )}
+
+      <div className={`fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto ${
+        selectedFormat === 'THERMAL_80MM' ? 'print-format-thermal' : 'print-format-a4'
+      }`}>
       <div className={`ticket-print-wrapper bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200 transition-all ${
         selectedFormat === 'THERMAL_80MM' 
           ? 'w-full max-w-md print-format-thermal' 
@@ -301,7 +331,6 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             <div 
               id="a4-receipt"
               className="bg-white p-8 sm:p-12 shadow-sm border border-slate-200 text-slate-900 w-full max-w-4xl space-y-6 font-sans"
-              style={{ minHeight: '297mm' }}
             >
               {/* A4 Official Hospital Header */}
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6 gap-6">
@@ -520,5 +549,7 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
 
       </div>
     </div>
-  );
+  </div>,
+  document.body
+);
 };

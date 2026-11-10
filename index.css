@@ -257,29 +257,72 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 }
 
 /* Print Media Queries for Thermal Receipt / Orientation Sheet */
+/* Print Media Queries for Thermal Receipt / Orientation Sheet / Official A4 */
 @media print {
-  body {
+  /* 1. Global Print Reset */
+  html, body {
     background: #ffffff !important;
     color: #000000 !important;
     margin: 0 !important;
     padding: 0 !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
   }
 
-  /* Hide all non-printable UI elements */
-  header, nav, aside, footer, button, .no-print, [role="navigation"] {
+  /* 2. When a print modal is open, COMPLETELY HIDE the background app (#root) */
+  body.has-print-modal > #root,
+  body.has-print-modal > *:not(#print-modal-portal),
+  body:has(#print-modal-portal) > #root,
+  body:has(#print-modal-portal) > *:not(#print-modal-portal) {
     display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    max-height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    left: -9999px !important;
   }
 
-  /* Target ticket modal specifically */
-  .fixed.inset-0 {
+  /* 3. Hide all non-printable chrome and interactive UI */
+  header, nav, aside, footer, button, .no-print, [role="navigation"],
+  .ticket-actions-bar,
+  #print-modal-portal .no-print,
+  #print-modal-portal button {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* 4. Display the Print Portal as the sole printable content */
+  #print-modal-portal {
+    display: block !important;
     position: static !important;
-    background: none !important;
-    backdrop-filter: none !important;
+    width: 100% !important;
+    margin: 0 !important;
     padding: 0 !important;
+    background: #ffffff !important;
+    overflow: visible !important;
+  }
+
+  #print-modal-portal .fixed.inset-0,
+  #print-modal-portal [class*="fixed"] {
+    position: static !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
     display: block !important;
   }
 
+  #print-modal-portal .ticket-print-wrapper,
   .ticket-print-wrapper {
+    position: static !important;
     max-height: none !important;
     overflow: visible !important;
     border: none !important;
@@ -287,37 +330,58 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     border-radius: 0 !important;
     margin: 0 auto !important;
     padding: 0 !important;
-  }
-
-  /* Thermal / Supermarket 80mm format */
-  .ticket-print-wrapper.print-format-thermal,
-  .print-format-thermal .ticket-print-wrapper,
-  .ticket-print-wrapper:not(.print-format-a4) {
-    width: 80mm !important;
-    max-width: 80mm !important;
-  }
-
-  /* Full Page A4 Invoice format */
-  .ticket-print-wrapper.print-format-a4,
-  .print-format-a4 .ticket-print-wrapper {
+    background: #ffffff !important;
+    color: #000000 !important;
+    display: block !important;
     width: 100% !important;
-    max-width: 210mm !important;
-    padding: 8mm !important;
+    max-width: 100% !important;
   }
 
+  #print-modal-portal .ticket-scroll-area,
   .ticket-scroll-area {
     max-height: none !important;
     overflow: visible !important;
     padding: 0 !important;
+    margin: 0 !important;
     background: transparent !important;
+    display: block !important;
   }
 
-  .ticket-actions-bar {
+  /* 5. Thermal Supermarket 80mm format styling */
+  #thermal-receipt,
+  .print-format-thermal #thermal-receipt,
+  .ticket-print-wrapper.print-format-thermal #thermal-receipt {
+    width: 76mm !important;
+    max-width: 76mm !important;
+    margin: 0 auto !important;
+    padding: 2mm 1mm !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* 6. Standard A4 Invoice / Sheet format styling */
+  #a4-receipt,
+  .print-format-a4 #a4-receipt,
+  .ticket-print-wrapper.print-format-a4 #a4-receipt {
+    width: 100% !important;
+    max-width: 190mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    min-height: auto !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* 7. Fallback if a modal is inside #root (e.g. shift closing slip or debt slip) */
+  body:not(.has-print-modal):has(.ticket-print-wrapper) > #root > *:not(:has(.ticket-print-wrapper)) {
     display: none !important;
-  }
-
-  @page {
-    size: auto;
-    margin: 3mm;
   }
 }
