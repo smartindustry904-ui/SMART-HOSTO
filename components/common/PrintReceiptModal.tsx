@@ -80,6 +80,92 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
     <div className={`fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto ${
       selectedFormat === 'THERMAL_80MM' ? 'print-format-thermal' : 'print-format-a4'
     }`}>
+      {/* Dynamic Airtight Print CSS Isolation: hides dashboard background, sidebar & chrome entirely */}
+      <style>{`
+        @media print {
+          html, body {
+            background: #ffffff !important;
+            color: #000000 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            min-height: auto !important;
+            overflow: visible !important;
+          }
+
+          /* Hide all elements on page */
+          body * {
+            visibility: hidden !important;
+          }
+
+          /* Reveal ONLY the active ticket-print-wrapper and its subcomponents */
+          .ticket-print-wrapper,
+          .ticket-print-wrapper * {
+            visibility: visible !important;
+          }
+
+          /* Eliminate fixed modal backdrop and position ticket at top of printed page */
+          .fixed.inset-0,
+          [class*="fixed"] {
+            position: static !important;
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            overflow: visible !important;
+          }
+
+          .ticket-print-wrapper {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
+            display: block !important;
+            width: 100% !important;
+            z-index: 9999999 !important;
+          }
+
+          .ticket-scroll-area {
+            max-height: none !important;
+            height: auto !important;
+            overflow: visible !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: transparent !important;
+            display: block !important;
+          }
+
+          /* Hide controls, buttons, toolbars from print preview */
+          .no-print,
+          .no-print *,
+          .ticket-actions-bar,
+          .ticket-actions-bar *,
+          button,
+          nav,
+          aside,
+          header {
+            display: none !important;
+            visibility: hidden !important;
+          }
+
+          tr, .avoid-break {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        }
+      `}</style>
+
       {/* Format-specific dynamic @page CSS rule for browser print preview */}
       {selectedFormat === 'THERMAL_80MM' ? (
         <style>{`
@@ -87,6 +173,16 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             @page {
               size: 80mm auto !important;
               margin: 2mm 1mm !important;
+            }
+            #thermal-receipt {
+              width: 76mm !important;
+              max-width: 76mm !important;
+              margin: 0 auto !important;
+              padding: 1mm !important;
+              border: none !important;
+              box-shadow: none !important;
+              background: #ffffff !important;
+              color: #000000 !important;
             }
           }
         `}</style>
@@ -96,6 +192,16 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             @page {
               size: A4 portrait !important;
               margin: 8mm 10mm !important;
+            }
+            #a4-receipt {
+              width: 100% !important;
+              max-width: 190mm !important;
+              margin: 0 auto !important;
+              padding: 0 !important;
+              border: none !important;
+              box-shadow: none !important;
+              background: #ffffff !important;
+              color: #000000 !important;
             }
           }
         `}</style>
