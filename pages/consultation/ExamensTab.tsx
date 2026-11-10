@@ -114,12 +114,27 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
       }
 
       const today = new Date();
-      const newRequest: LabExamRequest = {
+      const doctorName = user?.name || user?.username || 'Docteur';
+      const doctorId = user?.id || '';
+      const newRequest: any = {
         ...request,
         id: cleanId,
         date: today.toISOString(),
         status: 'en attente',
-        billingStatus: 'pending'
+        billingStatus: 'pending',
+        doctor: doctorName,
+        doctorName: doctorName,
+        doctorId: doctorId,
+        prescriberId: doctorId,
+        prescriberName: doctorName,
+        practitionerId: doctorId,
+        practitionerName: doctorName,
+        practitionerRole: user?.role || 'MEDECIN',
+        exams: (request.exams || []).map((e: any) => ({
+          ...e,
+          practitionerId: doctorId,
+          practitionerName: doctorName
+        }))
       };
 
       // Write to Firestore 'lab_requests'

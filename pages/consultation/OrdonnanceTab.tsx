@@ -111,19 +111,31 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
       const newOrdId = `ORD-${Math.floor(Math.random() * 1000000)}`;
       const docRef = doc(collection(db, 'pending_prescriptions'));
       
+      const doctorName = user?.name || user?.username || 'Dr. Sarr';
+      const doctorId = user?.id || '';
+
       const payload = {
         id: newOrdId,
         firebaseId: docRef.id,
         patientId: patient.id,
         patient: `${patient.lastName} ${patient.firstName}`,
-        doctor: user?.name || 'Dr. Sarr',
+        doctor: doctorName,
+        doctorName: doctorName,
+        doctorId: doctorId,
+        prescriberId: doctorId,
+        prescriberName: doctorName,
+        practitionerId: doctorId,
+        practitionerName: doctorName,
+        practitionerRole: user?.role || 'MEDECIN',
         date: dateStr,
         items: ord.traitements.map((t: any) => ({
           name: t.medicationName,
           posology: t.dosageScheme,
           duration: t.duration,
           quantity: t.totalBoxes || 1,
-          price: t.price || 1500
+          price: t.price || 1500,
+          practitionerId: doctorId,
+          practitionerName: doctorName
         })),
         createdAt: today.toISOString(),
         status: 'pending'
@@ -157,19 +169,31 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
       const timeStr = today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
       
       const docRef = doc(collection(db, 'pending_prescriptions'));
+      const doctorName = user?.name || user?.username || 'Dr. Sarr';
+      const doctorId = user?.id || '';
+
       await setDoc(docRef, {
         id: newOrd.id,
         firebaseId: docRef.id,
         patientId: patient.id,
         patient: `${patient.lastName} ${patient.firstName}`,
-        doctor: user?.name || 'Dr. Sarr',
+        doctor: doctorName,
+        doctorName: doctorName,
+        doctorId: doctorId,
+        prescriberId: doctorId,
+        prescriberName: doctorName,
+        practitionerId: doctorId,
+        practitionerName: doctorName,
+        practitionerRole: user?.role || 'MEDECIN',
         date: dateStr,
         items: newOrd.traitements.map((t: any) => ({
           name: t.medicationName,
           posology: t.dosageScheme,
           duration: t.duration,
           quantity: t.totalBoxes || 1,
-          price: t.price || 1500
+          price: t.price || 1500,
+          practitionerId: doctorId,
+          practitionerName: doctorName
         })),
         createdAt: today.toISOString(),
         status: 'pending'

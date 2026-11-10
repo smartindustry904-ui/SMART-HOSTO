@@ -1513,12 +1513,19 @@ async function buildStaffHospitalContext(staffDoc: any) {
 
   // 6. Inpatient & Stays / Discharges (inpatient_records)
   const activeInpatients: Array<{
+    id?: string;
+    patientId?: string;
     patientName: string;
     bed: string;
+    service?: string;
     admissionDate: string;
     status: string;
     dischargePlanned: boolean;
     doctor: string;
+    reason?: string;
+    priority?: string;
+    financialStatus?: string;
+    [key: string]: any;
   }> = [];
 
   if (inpSnap) {

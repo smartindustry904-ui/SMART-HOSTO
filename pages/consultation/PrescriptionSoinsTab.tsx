@@ -249,6 +249,11 @@ export const PrescriptionSoinsTab: React.FC<PrescriptionSoinsTabProps> = ({
         source: source, // 'URGENCES' | 'CONSULTATION'
         prescribedBy: doctorName,
         prescribedByRole: isUrgence ? 'Médecin Urgentiste' : 'Médecin',
+        prescriberId: user?.id || '',
+        prescriberName: doctorName,
+        practitionerId: user?.id || '',
+        practitionerName: doctorName,
+        practitionerRole: isUrgence ? 'Médecin Urgentiste' : 'Médecin',
         prescribedAt: today.toISOString(),
         status: 'EN ATTENTE', // Strict pending status for Receive-Only Nurse Queue
         createdAt: today.toISOString(),

@@ -124,68 +124,68 @@ export default function PatientDirectory({ onSelectPatient }: PatientDirectoryPr
           <p className="text-slate-500 max-w-md mx-auto">Nous n'avons trouvé aucun dossier correspondant à votre recherche. Veuillez vérifier l'orthographe ou essayer d'autres critères.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filteredPatients.map((p) => {
             const ageVal = calculateAge(p.birthDate);
             return (
               <div
                 key={p.id}
-                className="bg-white rounded-[32px] border border-slate-200 p-8 hover:border-blue-500 hover:shadow-2xl transition-all group relative overflow-hidden flex flex-col justify-between"
+                className="bg-white rounded-2xl border border-slate-200/90 p-4.5 hover:border-blue-500 hover:shadow-xl transition-all group relative overflow-hidden flex flex-col justify-between"
               >
                 <div>
-                  <div className="flex justify-between items-start mb-6">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 font-black text-lg">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 font-black text-sm">
                         {p.lastName.charAt(0)}{p.firstName.charAt(0)}
                       </div>
                       <div>
-                        <span className="text-[10px] font-black text-slate-400 font-mono tracking-widest uppercase">{p.id}</span>
-                        <h3 className="text-xl font-black text-slate-900 leading-tight">{p.lastName} {p.firstName}</h3>
+                        <span className="text-[9px] font-black text-slate-400 font-mono tracking-wider uppercase">{p.id}</span>
+                        <h3 className="text-sm font-black text-slate-900 leading-tight truncate">{p.lastName} {p.firstName}</h3>
                       </div>
                     </div>
                   </div>
 
-                  <div className="space-y-3.5 mb-8">
-                    <div className="flex items-center gap-3 text-slate-600">
-                      <Calendar size={16} className="text-slate-400" />
-                      <span className="text-xs font-bold">
+                  <div className="space-y-2 mb-4">
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <Calendar size={13} className="text-slate-400" />
+                      <span className="text-[11px] font-bold">
                         {p.birthDate ? `${new Date(p.birthDate).toLocaleDateString('fr-FR')} (${ageVal} ans)` : 'Né(e) - non renseigné'}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-3 text-slate-600">
-                      <Phone size={16} className="text-slate-400" />
-                      <span className="text-xs font-mono font-bold">
-                        {p.phone || 'Aucun numéro enregistré'}
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <Phone size={13} className="text-slate-400" />
+                      <span className="text-[11px] font-mono font-bold">
+                        {p.phone || 'Aucun numéro'}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-3 text-slate-600">
-                      <MapPin size={16} className="text-slate-400" />
-                      <span className="text-xs font-bold truncate">
+                    <div className="flex items-center gap-2 text-slate-600">
+                      <MapPin size={13} className="text-slate-400" />
+                      <span className="text-[11px] font-bold truncate">
                         {p.residence || 'Résidence non renseignée'}
                       </span>
                     </div>
 
                     {p.maritalStatus && (
-                      <div className="bg-slate-50 border border-slate-100/80 rounded-xl px-3.5 py-2 text-[10px] text-slate-500 font-bold flex justify-between items-center">
-                        <span>Statut matrimonial:</span>
-                        <span className="bg-white px-2 py-0.5 rounded border border-slate-200 uppercase">{p.maritalStatus}</span>
+                      <div className="bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1 text-[9px] text-slate-500 font-bold flex justify-between items-center">
+                        <span>Statut:</span>
+                        <span className="bg-white px-1.5 py-0.5 rounded border border-slate-200 uppercase">{p.maritalStatus}</span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                <div className="pt-6 border-t border-slate-100 mt-auto flex gap-2">
+                <div className="pt-2.5 border-t border-slate-100 mt-auto flex gap-2">
                   <button
                     onClick={() => onSelectPatient({
                       ...p,
                       age: ageVal,
                       name: `${p.lastName} ${p.firstName}`
                     })}
-                    className="flex-1 flex items-center justify-center gap-2 bg-blue-600 text-white font-black text-xs uppercase tracking-wider py-3.5 px-4 rounded-xl shadow-lg shadow-blue-600/10 hover:bg-blue-700 transition-all cursor-pointer"
+                    className="flex-1 flex items-center justify-center gap-1.5 bg-blue-600 text-white font-black text-[11px] uppercase tracking-wider py-2.5 px-3 rounded-xl shadow-sm hover:bg-blue-700 transition-all cursor-pointer"
                   >
-                    <ClipboardList size={14} />
+                    <ClipboardList size={13} />
                     Consulter / Dossier
                   </button>
                 </div>

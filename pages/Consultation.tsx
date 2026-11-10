@@ -133,10 +133,11 @@ const Consultation: React.FC<ConsultationProps> = ({
 
   // Listen to activePatient's actual record from Firestore in real-time
   useEffect(() => {
-    if (!activePatient?.id) return;
+    const targetPatientId = activePatient?.patientId || activePatient?.id;
+    if (!targetPatientId) return;
     
     try {
-      const unsubscribe = onSnapshot(doc(db, 'patients', activePatient.id), (docSnap) => {
+      const unsubscribe = onSnapshot(doc(db, 'patients', targetPatientId), (docSnap) => {
         if (docSnap.exists()) {
           const data = docSnap.data();
           setActivePatient(prev => {
@@ -144,7 +145,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             return {
               ...prev,
               ...data,
-              vitals: data.vitals || prev.vitals || {}
+              vitals: { ...(data.vitals || {}), ...(prev.vitals || {}) }
             };
           });
         }
@@ -153,7 +154,30 @@ const Consultation: React.FC<ConsultationProps> = ({
     } catch (e) {
       console.error("Error listening to active patient:", e);
     }
-  }, [activePatient?.id]);
+  }, [activePatient?.id, activePatient?.patientId]);
+
+  // Synchronize activePatient in real-time with waitingQueue updates (from nurse triage, reception, cashier)
+  useEffect(() => {
+    if (!activePatient) return;
+    const currentInQueue = (waitingQueue || []).find((p: any) => 
+      p.id === activePatient.id || 
+      p.queueDocId === (activePatient as any).queueDocId || 
+      (p.patientId && p.patientId === activePatient.id) ||
+      (activePatient.patientId && (p.id === activePatient.patientId || p.patientId === activePatient.patientId))
+    );
+    if (currentInQueue) {
+      setActivePatient(prev => {
+        if (!prev) return currentInQueue;
+        const mergedVitals = { ...(prev.vitals || {}), ...(currentInQueue.vitals || {}) };
+        return {
+          ...prev,
+          ...currentInQueue,
+          vitals: mergedVitals,
+          status: prev.status || currentInQueue.status
+        };
+      });
+    }
+  }, [waitingQueue]);
   const [consultationTab, setConsultationTab] = useState<ConsultationTab>('GENERAL');
   const [planningPatient, setPlanningPatient] = useState<any | null>(null);
 
@@ -410,9 +434,13 @@ const Consultation: React.FC<ConsultationProps> = ({
   const handleStartConsultation = (patient: any) => {
     // 1. INSTANT OPTIMISTIC UI TRANSITION (Zero latency - appears immediately)
     if (setWaitingQueue) {
-      setWaitingQueue(prev => prev.filter(p => p.id !== patient.id));
+      setWaitingQueue(prev => prev.map(p => 
+        (p.id === patient.id || p.queueDocId === patient.queueDocId || (patient.patientId && p.patientId === patient.patientId))
+          ? { ...p, status: 'in_consultation' }
+          : p
+      ));
     }
-    setActivePatient(patient);
+    setActivePatient({ ...patient, status: 'in_consultation' });
     setConsultationTab('MEDICAL'); // Default to MEDICAL (active clinical workspace) tab
     setActiveMenu('CONSULTATION');
 
@@ -529,6 +557,13 @@ const Consultation: React.FC<ConsultationProps> = ({
       } finally {
         setIsEndingSession(false);
       }
+    }
+    if (setWaitingQueue && activePatient) {
+      setWaitingQueue(prev => prev.filter(p => 
+        p.id !== activePatient.id && 
+        p.patientId !== activePatient.id && 
+        p.queueDocId !== (activePatient as any).queueDocId
+      ));
     }
     setActivePatient(null);
     setActiveMenu('WAITING_ROOM');
@@ -2153,60 +2188,60 @@ const Consultation: React.FC<ConsultationProps> = ({
 
                 {/* Permanent Patient Context Panel (1 column) -> Point 2 */}
                 {contextData && (
-                  <div className="xl:col-span-1 bg-white rounded-[40px] border border-slate-200 p-8 shadow-sm flex flex-col gap-5 sticky top-36 max-h-[82vh] overflow-y-auto animate-in slide-in-from-right duration-500">
-                    <div className="border-b border-slate-100 pb-3">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Cadre Contexte Patient</h4>
-                      <p className="text-sm font-black text-slate-800">Affichage Permanent Clinique</p>
+                  <div className="xl:col-span-1 bg-white rounded-2xl border border-slate-200/90 p-4.5 shadow-xs flex flex-col gap-3.5 sticky top-36 max-h-[82vh] overflow-y-auto animate-in slide-in-from-right duration-500">
+                    <div className="border-b border-slate-100 pb-2">
+                      <h4 className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-0.5">Cadre Contexte Patient</h4>
+                      <p className="text-xs font-black text-slate-800">Affichage Permanent Clinique</p>
                     </div>
 
                     {/* Patient identity block (Point 2.1) */}
-                    <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex flex-col gap-1">
-                      <p className="text-[8px] font-black uppercase tracking-widest text-slate-400">Identité Patient</p>
-                      <p className="text-sm font-black text-slate-900">{contextData.lastName} {contextData.firstName}</p>
-                      <div className="flex justify-between text-[10px] text-slate-500 font-bold mt-1">
+                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex flex-col gap-1">
+                      <p className="text-[7.5px] font-black uppercase tracking-wider text-slate-400">Identité Patient</p>
+                      <p className="text-xs font-black text-slate-900">{contextData.lastName} {contextData.firstName}</p>
+                      <div className="flex justify-between text-[9px] text-slate-500 font-bold mt-0.5">
                         <span>Genre: {contextData.gender === 'F' ? 'Femme ♀' : 'Homme ♂'}</span>
                         <span>Âge: {contextData.age} ans</span>
                       </div>
-                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">DME: {contextData.id}</p>
+                      <p className="text-[9px] text-slate-400 font-mono mt-0.5">DME: {contextData.id}</p>
                     </div>
 
                     {/* Vitals summary with BMI (Point 2.2) */}
-                    <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex flex-col gap-3">
-                      <p className="text-[8px] font-black uppercase tracking-widest text-slate-400">Constantes de Triage</p>
-                      <div className="grid grid-cols-2 gap-3.5">
-                        <div className="flex items-center gap-2">
-                          <Thermometer size={14} className="text-rose-500" />
+                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex flex-col gap-2">
+                      <p className="text-[7.5px] font-black uppercase tracking-wider text-slate-400">Constantes de Triage</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <Thermometer size={12} className="text-rose-500" />
                           <div>
-                            <p className="text-[8px] font-bold text-slate-500">Température</p>
-                            <p className="text-xs font-black text-slate-800">{contextData.vitals.temp} °C</p>
+                            <p className="text-[7.5px] font-bold text-slate-500">Température</p>
+                            <p className="text-[11px] font-black text-slate-800">{contextData.vitals.temp} °C</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Activity size={14} className="text-blue-500" />
+                        <div className="flex items-center gap-1.5">
+                          <Activity size={12} className="text-blue-500" />
                           <div>
-                            <p className="text-[8px] font-bold text-slate-500">Tension (TA)</p>
-                            <p className="text-xs font-black text-slate-800">{contextData.vitals.bp}</p>
+                            <p className="text-[7.5px] font-bold text-slate-500">Tension (TA)</p>
+                            <p className="text-[11px] font-black text-slate-800">{contextData.vitals.bp}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Heart size={14} className="text-emerald-500" />
+                        <div className="flex items-center gap-1.5">
+                          <Heart size={12} className="text-emerald-500" />
                           <div>
-                            <p className="text-[8px] font-bold text-slate-500">Pouls (FC)</p>
-                            <p className="text-xs font-black text-slate-800">{contextData.vitals.pulse} bpm</p>
+                            <p className="text-[7.5px] font-bold text-slate-500">Pouls (FC)</p>
+                            <p className="text-[11px] font-black text-slate-800">{contextData.vitals.pulse} bpm</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Activity size={14} className="text-orange-500" />
+                        <div className="flex items-center gap-1.5">
+                          <Activity size={12} className="text-orange-500" />
                           <div>
-                            <p className="text-[8px] font-bold text-slate-500">SPO2</p>
-                            <p className="text-xs font-black text-slate-800">{contextData.vitals.spo2} %</p>
+                            <p className="text-[7.5px] font-bold text-slate-500">SPO2</p>
+                            <p className="text-[11px] font-black text-slate-800">{contextData.vitals.spo2} %</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 col-span-2 border-t border-slate-100 pt-2 text-[10px] font-bold text-slate-600 justify-between">
+                        <div className="flex items-center gap-1.5 col-span-2 border-t border-slate-100 pt-1.5 text-[9px] font-bold text-slate-600 justify-between">
                           <span>FR: {contextData.vitals.respRate} cpm</span>
                           <span>Poids: {contextData.vitals.weight} kg</span>
                         </div>
-                        <div className="flex items-center gap-2 col-span-2 text-[10px] font-bold text-slate-600 justify-between">
+                        <div className="flex items-center gap-1.5 col-span-2 text-[9px] font-bold text-slate-600 justify-between">
                           <span>Taille: {contextData.vitals.height} cm</span>
                           <span className="text-blue-600">IMC: {contextData.vitals.bmi}</span>
                         </div>
@@ -2214,17 +2249,17 @@ const Consultation: React.FC<ConsultationProps> = ({
                     </div>
 
                     {/* Structured alerts Pregnancy & Chroniques (Point 2.3) */}
-                    <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl flex flex-col gap-2.5">
-                      <p className="text-[8px] font-black uppercase tracking-widest text-rose-500 flex items-center gap-1">
+                    <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex flex-col gap-2">
+                      <p className="text-[7.5px] font-black uppercase tracking-wider text-rose-500 flex items-center gap-1">
                         <AlertTriangle size={10} /> Alertes Signalées
                       </p>
                       
                       {/* Allergies */}
                       <div>
-                        <p className="text-[8px] font-bold text-rose-400 mb-1">Allergies</p>
-                        <div className="flex flex-wrap gap-1.5">
+                        <p className="text-[7.5px] font-bold text-rose-400 mb-0.5">Allergies</p>
+                        <div className="flex flex-wrap gap-1">
                           {contextData.allergies.map((all, i) => (
-                            <span key={i} className="bg-white text-rose-700 border border-rose-200 px-2 py-0.5 rounded text-[9px] font-black leading-tight">
+                            <span key={i} className="bg-white text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded text-[8.5px] font-black leading-tight">
                               {all}
                             </span>
                           ))}
@@ -2233,14 +2268,14 @@ const Consultation: React.FC<ConsultationProps> = ({
 
                       {/* Pregnancy Alert */}
                       <div>
-                        <p className="text-[8px] font-bold text-rose-400 mb-0.5">Statut de grossesse</p>
-                        <p className="text-[10px] font-black text-rose-800">{contextData.pregnancyStatus}</p>
+                        <p className="text-[7.5px] font-bold text-rose-400 mb-0.5">Statut de grossesse</p>
+                        <p className="text-[9px] font-black text-rose-800">{contextData.pregnancyStatus}</p>
                       </div>
 
                       {/* Chronic pathologies */}
                       <div>
-                        <p className="text-[8px] font-bold text-rose-400 mb-1">Pathologies chroniques</p>
-                        <ul className="text-[9px] font-black text-rose-800 list-disc list-inside">
+                        <p className="text-[7.5px] font-bold text-rose-400 mb-0.5">Pathologies chroniques</p>
+                        <ul className="text-[8.5px] font-black text-rose-800 list-disc list-inside">
                           {contextData.chronicPathologies.map((patho, i) => (
                             <li key={i}>{patho}</li>
                           ))}
@@ -2249,13 +2284,13 @@ const Consultation: React.FC<ConsultationProps> = ({
                     </div>
 
                     {/* Ongoing activities (Point 2.4) */}
-                    <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl flex flex-col gap-3">
-                      <p className="text-[8px] font-black uppercase tracking-widest text-slate-400">Activités & Traitements en cours</p>
+                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex flex-col gap-2.5">
+                      <p className="text-[7.5px] font-black uppercase tracking-wider text-slate-400">Activités & Traitements en cours</p>
                       
                       {/* Active treatments */}
-                      <div className="border-b border-slate-100 pb-2">
-                        <p className="text-[8px] font-bold text-slate-500 mb-1">Traitements de fond actifs</p>
-                        <ul className="text-[10px] font-semibold text-slate-700 space-y-1">
+                      <div className="border-b border-slate-100 pb-1.5">
+                        <p className="text-[7.5px] font-bold text-slate-500 mb-0.5">Traitements de fond actifs</p>
+                        <ul className="text-[9px] font-semibold text-slate-700 space-y-0.5">
                           {contextData.meds.map((med, i) => (
                             <li key={i} className="flex gap-1.5 items-start">
                               <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-1 shrink-0"></span>

@@ -183,180 +183,180 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-700">
+    <div className="space-y-5 animate-in fade-in duration-500">
       {/* Quick Actions */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 animate-in fade-in duration-500">
+      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5 animate-in fade-in duration-500">
         <button 
           onClick={() => onAction('MEDICAL')}
-          className="flex flex-col items-center justify-center p-6 bg-blue-50 text-blue-700 border border-blue-200 rounded-[32px] hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-sm hover:shadow-md hover:shadow-blue-600/10 group cursor-pointer"
+          className="flex flex-col items-center justify-center p-3 bg-blue-50 text-blue-700 border border-blue-200 rounded-2xl hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all shadow-xs hover:shadow-md hover:shadow-blue-600/10 group cursor-pointer"
         >
-          <Stethoscope size={24} className="mb-3 text-blue-600 group-hover:text-white group-hover:scale-110 transition-all" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-center">Nouvelle Consultation</span>
+          <Stethoscope size={18} className="mb-1.5 text-blue-600 group-hover:text-white group-hover:scale-110 transition-all" />
+          <span className="text-[9px] font-black uppercase tracking-wider text-center">Consultation</span>
         </button>
         <button 
           onClick={() => onAction('SOINS')}
-          className="flex flex-col items-center justify-center p-6 bg-teal-50 text-teal-700 border border-teal-200 rounded-[32px] hover:bg-teal-600 hover:text-white hover:border-teal-600 transition-all shadow-sm hover:shadow-md hover:shadow-teal-600/10 group cursor-pointer"
+          className="flex flex-col items-center justify-center p-3 bg-teal-50 text-teal-700 border border-teal-200 rounded-2xl hover:bg-teal-600 hover:text-white hover:border-teal-600 transition-all shadow-xs hover:shadow-md hover:shadow-teal-600/10 group cursor-pointer"
         >
-          <Syringe size={24} className="mb-3 text-teal-600 group-hover:text-white group-hover:scale-110 transition-all" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-center">Prescrire un Soin</span>
+          <Syringe size={18} className="mb-1.5 text-teal-600 group-hover:text-white group-hover:scale-110 transition-all" />
+          <span className="text-[9px] font-black uppercase tracking-wider text-center">Prescrire Soin</span>
         </button>
         <button 
           onClick={() => onAction('PRESCRIPTION')}
-          className="flex flex-col items-center justify-center p-6 bg-slate-50 text-slate-700 border border-slate-200 rounded-[32px] hover:bg-slate-100 hover:text-slate-900 hover:border-slate-300 transition-all shadow-sm group cursor-pointer"
+          className="flex flex-col items-center justify-center p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-2xl hover:bg-slate-100 hover:text-slate-900 hover:border-slate-300 transition-all shadow-xs group cursor-pointer"
         >
-          <Pill size={24} className="mb-3 text-slate-500 group-hover:text-slate-800 group-hover:scale-110 transition-all" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-center">Renouveler Traitement</span>
+          <Pill size={18} className="mb-1.5 text-slate-500 group-hover:text-slate-800 group-hover:scale-110 transition-all" />
+          <span className="text-[9px] font-black uppercase tracking-wider text-center">Ordonnance</span>
         </button>
         <button 
           onClick={() => onAction('EXAMS')}
-          className="flex flex-col items-center justify-center p-6 bg-slate-50 text-slate-700 border border-slate-200 rounded-[32px] hover:bg-slate-100 hover:text-slate-900 hover:border-slate-300 transition-all shadow-sm group cursor-pointer"
+          className="flex flex-col items-center justify-center p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-2xl hover:bg-slate-100 hover:text-slate-900 hover:border-slate-300 transition-all shadow-xs group cursor-pointer"
         >
-          <Beaker size={24} className="mb-3 text-slate-500 group-hover:text-slate-800 group-hover:scale-110 transition-all" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-center">Voir Résultats</span>
+          <Beaker size={18} className="mb-1.5 text-slate-500 group-hover:text-slate-800 group-hover:scale-110 transition-all" />
+          <span className="text-[9px] font-black uppercase tracking-wider text-center">Résultats Lab</span>
         </button>
         <button 
           onClick={() => onAction('HISTORY')}
-          className="flex flex-col items-center justify-center p-6 bg-slate-50 text-slate-700 border border-slate-200 rounded-[32px] hover:bg-slate-100 hover:text-slate-900 hover:border-slate-300 transition-all shadow-sm group cursor-pointer"
+          className="flex flex-col items-center justify-center p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-2xl hover:bg-slate-100 hover:text-slate-900 hover:border-slate-300 transition-all shadow-xs group cursor-pointer"
         >
-          <History size={24} className="mb-3 text-slate-500 group-hover:text-slate-800 group-hover:scale-110 transition-all" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-center">Voir Historique</span>
+          <History size={18} className="mb-1.5 text-slate-500 group-hover:text-slate-800 group-hover:scale-110 transition-all" />
+          <span className="text-[9px] font-black uppercase tracking-wider text-center">Historique</span>
         </button>
         <button 
           onClick={() => onAction('HOSPITALIZE')}
-          className="flex flex-col items-center justify-center p-6 bg-amber-50 text-amber-700 border border-amber-200 rounded-[32px] hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all shadow-sm hover:shadow-md hover:shadow-amber-500/10 group cursor-pointer"
+          className="flex flex-col items-center justify-center p-3 bg-amber-50 text-amber-700 border border-amber-200 rounded-2xl hover:bg-amber-500 hover:text-white hover:border-amber-500 transition-all shadow-xs hover:shadow-md hover:shadow-amber-500/10 group cursor-pointer"
         >
-          <Hospital size={24} className="mb-3 text-amber-600 group-hover:text-white group-hover:scale-110 transition-all" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-center">Hospitaliser</span>
+          <Hospital size={18} className="mb-1.5 text-amber-600 group-hover:text-white group-hover:scale-110 transition-all" />
+          <span className="text-[9px] font-black uppercase tracking-wider text-center">Hospitaliser</span>
         </button>
         <button 
           onClick={() => onAction('APPOINTMENT')}
-          className="flex flex-col items-center justify-center p-6 bg-slate-50 text-slate-700 border border-slate-200 rounded-[32px] hover:bg-slate-100 hover:text-slate-900 hover:border-slate-300 transition-all shadow-sm group cursor-pointer"
+          className="flex flex-col items-center justify-center p-3 bg-slate-50 text-slate-700 border border-slate-200 rounded-2xl hover:bg-slate-100 hover:text-slate-900 hover:border-slate-300 transition-all shadow-xs group cursor-pointer"
         >
-          <Calendar size={24} className="mb-3 text-slate-500 group-hover:text-slate-800 group-hover:scale-110 transition-all" />
-          <span className="text-[10px] font-black uppercase tracking-widest text-center">Planifier RDV</span>
+          <Calendar size={18} className="mb-1.5 text-slate-500 group-hover:text-slate-800 group-hover:scale-110 transition-all" />
+          <span className="text-[9px] font-black uppercase tracking-wider text-center">Planifier RDV</span>
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Vitals Section */}
-        <div className="lg:col-span-2 bg-white rounded-[40px] border border-slate-200 p-8 shadow-sm">
-          <div className="flex justify-between items-center mb-8">
-            <h3 className="text-xl font-black text-slate-900 flex items-center gap-3">
-              <Activity className="text-blue-600" /> Paramètres vitaux du jour
+        <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <Activity className="text-blue-600" size={18} /> Paramètres vitaux du jour
             </h3>
             <button 
               onClick={() => setShowVitalsModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-blue-600 hover:text-white transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-blue-600 hover:text-white transition-all cursor-pointer"
             >
-              <RefreshCw size={14} /> Mettre à jour
+              <RefreshCw size={12} /> Mettre à jour
             </button>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 text-center hover:border-blue-200 transition-colors">
-              <Activity size={20} className="mx-auto mb-3 text-blue-600" />
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">TA</p>
-              <p className="text-lg font-black text-slate-900">{patient.vitals?.bp || '--'}</p>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 text-center hover:border-blue-200 transition-colors">
+              <Activity size={16} className="mx-auto mb-1.5 text-blue-600" />
+              <p className="text-[8.5px] font-black text-slate-400 uppercase mb-0.5">TA</p>
+              <p className="text-sm font-black text-slate-900">{patient.vitals?.bp || '--'}</p>
             </div>
-            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 text-center hover:border-rose-200 transition-colors">
-              <Heart size={20} className="mx-auto mb-3 text-rose-600" />
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">FC</p>
-              <p className="text-lg font-black text-slate-900">{patient.vitals?.pulse || '--'}</p>
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 text-center hover:border-rose-200 transition-colors">
+              <Heart size={16} className="mx-auto mb-1.5 text-rose-600" />
+              <p className="text-[8.5px] font-black text-slate-400 uppercase mb-0.5">FC</p>
+              <p className="text-sm font-black text-slate-900">{patient.vitals?.pulse || '--'}</p>
             </div>
-            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 text-center hover:border-emerald-200 transition-colors">
-              <Wind size={20} className="mx-auto mb-3 text-emerald-600" />
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">FR</p>
-              <p className="text-lg font-black text-slate-900">{patient.vitals?.respRate || '--'}</p>
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 text-center hover:border-emerald-200 transition-colors">
+              <Wind size={16} className="mx-auto mb-1.5 text-emerald-600" />
+              <p className="text-[8.5px] font-black text-slate-400 uppercase mb-0.5">FR</p>
+              <p className="text-sm font-black text-slate-900">{patient.vitals?.respRate || '--'}</p>
             </div>
-            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 text-center hover:border-amber-200 transition-colors">
-              <Thermometer size={20} className="mx-auto mb-3 text-amber-600" />
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Temp</p>
-              <p className="text-lg font-black text-slate-900">{patient.vitals?.temp || '--'}°C</p>
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 text-center hover:border-amber-200 transition-colors">
+              <Thermometer size={16} className="mx-auto mb-1.5 text-amber-600" />
+              <p className="text-[8.5px] font-black text-slate-400 uppercase mb-0.5">Temp</p>
+              <p className="text-sm font-black text-slate-900">{patient.vitals?.temp || '--'}°C</p>
             </div>
-            <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 text-center hover:border-sky-200 transition-colors">
-              <Droplets size={20} className="mx-auto mb-3 text-sky-400" />
-              <p className="text-[10px] font-black text-slate-400 uppercase mb-1">SpO2</p>
-              <p className="text-lg font-black text-slate-900">{patient.vitals?.spo2 || '--'}%</p>
+            <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 text-center hover:border-sky-200 transition-colors">
+              <Droplets size={16} className="mx-auto mb-1.5 text-sky-400" />
+              <p className="text-[8.5px] font-black text-slate-400 uppercase mb-0.5">SpO2</p>
+              <p className="text-sm font-black text-slate-900">{patient.vitals?.spo2 || '--'}%</p>
             </div>
           </div>
         </div>
 
         {/* Last Diagnosis */}
-        <div className="bg-slate-900 rounded-[40px] p-8 text-white shadow-xl shadow-slate-900/20 flex flex-col justify-between">
+        <div className="bg-slate-900 rounded-2xl p-5 text-white shadow-md flex flex-col justify-between">
           <div>
-            <h3 className="text-xl font-black mb-6 flex items-center gap-3">
-              <FileText className="text-blue-400" /> Dernier diagnostic
+            <h3 className="text-base font-black mb-3 flex items-center gap-2">
+              <FileText className="text-blue-400" size={18} /> Dernier diagnostic
             </h3>
             {lastDiagnosis ? (
-              <div className="bg-white/10 rounded-3xl p-6 border border-white/10 animate-in fade-in duration-300">
-                <p className="text-[10px] font-black text-blue-300 uppercase tracking-widest mb-2">Diagnostic Principal</p>
-                <p className="text-2xl font-black mb-2">{lastDiagnosis.name}</p>
-                <p className="text-sm text-slate-400 font-medium italic">Posé le {lastDiagnosis.date}</p>
+              <div className="bg-white/10 rounded-xl p-3.5 border border-white/10 animate-in fade-in duration-300">
+                <p className="text-[8.5px] font-black text-blue-300 uppercase tracking-wider mb-1">Diagnostic Principal</p>
+                <p className="text-base font-black mb-1">{lastDiagnosis.name}</p>
+                <p className="text-xs text-slate-400 font-medium italic">Posé le {lastDiagnosis.date}</p>
               </div>
             ) : (
-              <div className="bg-white/5 rounded-3xl p-6 border border-white/5 text-center py-8">
-                <p className="text-sm text-slate-400 italic">Aucun diagnostic enregistré pour ce patient.</p>
+              <div className="bg-white/5 rounded-xl p-4 border border-white/5 text-center">
+                <p className="text-xs text-slate-400 italic">Aucun diagnostic enregistré pour ce patient.</p>
               </div>
             )}
           </div>
           <button 
             onClick={() => onAction('HISTORY')}
-            className="w-full mt-6 py-4 bg-blue-600 hover:bg-blue-700 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all cursor-pointer"
+            className="w-full mt-3 py-2.5 bg-blue-600 hover:bg-blue-700 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer"
           >
             Voir détails complets
           </button>
         </div>
 
         {/* Treatments Section */}
-        <div className="bg-white rounded-[40px] border border-slate-200 p-8 shadow-sm">
-          <div className="flex justify-between items-center mb-8">
-            <h3 className="text-xl font-black text-slate-900 flex items-center gap-3">
-              <Pill className="text-emerald-600" /> Traitements actifs
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <Pill className="text-emerald-600" size={18} /> Traitements actifs
             </h3>
           </div>
-          <div className="space-y-4 max-h-[250px] overflow-y-auto pr-2">
+          <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
             {realTreatments.length > 0 ? (
               realTreatments.map(t => (
-                <div key={t.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-emerald-200 transition-all">
+                <div key={t.id} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-100 group hover:border-emerald-200 transition-all">
                   <div>
-                    <p className="font-black text-slate-900">{t.name}</p>
-                    <p className="text-xs text-slate-500 font-medium">{t.posology}</p>
+                    <p className="text-xs font-black text-slate-900">{t.name}</p>
+                    <p className="text-[11px] text-slate-500 font-medium">{t.posology}</p>
                   </div>
-                  <span className="text-[8px] font-black uppercase tracking-widest bg-emerald-100 text-emerald-700 px-2 py-1 rounded-full">
+                  <span className="text-[8px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
                     Actif
                   </span>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-slate-400 italic text-center py-6">Aucun traitement de fond actif.</p>
+              <p className="text-xs text-slate-400 italic text-center py-4">Aucun traitement de fond actif.</p>
             )}
           </div>
         </div>
 
         {/* Exams Section */}
-        <div className="bg-white rounded-[40px] border border-slate-200 p-8 shadow-sm">
-          <div className="flex justify-between items-center mb-8">
-            <h3 className="text-xl font-black text-slate-900 flex items-center gap-3">
-              <Beaker className="text-purple-600" /> Examens en attente
+        <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <Beaker className="text-purple-600" size={18} /> Examens en attente
             </h3>
           </div>
-          <div className="space-y-4 max-h-[250px] overflow-y-auto pr-2">
+          <div className="space-y-2.5 max-h-[220px] overflow-y-auto pr-1">
             {realExams.length > 0 ? (
               realExams.map(e => (
-                <div key={e.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-purple-50 text-purple-600">
-                      <Beaker size={18} />
+                <div key={e.id} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-50 text-purple-600">
+                      <Beaker size={14} />
                     </div>
                     <div>
-                      <p className="font-black text-slate-900">{e.name}</p>
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{e.status}</p>
+                      <p className="text-xs font-black text-slate-900">{e.name}</p>
+                      <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">{e.status}</p>
                     </div>
                   </div>
                 </div>
               ))
             ) : (
-              <p className="text-sm text-slate-400 italic text-center py-6">Aucun examen de laboratoire en attente.</p>
+              <p className="text-xs text-slate-400 italic text-center py-4">Aucun examen de laboratoire en attente.</p>
             )}
           </div>
         </div>
