@@ -269,13 +269,34 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     overflow: visible !important;
   }
 
-  /* 2. When a print modal is open: HIDE APPLICATION BACKGROUND CHROME */
-  body.has-print-modal > #root > div > aside,
-  body.has-print-modal > #root > div > header,
-  body.has-print-modal > #root > div > nav,
-  body.has-print-modal > #root > div > footer,
-  body.has-print-modal > #root > div > [role="navigation"],
-  body.has-print-modal main > *:not(:has(.ticket-print-wrapper)),
+  /* 2. When a print modal is open: HIDE ENTIRE ROOT APPLICATION & BACKGROUND */
+  body.has-print-modal > #root,
+  body.has-print-modal > *:not(#ticket-print-portal):not(#shift-closing-slip-portal):not(script):not(style) {
+    display: none !important;
+  }
+
+  body.has-print-modal {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+  }
+
+  body.has-print-modal #ticket-print-portal,
+  body.has-print-modal #shift-closing-slip-portal {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+  }
+
   body.has-print-modal .no-print,
   body.has-print-modal .no-print *,
   body.has-print-modal .ticket-actions-bar,
@@ -284,13 +305,7 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     display: none !important;
   }
 
-  /* 3. Hide any sibling within the page that does not contain the print wrapper */
-  body.has-print-modal *:has(> .ticket-modal-backdrop) > *:not(.ticket-modal-backdrop),
-  body.has-print-modal *:has(> .ticket-print-wrapper) > *:not(.ticket-print-wrapper) {
-    display: none !important;
-  }
-
-  /* 4. Display the receipt modal cleanly at the top of the page */
+  /* 3. Display the receipt modal cleanly at the top of the page */
   body.has-print-modal .ticket-modal-backdrop,
   body.has-print-modal .ticket-modal-backdrop.fixed.inset-0 {
     position: static !important;
@@ -334,21 +349,11 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     display: block !important;
   }
 
-  /* Ensure containers do not clip printing */
-  body.has-print-modal,
-  body.has-print-modal #root,
-  body.has-print-modal #root > div,
-  body.has-print-modal main {
-    overflow: visible !important;
-    height: auto !important;
-    min-height: auto !important;
-    max-height: none !important;
-  }
-
-  /* 5. Thermal Supermarket 80mm format styling */
+  /* 4. Thermal Supermarket 80mm format styling */
   #thermal-receipt,
   .print-format-thermal #thermal-receipt,
   .ticket-print-wrapper.print-format-thermal #thermal-receipt {
+    display: block !important;
     width: 76mm !important;
     max-width: 76mm !important;
     margin: 0 auto !important;
@@ -357,14 +362,21 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     box-shadow: none !important;
     background: #ffffff !important;
     color: #000000 !important;
+    font-family: 'Courier New', Courier, monospace !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
 
-  /* 6. Standard A4 Invoice / Sheet format styling */
+  .print-format-thermal #a4-receipt,
+  .ticket-print-wrapper.print-format-thermal #a4-receipt {
+    display: none !important;
+  }
+
+  /* 5. Standard A4 Invoice / Sheet format styling */
   #a4-receipt,
   .print-format-a4 #a4-receipt,
   .ticket-print-wrapper.print-format-a4 #a4-receipt {
+    display: block !important;
     width: 100% !important;
     max-width: 190mm !important;
     margin: 0 auto !important;
@@ -378,7 +390,12 @@ html.dark ::-webkit-scrollbar-thumb:hover {
     break-inside: avoid !important;
   }
 
-  /* 7. Fallback if a modal is inside #root without has-print-modal (e.g. shift closing slip or debt slip) */
+  .print-format-a4 #thermal-receipt,
+  .ticket-print-wrapper.print-format-a4 #thermal-receipt {
+    display: none !important;
+  }
+
+  /* 6. Fallback if a modal is inside #root without has-print-modal */
   body:not(.has-print-modal):has(.ticket-print-wrapper) > #root > *:not(:has(.ticket-print-wrapper)) {
     display: none !important;
   }

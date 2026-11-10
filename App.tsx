@@ -659,7 +659,7 @@ const App: React.FC = () => {
     }
 
     switch(currentModule) {
-      case Role.ADMIN: return <Dashboard theme={theme} />;
+      case Role.ADMIN: return <Dashboard theme={theme} user={user} />;
       case Role.RECEPTION: 
         return (
           <Reception 

@@ -21,10 +21,12 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useSettings } from '../hooks/useSettings';
 import { db } from '../src/firebase';
 import { collection, query, onSnapshot, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant } from '../src/utils/tenant';
 import StatCard from '../components/StatCard';
 
-const Dashboard = ({ theme }: { theme: 'light' | 'dark' }) => {
+const Dashboard = ({ theme, user }: { theme: 'light' | 'dark'; user?: any }) => {
   const { establishment } = useSettings();
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const [timeRange, setTimeRange] = useState<'day' | 'week' | 'month'>('day');
   const [patients, setPatients] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -40,34 +42,34 @@ const Dashboard = ({ theme }: { theme: 'light' | 'dark' }) => {
     const today = new Date().toISOString().split('T')[0];
     const qQueues = query(collection(db, 'service_queues'));
     const unsubQueues = onSnapshot(qQueues, (snap) => {
-      setQueues(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setQueues(snap.docs.filter(d => belongsToTenant(d.data(), activeTenantId)).map(d => ({ id: d.id, ...d.data() })));
     });
 
     // Transactions for revenue
     const qTrans = query(collection(db, 'cashier_transactions'), orderBy('date', 'desc'), limit(100));
     const unsubTrans = onSnapshot(qTrans, (snap) => {
-      setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setTransactions(snap.docs.filter(d => belongsToTenant(d.data(), activeTenantId)).map(d => ({ id: d.id, ...d.data() })));
     });
 
     // Beds for occupancy
     const unsubBeds = onSnapshot(collection(db, 'beds'), (snap) => {
-      setBeds(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setBeds(snap.docs.filter(d => belongsToTenant(d.data(), activeTenantId)).map(d => ({ id: d.id, ...d.data() })));
     });
 
     // Recent activity (audit logs or specific events)
     const qAudit = query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(5));
     const unsubAudit = onSnapshot(qAudit, (snap) => {
-      setAuditLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setAuditLogs(snap.docs.filter(d => belongsToTenant(d.data(), activeTenantId)).map(d => ({ id: d.id, ...d.data() })));
     });
 
     // Stock meds for stock alert
     const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
-      setMeds(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setMeds(snap.docs.filter(d => belongsToTenant(d.data(), activeTenantId)).map(d => ({ id: d.id, ...d.data() })));
     });
 
     // Inpatient records for real admissions count
     const unsubInpatients = onSnapshot(collection(db, 'inpatient_records'), (snap) => {
-      setInpatientRecords(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setInpatientRecords(snap.docs.filter(d => belongsToTenant(d.data(), activeTenantId)).map(d => ({ id: d.id, ...d.data() })));
     });
 
     return () => {
@@ -78,7 +80,7 @@ const Dashboard = ({ theme }: { theme: 'light' | 'dark' }) => {
       unsubMeds();
       unsubInpatients();
     };
-  }, []);
+  }, [activeTenantId]);
 
   // 2. Compute stats based on timeRange
   const filteredData = useMemo(() => {

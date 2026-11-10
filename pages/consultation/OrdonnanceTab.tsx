@@ -5,6 +5,7 @@ import DigitalPrescription from '../tools/DigitalPrescription';
 import { Patient, User, Medication, Ordonnance, Prescription } from '../../types';
 import { db } from '../../src/firebase';
 import { collection, doc, setDoc, onSnapshot, query, orderBy, deleteDoc } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface OrdonnanceTabProps {
   patient: Patient;
@@ -77,10 +78,12 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
   // 2. Fetch medication catalog from pharmacy_inventory (Settings)
   useEffect(() => {
     try {
+      const activeTenantId = getActiveTenantId(user, patient);
       const q = query(collection(db, 'pharmacy_inventory'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map(ds => {
+        const filteredDocs = snapshot.docs.filter(ds => belongsToTenant(ds.data(), activeTenantId));
+        if (filteredDocs.length > 0) {
+          const list = filteredDocs.map(ds => {
             const d = ds.data();
             return {
               id: ds.id,
@@ -101,7 +104,7 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
       console.warn("Medication collection error, using fallbacks: ", e);
       setMedications(staticMedications);
     }
-  }, []);
+  }, [user, patient]);
 
   const handleRenew = async (ord: Ordonnance) => {
     try {

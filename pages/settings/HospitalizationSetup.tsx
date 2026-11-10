@@ -1,15 +1,19 @@
 
-import React, { useState, useEffect } from 'react';
-import { Bed, Room, BedStatus, BedCategory, User } from '../../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Bed, Room, BedStatus, BedCategory, User, EstablishmentConfig } from '../../types';
 import { db, sanitizeData } from '../../src/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc } from 'firebase/firestore';
 import { Plus, Trash2, Edit2, Save, X, Bed as BedIcon, Building2, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
 
 interface HospitalizationSetupProps {
   showMessage: (type: 'success' | 'error', text: string) => void;
+  user?: User | null;
+  establishment?: EstablishmentConfig;
 }
 
-export default function HospitalizationSetup({ showMessage }: HospitalizationSetupProps) {
+export default function HospitalizationSetup({ showMessage, user, establishment }: HospitalizationSetupProps) {
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [beds, setBeds] = useState<Bed[]>([]);
   const [showRoomForm, setShowRoomForm] = useState(false);
@@ -32,16 +36,18 @@ export default function HospitalizationSetup({ showMessage }: HospitalizationSet
 
   useEffect(() => {
     const unsubRooms = onSnapshot(collection(db, 'rooms'), (snap) => {
-      setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() } as Room)));
+      const allRooms = snap.docs.map(d => ({ id: d.id, ...d.data() } as Room));
+      setRooms(allRooms.filter(r => belongsToTenant(r, activeTenantId)));
     });
     const unsubBeds = onSnapshot(collection(db, 'beds'), (snap) => {
-      setBeds(snap.docs.map(d => ({ id: d.id, ...d.data() } as Bed)));
+      const allBeds = snap.docs.map(d => ({ id: d.id, ...d.data() } as Bed));
+      setBeds(allBeds.filter(b => belongsToTenant(b, activeTenantId)));
     });
     return () => {
       unsubRooms();
       unsubBeds();
     };
-  }, []);
+  }, [activeTenantId]);
 
   const handleSaveRoom = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,10 +55,10 @@ export default function HospitalizationSetup({ showMessage }: HospitalizationSet
     setIsSavingRoom(true);
     try {
       const id = editingRoom?.id || Math.random().toString(36).substr(2, 9);
-      await setDoc(doc(db, 'rooms', id), sanitizeData({
+      await setDoc(doc(db, 'rooms', id), sanitizeData(stampTenantData({
         ...roomForm,
         id
-      }), { merge: true });
+      }, user, establishment)), { merge: true });
       showMessage('success', editingRoom ? 'Chambre modifiée' : 'Chambre créée');
       setShowRoomForm(false);
       setEditingRoom(null);
@@ -89,12 +95,12 @@ export default function HospitalizationSetup({ showMessage }: HospitalizationSet
     setIsSavingBed(true);
     try {
       const id = editingBed?.id || Math.random().toString(36).substr(2, 9);
-      await setDoc(doc(db, 'beds', id), sanitizeData({
+      await setDoc(doc(db, 'beds', id), sanitizeData(stampTenantData({
         ...bedForm,
         id,
         roomId: selectedRoomId,
         lastUpdated: new Date().toISOString()
-      }), { merge: true });
+      }, user, establishment)), { merge: true });
       showMessage('success', editingBed ? 'Lit modifié avec succès' : 'Lit ajouté avec succès');
       setShowBedForm(false);
       setEditingBed(null);

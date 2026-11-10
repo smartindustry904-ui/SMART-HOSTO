@@ -12,9 +12,11 @@ import { hasImplementedModule, getModuleForService } from '../../src/config/modu
 interface ServicesDepartmentsProps {
   users: User[];
   showMessage: (type: 'success' | 'error', text: string) => void;
+  user?: User | null;
+  establishment?: any;
 }
 
-const ServicesDepartments: React.FC<ServicesDepartmentsProps> = ({ users, showMessage }) => {
+const ServicesDepartments: React.FC<ServicesDepartmentsProps> = ({ users, showMessage, user, establishment }) => {
   const [tools, setTools] = useState<Tool[]>([]);
   const { services, updateService, toggleService, addService, deleteService } = useHospitalServices();
   const [isTogglingId, setIsTogglingId] = useState<string | null>(null);
@@ -333,6 +335,8 @@ const ServicesDepartments: React.FC<ServicesDepartmentsProps> = ({ users, showMe
           service={selectedService} 
           users={users}
           tools={tools}
+          user={user}
+          establishment={establishment}
           onClose={() => setIsConfigModalOpen(false)} 
           onSave={saveConfig} 
           onDelete={handleDelete}
@@ -365,11 +369,13 @@ const ServiceConfigModal: React.FC<{
   service: Service, 
   users: User[], 
   tools: Tool[], 
+  user?: User | null,
+  establishment?: any,
   onClose: () => void, 
   onSave: (s: Service) => void,
   onDelete: (id: string, name: string) => void,
   showMessage: (type: 'success' | 'error', text: string) => void
-}> = ({ service, users, tools, onClose, onSave, onDelete, showMessage }) => {
+}> = ({ service, users, tools, user, establishment, onClose, onSave, onDelete, showMessage }) => {
   const [editedService, setEditedService] = useState<Service>({ ...service });
   const [activeTab, setActiveTab] = useState<'info' | 'users' | 'tools' | 'settings'>('info');
 
@@ -596,7 +602,7 @@ const ServiceConfigModal: React.FC<{
                 {/* Hospitalization Setup */}
                 {editedService.id === 'SRV-HOSPITALISATION' && (
                   <div className="pt-4 border-t border-slate-100">
-                    <HospitalizationSetup showMessage={showMessage} />
+                    <HospitalizationSetup showMessage={showMessage} user={user} establishment={establishment} />
                   </div>
                 )}
                 

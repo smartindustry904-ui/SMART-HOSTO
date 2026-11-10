@@ -30,15 +30,15 @@ export const printElementDirectly = (
     oldFrame.remove();
   }
 
-  // Create an invisible iframe for complete DOM and CSS isolation
+  // Create an invisible iframe positioned offscreen
   const iframe = document.createElement('iframe');
   iframe.id = 'smarthosto-print-isolated-frame';
   iframe.setAttribute('aria-hidden', 'true');
   iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
+  iframe.style.left = '-9999px';
+  iframe.style.top = '-9999px';
+  iframe.style.width = '1024px';
+  iframe.style.height = '1400px';
   iframe.style.border = '0';
   iframe.style.opacity = '0';
   iframe.style.pointerEvents = 'none';
@@ -142,7 +142,6 @@ export const printElementDirectly = (
       <link rel="preconnect" href="https://fonts.googleapis.com">
       <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
       <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-      <script src="https://cdn.tailwindcss.com"></script>
       ${stylesHtml}
       <style>
         ${chosenPageStyles}

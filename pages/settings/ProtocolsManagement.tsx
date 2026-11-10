@@ -38,9 +38,11 @@ import { Protocol, ProtocolCategory, ProtocolElement, ProtocolVersion, ProtocolL
 import { DEFAULT_PROTOCOLS } from '../../constants/defaultProtocols';
 import { db } from '../../src/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface ProtocolsManagementProps {
   user: User | null;
+  establishment?: any;
   showMessage: (type: 'success' | 'error', text: string) => void;
 }
 
@@ -78,10 +80,13 @@ const STATUS_COLORS = {
   ARCHIVED: 'bg-slate-100 text-slate-550 border-slate-300'
 };
 
-export const ProtocolsManagement: React.FC<ProtocolsManagementProps> = ({ user, showMessage }) => {
+export const ProtocolsManagement: React.FC<ProtocolsManagementProps> = ({ user, establishment, showMessage }) => {
+  const activeTenantId = React.useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+  const storageKey = activeTenantId && activeTenantId !== 'default_hospital' ? `hospital_protocols_${activeTenantId}` : 'hospital_protocols';
+
   // Load protocols from localStorage or seeds
   const [protocols, setProtocols] = useState<Protocol[]>(() => {
-    const saved = localStorage.getItem('hospital_protocols');
+    const saved = localStorage.getItem(storageKey) || localStorage.getItem('hospital_protocols');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -94,8 +99,8 @@ export const ProtocolsManagement: React.FC<ProtocolsManagementProps> = ({ user, 
 
   // Save protocols to localStorage on change
   useEffect(() => {
-    localStorage.setItem('hospital_protocols', JSON.stringify(protocols));
-  }, [protocols]);
+    localStorage.setItem(storageKey, JSON.stringify(protocols));
+  }, [protocols, storageKey]);
 
   // UI state
   const [activeSubTab, setActiveSubTab] = useState<'catalog' | 'stats'>('catalog');
@@ -116,30 +121,18 @@ export const ProtocolsManagement: React.FC<ProtocolsManagementProps> = ({ user, 
 
   useEffect(() => {
     const unsubActs = onSnapshot(collection(db, 'medical_acts'), (snap) => {
-      if (!snap.empty) {
-        setActsReferential(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } else {
-        const saved = localStorage.getItem('hospital_acts');
-        if (saved) setActsReferential(JSON.parse(saved));
-      }
+      const allActs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setActsReferential(allActs.filter(a => belongsToTenant(a, activeTenantId)));
     });
 
     const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
-      if (!snap.empty) {
-        setMedsReferential(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } else {
-        const saved = localStorage.getItem('hospital_meds');
-        if (saved) setMedsReferential(JSON.parse(saved));
-      }
+      const allMeds = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setMedsReferential(allMeds.filter(m => belongsToTenant(m, activeTenantId)));
     });
 
     const unsubConsumables = onSnapshot(collection(db, 'hospital_consumables'), (snap) => {
-      if (!snap.empty) {
-        setConsumablesReferential(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-      } else {
-        const saved = localStorage.getItem('hospital_consumables');
-        if (saved) setConsumablesReferential(JSON.parse(saved));
-      }
+      const allCons = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setConsumablesReferential(allCons.filter(c => belongsToTenant(c, activeTenantId)));
     });
 
     return () => {
@@ -147,7 +140,7 @@ export const ProtocolsManagement: React.FC<ProtocolsManagementProps> = ({ user, 
       unsubMeds();
       unsubConsumables();
     };
-  }, []);
+  }, [activeTenantId]);
 
   // Element builders state inside compilation
   const [newElementName, setNewElementName] = useState('');

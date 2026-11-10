@@ -154,25 +154,25 @@ const Inpatient: React.FC<InpatientProps> = ({
     try {
       const batch = writeBatch(db);
 
-      const r1 = { id: 'room_101', name: 'Chambre 101', description: 'Médecine Générale', capacity: 2 };
-      const r2 = { id: 'room_102', name: 'Chambre 102', description: 'Chirurgie & Surveillance', capacity: 2 };
-      const r3 = { id: 'room_103', name: 'Chambre 103', description: 'Soins Intensifs (USI)', capacity: 2 };
+      const r1 = stampTenantData({ id: `${activeTenantId}_room_101`, name: 'Chambre 101', description: 'Médecine Générale', capacity: 2 }, user, establishment);
+      const r2 = stampTenantData({ id: `${activeTenantId}_room_102`, name: 'Chambre 102', description: 'Chirurgie & Surveillance', capacity: 2 }, user, establishment);
+      const r3 = stampTenantData({ id: `${activeTenantId}_room_103`, name: 'Chambre 103', description: 'Soins Intensifs (USI)', capacity: 2 }, user, establishment);
 
       batch.set(doc(db, 'rooms', r1.id), r1);
       batch.set(doc(db, 'rooms', r2.id), r2);
       batch.set(doc(db, 'rooms', r3.id), r3);
 
       const defaultBeds = [
-        { id: 'lit_a01', name: 'Lit A01', roomId: 'room_101', status: 'AVAILABLE', category: 'hospitalisation', service: 'Médecine Générale' },
-        { id: 'lit_a02', name: 'Lit A02', roomId: 'room_101', status: 'AVAILABLE', category: 'hospitalisation', service: 'Médecine Générale' },
-        { id: 'lit_b01', name: 'Lit B01', roomId: 'room_102', status: 'AVAILABLE', category: 'hospitalisation', service: 'Chirurgie' },
-        { id: 'lit_b02', name: 'Lit B02', roomId: 'room_102', status: 'AVAILABLE', category: 'hospitalisation', service: 'Chirurgie' },
-        { id: 'lit_c01', name: 'Lit C01', roomId: 'room_103', status: 'AVAILABLE', category: 'hospitalisation', service: 'Soins Intensifs' },
-        { id: 'lit_c02', name: 'Lit C02', roomId: 'room_103', status: 'AVAILABLE', category: 'hospitalisation', service: 'Soins Intensifs' },
+        { id: `${activeTenantId}_lit_a01`, name: 'Lit A01', roomId: r1.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Médecine Générale' },
+        { id: `${activeTenantId}_lit_a02`, name: 'Lit A02', roomId: r1.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Médecine Générale' },
+        { id: `${activeTenantId}_lit_b01`, name: 'Lit B01', roomId: r2.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Chirurgie' },
+        { id: `${activeTenantId}_lit_b02`, name: 'Lit B02', roomId: r2.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Chirurgie' },
+        { id: `${activeTenantId}_lit_c01`, name: 'Lit C01', roomId: r3.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Soins Intensifs' },
+        { id: `${activeTenantId}_lit_c02`, name: 'Lit C02', roomId: r3.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Soins Intensifs' },
       ];
 
       defaultBeds.forEach(b => {
-        batch.set(doc(db, 'beds', b.id), { ...b, lastUpdated: new Date().toISOString() });
+        batch.set(doc(db, 'beds', b.id), sanitizeData(stampTenantData({ ...b, lastUpdated: new Date().toISOString() }, user, establishment)));
       });
 
       await batch.commit();

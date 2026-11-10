@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { db } from '../../src/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 export interface AttachedItem {
   id: string;
@@ -40,6 +41,8 @@ interface AddMedicalActFormProps {
   onClose: () => void;
   onSave: (act: any) => void;
   initialData?: any;
+  user?: any;
+  establishment?: any;
 }
 
 const STANDARD_EQUIPMENTS = [
@@ -61,7 +64,8 @@ const STANDARD_EQUIPMENTS = [
   'Stérilisateur / Autoclave hospitalier'
 ];
 
-const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, initialData }) => {
+const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, initialData, user, establishment }) => {
+  const activeTenantId = React.useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const [activeTab, setActiveTab] = useState<'general' | 'classification' | 'execution' | 'facturation' | 'ressources' | 'laboratoire'>('general');
 
   // Initialize form data with initialData if editing
@@ -134,47 +138,27 @@ const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, 
   useEffect(() => {
     // 1. Subscribe to pharmacy_inventory
     const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
-      if (!snap.empty) {
-        setInventoryMeds(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } else {
-        const saved = localStorage.getItem('hospital_meds');
-        if (saved) {
-          try { setInventoryMeds(JSON.parse(saved)); } catch (e) {}
-        }
-      }
+      const allMeds = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setInventoryMeds(allMeds.filter(m => belongsToTenant(m, activeTenantId)));
       setLoadingInventory(false);
     }, (err) => {
       console.warn("Error fetching pharmacy_inventory in AddMedicalActForm:", err);
-      const saved = localStorage.getItem('hospital_meds');
-      if (saved) {
-        try { setInventoryMeds(JSON.parse(saved)); } catch (e) {}
-      }
       setLoadingInventory(false);
     });
 
     // 2. Subscribe to hospital_consumables
     const unsubCons = onSnapshot(collection(db, 'hospital_consumables'), (snap) => {
-      if (!snap.empty) {
-        setInventoryConsumables(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } else {
-        const saved = localStorage.getItem('hospital_consumables');
-        if (saved) {
-          try { setInventoryConsumables(JSON.parse(saved)); } catch (e) {}
-        }
-      }
+      const allCons = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setInventoryConsumables(allCons.filter(c => belongsToTenant(c, activeTenantId)));
     }, (err) => {
       console.warn("Error fetching hospital_consumables in AddMedicalActForm:", err);
-      const saved = localStorage.getItem('hospital_consumables');
-      if (saved) {
-        try { setInventoryConsumables(JSON.parse(saved)); } catch (e) {}
-      }
     });
 
     return () => {
       unsubMeds();
       unsubCons();
     };
-  }, []);
+  }, [activeTenantId]);
 
   // Filtered dropdown lists
   const filteredMeds = useMemo(() => {

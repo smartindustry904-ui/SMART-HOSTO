@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Printer, X, Receipt, FileText, CheckCircle2, Building2, Phone, Mail, MapPin, User, ShieldCheck } from 'lucide-react';
 import { EstablishmentConfig } from '../../types';
 import { printElementDirectly } from '../../src/utils/print';
@@ -85,20 +86,25 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
   };
 
   const handlePrint = () => {
-    const targetElementId = selectedFormat === 'THERMAL_80MM' ? 'thermal-receipt' : 'a4-receipt';
-    printElementDirectly(targetElementId, {
-      format: selectedFormat,
-      title: receipt.title || (selectedFormat === 'THERMAL_80MM' ? `Ticket-${receipt.id}` : `Facture-${receipt.id}`)
-    });
+    // Triggers standard native browser print with zero background bleed
+    window.print();
   };
 
-  return (
-    <div className={`ticket-modal-backdrop fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto ${
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div id="ticket-print-portal" className={`ticket-modal-backdrop fixed inset-0 z-[150] bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto ${
       selectedFormat === 'THERMAL_80MM' ? 'print-format-thermal' : 'print-format-a4'
     }`}>
       {/* Dynamic Airtight Print CSS Isolation: hides dashboard background, sidebar & chrome entirely */}
       <style>{`
         @media print {
+          /* Complete elimination of background app and root chrome */
+          body.has-print-modal > #root,
+          body.has-print-modal > *:not(#ticket-print-portal):not(script):not(style) {
+            display: none !important;
+          }
+
           html, body {
             background: #ffffff !important;
             color: #000000 !important;
@@ -109,22 +115,7 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             overflow: visible !important;
           }
 
-          /* Hide all application chrome behind the modal */
-          body > #root > div > aside,
-          body > #root > div > header,
-          body > #root > div > nav,
-          body > #root > div > footer,
-          body > #root > div > [role="navigation"],
-          body main > *:not(:has(.ticket-print-wrapper)),
-          .no-print,
-          .no-print *,
-          .ticket-actions-bar,
-          .ticket-actions-bar *,
-          button {
-            display: none !important;
-          }
-
-          /* Modal backdrop and container reset for pristine page flow */
+          #ticket-print-portal,
           .ticket-modal-backdrop {
             position: static !important;
             background: transparent !important;
@@ -135,6 +126,9 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             overflow: visible !important;
             display: block !important;
             width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            min-height: auto !important;
           }
 
           .ticket-print-wrapper {
@@ -163,6 +157,14 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
             display: block !important;
           }
 
+          .no-print,
+          .no-print *,
+          .ticket-actions-bar,
+          .ticket-actions-bar *,
+          button {
+            display: none !important;
+          }
+
           tr, .avoid-break {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
@@ -176,17 +178,22 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
           @media print {
             @page {
               size: 80mm auto !important;
-              margin: 2mm 1mm !important;
+              margin: 0 !important;
             }
             #thermal-receipt {
+              display: block !important;
               width: 76mm !important;
               max-width: 76mm !important;
               margin: 0 auto !important;
-              padding: 1mm !important;
+              padding: 2mm 1mm !important;
               border: none !important;
               box-shadow: none !important;
               background: #ffffff !important;
               color: #000000 !important;
+              font-family: 'Courier New', Courier, monospace !important;
+            }
+            #a4-receipt {
+              display: none !important;
             }
           }
         `}</style>
@@ -198,6 +205,7 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
               margin: 8mm 10mm !important;
             }
             #a4-receipt {
+              display: block !important;
               width: 100% !important;
               max-width: 190mm !important;
               margin: 0 auto !important;
@@ -206,6 +214,9 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
               box-shadow: none !important;
               background: #ffffff !important;
               color: #000000 !important;
+            }
+            #thermal-receipt {
+              display: none !important;
             }
           }
         `}</style>
@@ -656,6 +667,7 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
         </div>
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

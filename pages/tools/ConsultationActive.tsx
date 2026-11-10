@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { User, PaymentRequest, ConsultationAddendum } from '../../types';
 import { db, sanitizeData } from '../../src/firebase';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 import { collection, doc, setDoc, getDocs, query, where, updateDoc, addDoc, onSnapshot, orderBy } from 'firebase/firestore';
 import VoiceDictationButton from '../../components/VoiceDictationButton';
 import { 
@@ -292,6 +293,7 @@ export default function ConsultationActive({
   // Fetch medication catalog from central pharmacy_inventory
   useEffect(() => {
     try {
+      const activeTenantId = getActiveTenantId(user, patient);
       const q = query(collection(db, 'pharmacy_inventory'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const fallbackMedications = [
@@ -305,10 +307,12 @@ export default function ConsultationActive({
           { id: 'm8', name: 'Metformine 500mg (Flacon)', price: 1800, defaultPosology: '1 comprimé matin et soir pendant le repas', family: 'Antidiabétique', stock: 70, forms: ['Comprimé'] }
         ];
 
-        if (snapshot.empty) {
+        const tenantDocs = snapshot.docs.filter(ds => belongsToTenant(ds.data(), activeTenantId));
+
+        if (tenantDocs.length === 0) {
           setDbMedications(fallbackMedications);
         } else {
-          const list = snapshot.docs.map(ds => {
+          const list = tenantDocs.map(ds => {
             const d = ds.data();
             return {
               id: ds.id,
@@ -327,11 +331,12 @@ export default function ConsultationActive({
     } catch (e) {
       console.warn("Error subscribing to pharmacy_inventory:", e);
     }
-  }, []);
+  }, [user, patient]);
 
   // Fetch exam catalog from central medical_acts
   useEffect(() => {
     try {
+      const activeTenantId = getActiveTenantId(user, patient);
       const q = query(collection(db, 'medical_acts'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const fallbackExams = [
@@ -346,10 +351,12 @@ export default function ConsultationActive({
           { id: 'e9', name: 'ECG de repos 12 dérivations', price: 7000, category: 'Imagerie' }
         ];
 
-        if (snapshot.empty) {
+        const tenantDocs = snapshot.docs.filter(ds => belongsToTenant(ds.data(), activeTenantId));
+
+        if (tenantDocs.length === 0) {
           setDbExams(fallbackExams);
         } else {
-          const list = snapshot.docs.map(ds => {
+          const list = tenantDocs.map(ds => {
             const d = ds.data();
             return {
               id: ds.id,

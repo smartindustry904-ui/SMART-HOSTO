@@ -3,6 +3,7 @@ import { X, PlusCircle, Package, Calendar, Tag, ShieldCheck, DollarSign, Buildin
 import { Medication, Supplier } from '../../types';
 import { db } from '../../src/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 export type RestockItemType = 'MEDICATION' | 'CONSUMABLE';
 
@@ -11,6 +12,8 @@ interface RestockModalProps {
   consumable?: any | null;
   initialType?: RestockItemType;
   currency?: string;
+  user?: any;
+  establishment?: any;
   onClose: () => void;
   onSubmit: (data: {
     itemType: RestockItemType;
@@ -31,9 +34,12 @@ const RestockModal: React.FC<RestockModalProps> = ({
   consumable,
   initialType,
   currency = 'FCFA',
+  user,
+  establishment,
   onClose,
   onSubmit
 }) => {
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   // Determine initial item type
   const [itemType, setItemType] = useState<RestockItemType>(() => {
     if (consumable && !medication) return 'CONSUMABLE';
@@ -66,13 +72,16 @@ const RestockModal: React.FC<RestockModalProps> = ({
   // Real-time subscriptions
   useEffect(() => {
     const unsubSupp = onSnapshot(collection(db, 'suppliers'), snapshot => {
-      setSuppliersList(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Supplier)));
+      const allSupp = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Supplier));
+      setSuppliersList(allSupp.filter(s => belongsToTenant(s, activeTenantId)));
     });
     const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), snapshot => {
-      setMedicationsList(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Medication)));
+      const allMeds = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Medication));
+      setMedicationsList(allMeds.filter(m => belongsToTenant(m, activeTenantId)));
     });
     const unsubCons = onSnapshot(collection(db, 'hospital_consumables'), snapshot => {
-      setConsumablesList(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+      const allCons = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      setConsumablesList(allCons.filter(c => belongsToTenant(c, activeTenantId)));
     });
 
     return () => {
@@ -80,7 +89,7 @@ const RestockModal: React.FC<RestockModalProps> = ({
       unsubMeds();
       unsubCons();
     };
-  }, []);
+  }, [activeTenantId]);
 
   // Update selected IDs if props change
   useEffect(() => {

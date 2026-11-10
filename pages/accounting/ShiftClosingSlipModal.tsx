@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Printer, Landmark, CheckCircle, ShieldCheck, User, Calendar, DollarSign, Smartphone, CreditCard, Wallet, AlertCircle } from 'lucide-react';
 import { CashierSession } from '../../types';
-import { printElementDirectly } from '../../src/utils/print';
 
 interface ShiftClosingSlipModalProps {
   session: CashierSession;
@@ -14,11 +14,15 @@ export const ShiftClosingSlipModal: React.FC<ShiftClosingSlipModalProps> = ({
   currency = 'FCFA',
   onClose
 }) => {
+  useEffect(() => {
+    document.body.classList.add('has-print-modal');
+    return () => {
+      document.body.classList.remove('has-print-modal');
+    };
+  }, []);
+
   const handlePrint = () => {
-    printElementDirectly('shift-closing-slip-printable', {
-      format: 'A4',
-      title: `Bordereau-Cloture-${session.id || 'Caisse'}`
-    });
+    window.print();
   };
 
   const openedAt = session.openedAt ? new Date(session.openedAt).toLocaleString('fr-FR') : '-';
@@ -27,19 +31,20 @@ export const ShiftClosingSlipModal: React.FC<ShiftClosingSlipModalProps> = ({
   const diff = Number(session.difference || 0);
   const isBalanced = Math.abs(diff) < 1;
 
-  return (
-    <div className="fixed inset-0 bg-slate-955/75 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-hidden shift-slip-backdrop">
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
+    <div id="shift-closing-slip-portal" className="fixed inset-0 bg-slate-955/75 backdrop-blur-sm z-[100] flex items-center justify-center p-3 sm:p-4 md:p-6 overflow-hidden shift-slip-backdrop">
       <style>{`
         @media print {
-          body > #root > div > aside,
-          body > #root > div > header,
-          body > #root > div > nav,
-          body > #root > div > footer,
-          body > #root > div > [role="navigation"],
-          body main > *:not(:has(.shift-slip-container)),
+          body.has-print-modal > #root,
+          body.has-print-modal > *:not(#shift-closing-slip-portal):not(script):not(style) {
+            display: none !important;
+          }
           .no-print {
             display: none !important;
           }
+          #shift-closing-slip-portal,
           .shift-slip-backdrop {
             position: static !important;
             background: none !important;
@@ -47,6 +52,8 @@ export const ShiftClosingSlipModal: React.FC<ShiftClosingSlipModalProps> = ({
             padding: 0 !important;
             display: block !important;
             overflow: visible !important;
+            width: 100% !important;
+            height: auto !important;
           }
           .shift-slip-container {
             max-height: none !important;
@@ -295,6 +302,7 @@ export const ShiftClosingSlipModal: React.FC<ShiftClosingSlipModalProps> = ({
         </div>
 
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

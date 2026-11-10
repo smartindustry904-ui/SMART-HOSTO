@@ -1,15 +1,19 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { X, History, ArrowDownRight, Search, Calendar, User, Package, RefreshCw } from 'lucide-react';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../src/firebase';
 import { StockMovement } from '../../types';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface StockMovementsModalProps {
   onClose: () => void;
   currency?: string;
+  user?: any;
+  establishment?: any;
 }
 
-const StockMovementsModal: React.FC<StockMovementsModalProps> = ({ onClose, currency = 'FCFA' }) => {
+const StockMovementsModal: React.FC<StockMovementsModalProps> = ({ onClose, currency = 'FCFA', user, establishment }) => {
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -26,7 +30,7 @@ const StockMovementsModal: React.FC<StockMovementsModalProps> = ({ onClose, curr
         id: docSnap.id,
         ...docSnap.data()
       } as StockMovement));
-      setMovements(items);
+      setMovements(items.filter(m => belongsToTenant(m, activeTenantId)));
       setLoading(false);
     }, (err) => {
       console.error("Error fetching stock movements:", err);
@@ -35,7 +39,7 @@ const StockMovementsModal: React.FC<StockMovementsModalProps> = ({ onClose, curr
     });
 
     return () => unsub();
-  }, []);
+  }, [activeTenantId]);
 
   const filtered = movements.filter(m => {
     const term = searchTerm.toLowerCase();

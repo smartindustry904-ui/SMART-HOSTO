@@ -60,6 +60,7 @@ import { StaffPerformanceModal } from '../components/profile/StaffPerformanceMod
 import { AppearanceSettings } from './settings/AppearanceSettings';
 import { db, sanitizeData, handleFirestoreError, OperationType } from '../src/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, where, addDoc, updateDoc, getDocs, limit, getDoc } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface SettingsProps {
   activeTab: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent';
@@ -143,37 +144,49 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
     autoApplyCredit: true
   });
 
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+
   // Firestore Listeners
   useEffect(() => {
     const unsubUsers = onSnapshot(collection(db, 'hospital_users'), (snap) => {
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() } as User)));
+      const allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as User));
+      setUsers(allUsers.filter(u => belongsToTenant(u, activeTenantId)));
     });
 
     const unsubRoles = onSnapshot(collection(db, 'hospital_roles'), (snap) => {
-      setRoles(snap.docs.map(d => ({ id: d.id, ...d.data() } as CustomRole)));
+      const allRoles = snap.docs.map(d => ({ id: d.id, ...d.data() } as CustomRole));
+      setRoles(allRoles.filter(r => belongsToTenant(r, activeTenantId)));
     });
 
     const unsubConfig = onSnapshot(collection(db, 'hospital_config'), (snap) => {
-      if (!snap.empty) {
+      const matched = snap.docs.find(d => belongsToTenant(d.data(), activeTenantId));
+      if (matched) {
+        setEstablishment(matched.data() as EstablishmentConfig);
+      } else if (!snap.empty && activeTenantId === 'default_hospital') {
         setEstablishment(snap.docs[0].data() as EstablishmentConfig);
       }
     });
 
     const unsubActs = onSnapshot(collection(db, 'medical_acts'), (snap) => {
-      setActs(snap.docs.map(d => ({ id: d.id, ...d.data() } as MedicalAct)));
+      const allActs = snap.docs.map(d => ({ id: d.id, ...d.data() } as MedicalAct));
+      setActs(allActs.filter(a => belongsToTenant(a, activeTenantId)));
     });
 
     const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
-      setMeds(snap.docs.map(d => ({ id: d.id, ...d.data() } as Medication)));
+      const allMeds = snap.docs.map(d => ({ id: d.id, ...d.data() } as Medication));
+      setMeds(allMeds.filter(m => belongsToTenant(m, activeTenantId)));
     });
 
     const unsubConsumables = onSnapshot(collection(db, 'hospital_consumables'), (snap) => {
-      setConsumables(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const allCons = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setConsumables(allCons.filter(c => belongsToTenant(c, activeTenantId)));
     });
 
     const unsubCashier = onSnapshot(collection(db, 'parametres_caisse'), (snap) => {
-      if (!snap.empty) {
-        const data = snap.docs[0].data();
+      const matched = snap.docs.find(d => belongsToTenant(d.data(), activeTenantId));
+      const target = matched || (activeTenantId === 'default_hospital' ? snap.docs[0] : null);
+      if (target) {
+        const data = target.data();
         setCashierSettings({
           partialPayment: data.paiementPartielAutorise,
           maxDebt: data.seuilDetteMax,
@@ -219,7 +232,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
       unsubHospitals();
       unsubClinics();
     };
-  }, [user, establishment.name]);
+  }, [user, establishment.name, activeTenantId]);
 
   // Handle deep-linking navigation from System Alerts (e.g. Low Stock restock)
   useEffect(() => {
@@ -305,7 +318,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
           adminId: user?.id || '',
           createdAt: new Date().toISOString()
         };
-        await setDoc(doc(db, 'stock_movements', movementId), sanitizeData(movementEntry));
+        await setDoc(doc(db, 'stock_movements', movementId), sanitizeData(stampTenantData(movementEntry, user, establishment)));
 
         // Automated Accounting Synchronization: Generate Supplier Invoice (Comptabilité > Dépenses & Paiements)
         const supplierName = (data.supplier || '').trim() || 'Fournisseur Consommables';
@@ -339,7 +352,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
               notes: data.notes || `Livraison consommables: ${consumableName} (${data.quantity} ${consumableData?.uniteGestion || 'unités'})`,
               createdAt: new Date().toISOString()
             };
-            await setDoc(doc(db, 'supplier_invoices', invoiceId), sanitizeData(newInvoice));
+            await setDoc(doc(db, 'supplier_invoices', invoiceId), sanitizeData(stampTenantData(newInvoice, user, establishment)));
 
             // 2. Direct Expense Record for Dépenses & Paiements Tab
             const expenseId = `EXP-RESTOCK-${Date.now()}`;
@@ -364,7 +377,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 itemId: targetItemId
               }
             };
-            await setDoc(doc(db, 'expenses', expenseId), sanitizeData(newExpense));
+            await setDoc(doc(db, 'expenses', expenseId), sanitizeData(stampTenantData(newExpense, user, establishment)));
 
             // 3. Update or create Supplier Record
             const suppRef = doc(db, 'suppliers', supplierId);
@@ -397,7 +410,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 historyCount: 1,
                 createdAt: new Date().toISOString()
               };
-              await setDoc(suppRef, sanitizeData(newSupplier));
+              await setDoc(suppRef, sanitizeData(stampTenantData(newSupplier, user, establishment)));
             }
           } catch (invErr) {
             console.error("Error syncing accounting for consumable restock:", invErr);
@@ -452,7 +465,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
           adminId: user?.id || '',
           createdAt: new Date().toISOString()
         };
-        await setDoc(doc(db, 'stock_movements', movementId), sanitizeData(movementEntry));
+        await setDoc(doc(db, 'stock_movements', movementId), sanitizeData(stampTenantData(movementEntry, user, establishment)));
 
         // 3. Automated Accounting Integration: Generate Supplier Invoice (Achats & Fournisseurs)
         const supplierName = (data.supplier || '').trim();
@@ -486,7 +499,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
               notes: data.notes || `Livraison de réapprovisionnement: ${currentMed.name} (${data.quantity} unités, Lot: ${data.batchNumber})`,
               createdAt: new Date().toISOString()
             };
-            await setDoc(doc(db, 'supplier_invoices', invoiceId), sanitizeData(newInvoice));
+            await setDoc(doc(db, 'supplier_invoices', invoiceId), sanitizeData(stampTenantData(newInvoice, user, establishment)));
 
             // Sync to expenses collection for universal accounting visibility
             const expenseId = `EXP-RESTOCK-${Date.now()}`;
@@ -511,7 +524,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 itemId: targetItemId
               }
             };
-            await setDoc(doc(db, 'expenses', expenseId), sanitizeData(newExpense));
+            await setDoc(doc(db, 'expenses', expenseId), sanitizeData(stampTenantData(newExpense, user, establishment)));
 
             // Check if supplier exists in 'suppliers'
             const suppRef = doc(db, 'suppliers', supplierId);
@@ -544,7 +557,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 historyCount: 1,
                 createdAt: new Date().toISOString()
               };
-              await setDoc(suppRef, sanitizeData(newSupplier));
+              await setDoc(suppRef, sanitizeData(stampTenantData(newSupplier, user, establishment)));
             }
           } catch (invErr) {
             console.error("Error creating automated supplier invoice:", invErr);
@@ -1851,7 +1864,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
           )}
 
           {activeTab === 'protocols' && (
-            <ProtocolsManagement user={user} showMessage={showMessage} />
+            <ProtocolsManagement user={user} establishment={establishment} showMessage={showMessage} />
           )}
 
           {activeTab === 'referentials' && (
@@ -2665,7 +2678,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
               };
-              await setDoc(doc(db, 'pharmacy_inventory', medId), sanitizeData(newMed));
+              await setDoc(doc(db, 'pharmacy_inventory', medId), sanitizeData(stampTenantData(newMed, user, establishment)));
               setShowAddMedication(false);
               showMessage('success', `Médicament "${med.name}" ajouté avec succès`);
             } catch (error) {
@@ -2682,6 +2695,8 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
           consumable={selectedConsumableForRestock}
           initialType={selectedConsumableForRestock ? 'CONSUMABLE' : 'MEDICATION'}
           currency={establishment.currency}
+          user={user}
+          establishment={establishment}
           onClose={() => {
             setSelectedMedForRestock(null);
             setSelectedConsumableForRestock(null);
@@ -2694,6 +2709,8 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
       {showStockMovements && (
         <StockMovementsModal
           currency={establishment.currency}
+          user={user}
+          establishment={establishment}
           onClose={() => setShowStockMovements(false)}
         />
       )}
@@ -2701,6 +2718,8 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
       {showAddMedicalAct && (
         <AddMedicalActForm 
           initialData={editingMedicalAct}
+          user={user}
+          establishment={establishment}
           onClose={() => {
             setShowAddMedicalAct(false);
             setEditingMedicalAct(null);
@@ -2716,7 +2735,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 ...act,
                 updatedAt: new Date().toISOString()
               };
-              await setDoc(doc(db, 'medical_acts', actId), sanitizeData(newAct), { merge: true });
+              await setDoc(doc(db, 'medical_acts', actId), sanitizeData(stampTenantData(newAct, user, establishment)), { merge: true });
               setShowAddMedicalAct(false);
               setEditingMedicalAct(null);
               showMessage('success', editingMedicalAct ? 'Prestation mise à jour avec succès' : 'Prestation ajoutée avec succès');
@@ -2744,7 +2763,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 updatedAt: new Date().toISOString(),
                 createdAt: new Date().toISOString()
               };
-              await setDoc(doc(db, 'hospital_consumables', consumableId), sanitizeData(newConsumable));
+              await setDoc(doc(db, 'hospital_consumables', consumableId), sanitizeData(stampTenantData(newConsumable, user, establishment)));
               setShowAddConsumable(false);
               showMessage('success', 'Consommable enregistré avec succès (Stock initial: 0)');
             } catch (error) {
