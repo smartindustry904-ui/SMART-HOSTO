@@ -5,7 +5,7 @@ import {
   Users, Stethoscope, Beaker, 
   Activity, AlertCircle, ChevronRight,
   CheckCircle2, CreditCard, ShieldAlert, Calendar,
-  Clock, UserCheck, Printer,
+  Clock, UserCheck, Printer, Filter, ArrowUpDown,
   LogOut, FileText, CheckCircle, X,
   User as UserIcon, ArrowRightLeft,
   Scale, Thermometer, Info, Award, Settings,
@@ -429,6 +429,103 @@ const Reception: React.FC<ReceptionProps> = ({
   const [dischargeError, setDischargeError] = useState<{ patientId: string; message: string } | null>(null);
   const [isProcessingDischarge, setIsProcessingDischarge] = useState<string | null>(null);
   const [selectedPatientForHistory, setSelectedPatientForHistory] = useState<Patient | null>(null);
+  
+  // Sorties Search & Filter States
+  const [sortieSearchTerm, setSortieSearchTerm] = useState('');
+  const [sortieStatusFilter, setSortieStatusFilter] = useState<'ALL' | 'READY' | 'PENDING_CAISSE' | 'PENDING_MEDICAL'>('ALL');
+  const [sortieDepartmentFilter, setSortieDepartmentFilter] = useState<string>('ALL');
+
+  const getSortieTimestamp = (item: any): number => {
+    if (item.createdAt) {
+      const t = new Date(item.createdAt).getTime();
+      if (!isNaN(t)) return t;
+    }
+    if (item.dischargeDate) {
+      const t = new Date(item.dischargeDate).getTime();
+      if (!isNaN(t)) return t;
+    }
+    if (item.dischargedAt) {
+      const t = new Date(item.dischargedAt).getTime();
+      if (!isNaN(t)) return t;
+    }
+    if (item.updatedAt) {
+      const t = new Date(item.updatedAt).getTime();
+      if (!isNaN(t)) return t;
+    }
+    if (item.admissionDate) {
+      const t = new Date(item.admissionDate).getTime();
+      if (!isNaN(t)) return t;
+    }
+    return 0;
+  };
+
+  const formatSortieTime = (item: any): string => {
+    const rawDate = item.createdAt || item.dischargeDate || item.dischargedAt || item.admissionDate;
+    if (!rawDate) return 'Aujourd\'hui';
+    try {
+      const d = new Date(rawDate);
+      if (isNaN(d.getTime())) return String(rawDate);
+      const now = new Date();
+      const diffMs = now.getTime() - d.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      if (diffMins >= 0 && diffMins < 1) return 'À l\'instant';
+      if (diffMins >= 1 && diffMins < 60) return `Il y a ${diffMins} min`;
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours >= 1 && diffHours < 24) return `Il y a ${diffHours} h`;
+      return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return String(rawDate);
+    }
+  };
+
+  const availableSortieDepartments = useMemo(() => {
+    const set = new Set<string>();
+    patientsToDischarge.forEach(p => {
+      const dep = p.department || p.service;
+      if (dep && typeof dep === 'string') set.add(dep.trim());
+    });
+    return Array.from(set).sort();
+  }, [patientsToDischarge]);
+
+  const sortieStats = useMemo(() => {
+    const total = patientsToDischarge.length;
+    const ready = patientsToDischarge.filter(p => p.medicalClearance && p.hospitalizationClosed && p.financialClearance).length;
+    const pendingCaisse = patientsToDischarge.filter(p => !p.financialClearance).length;
+    const pendingMedical = patientsToDischarge.filter(p => !p.medicalClearance || !p.hospitalizationClosed).length;
+    return { total, ready, pendingCaisse, pendingMedical };
+  }, [patientsToDischarge]);
+
+  const filteredAndSortedPatientsToDischarge = useMemo(() => {
+    return [...patientsToDischarge]
+      .sort((a, b) => getSortieTimestamp(b) - getSortieTimestamp(a))
+      .filter(patient => {
+        // 1. Search Query
+        if (sortieSearchTerm.trim()) {
+          const q = sortieSearchTerm.toLowerCase().trim();
+          const pName = (patient.name || patient.patientName || '').toLowerCase();
+          const pId = (patient.patientId || patient.id || '').toLowerCase();
+          const pDme = (patient.dmeId || '').toLowerCase();
+          const pDept = (patient.department || patient.service || '').toLowerCase();
+          const pDoctor = (patient.doctorName || patient.dischargedBy || patient.user || '').toLowerCase();
+          const match = pName.includes(q) || pId.includes(q) || pDme.includes(q) || pDept.includes(q) || pDoctor.includes(q);
+          if (!match) return false;
+        }
+
+        // 2. Status Filter
+        const isReady = Boolean(patient.medicalClearance && patient.hospitalizationClosed && patient.financialClearance);
+        if (sortieStatusFilter === 'READY' && !isReady) return false;
+        if (sortieStatusFilter === 'PENDING_CAISSE' && patient.financialClearance) return false;
+        if (sortieStatusFilter === 'PENDING_MEDICAL' && (patient.medicalClearance && patient.hospitalizationClosed)) return false;
+
+        // 3. Department Filter
+        if (sortieDepartmentFilter !== 'ALL') {
+          const dep = (patient.department || patient.service || '').trim().toLowerCase();
+          if (dep !== sortieDepartmentFilter.toLowerCase()) return false;
+        }
+
+        return true;
+      });
+  }, [patientsToDischarge, sortieSearchTerm, sortieStatusFilter, sortieDepartmentFilter]);
 
   const [currentPatient, setCurrentPatient] = useState<Partial<Patient>>({
     gender: 'M',
@@ -2489,145 +2586,413 @@ const Reception: React.FC<ReceptionProps> = ({
     )}
 
       {activeTab === 'sorties' && (
-        <div className="animate-in fade-in duration-300">
-           <div className="bg-white p-5 sm:p-6 rounded-2xl shadow-xs relative overflow-hidden border border-slate-200">
-              {/* Compact Header */}
-              <div className="relative z-10 flex flex-wrap items-center justify-between gap-3 mb-5 pb-3.5 border-b border-slate-100">
-                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center border border-emerald-200/80 shrink-0">
-                      <LogOut size={18} />
-                    </div>
-                    <div>
-                      <h2 className="text-base sm:text-lg font-extrabold tracking-tight text-slate-900">
-                        Sorties Administratives
-                      </h2>
-                      <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5 mt-0.5">
-                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                         Validation finale des critères médicaux, d'hospitalisation et de caisse avant sortie.
-                      </p>
-                    </div>
-                 </div>
-                 <div className="bg-emerald-50 border border-emerald-200/80 text-emerald-800 px-3.5 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-lg bg-emerald-600 text-white flex items-center justify-center text-xs font-black">{patientsToDischarge.length}</span>
-                    <span>En attente de sortie</span>
-                 </div>
+        <div className="animate-in fade-in duration-300 space-y-4">
+          <div className={`p-5 sm:p-6 rounded-3xl shadow-sm border transition-all ${
+            theme === 'dark' ? 'bg-[#111827] border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            {/* 1. Header Banner */}
+            <div className="flex flex-wrap items-center justify-between gap-4 pb-5 border-b border-slate-100 dark:border-slate-800/80">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 bg-gradient-to-tr from-emerald-600 to-teal-500 text-white rounded-2xl shadow-sm shadow-emerald-500/20 flex items-center justify-center shrink-0">
+                  <LogOut size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className={`text-lg sm:text-xl font-black tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                      Sorties Administratives & Quittances
+                    </h2>
+                    <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200/80 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-800">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      Temps Réel
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    Contrôle triple validation : Autorisation médicale, Clôture séjour/hospitalisation et Solde de caisse.
+                  </p>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 relative z-10">
-                 {patientsToDischarge.map((patient, pIdx) => {
-                   const isReady = patient.medicalClearance && patient.hospitalizationClosed && patient.financialClearance;
-                   const isProcessing = isProcessingDischarge === patient.id;
-                   return (
-                   <div 
-                     key={patient.id || `disch-${pIdx}`} 
-                     className={`p-4 rounded-xl border transition-all relative flex flex-col justify-between ${
-                       isReady 
-                         ? 'bg-emerald-50/30 border-emerald-200 hover:border-emerald-300' 
-                         : 'bg-slate-50/60 border-slate-200 hover:border-slate-300'
-                     }`}
-                   >
-                      <div>
-                        {/* Card Top Row: Patient Name + Status Badge */}
-                        <div className="flex justify-between items-start gap-2 mb-2.5">
-                           <div className="min-w-0">
-                             <h3 className="text-sm sm:text-base font-extrabold text-slate-900 truncate leading-tight">{patient.name}</h3>
-                             <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 font-semibold mt-1">
-                               <span className="font-mono text-slate-600 bg-white px-1.5 py-0.5 rounded border border-slate-200">{patient.id}</span>
-                               <span>•</span>
-                               <span className="text-blue-600 font-bold">{patient.department}</span>
-                               <span>•</span>
-                               <span>Admis le {patient.admissionDate}</span>
-                             </div>
-                           </div>
-                           {isReady ? (
-                             <span className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider flex items-center gap-1 shrink-0">
-                               <CheckCircle2 size={12} /> Prêt
-                             </span>
-                           ) : (
-                             <span className="bg-amber-100 text-amber-800 px-2.5 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider flex items-center gap-1 shrink-0">
-                               <Clock size={12} /> Incomplet
-                             </span>
-                           )}
+              {/* Counter Badges Strip */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className={`px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 border ${
+                  theme === 'dark' ? 'bg-slate-800/80 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}>
+                  <span className="text-[10px] uppercase tracking-wider text-slate-400">Total</span>
+                  <span className="font-mono text-xs">{sortieStats.total}</span>
+                </div>
+
+                <div className="px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300">
+                  <CheckCircle2 size={13} className="text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-[10px] uppercase tracking-wider">Prêts</span>
+                  <span className="font-mono">{sortieStats.ready}</span>
+                </div>
+
+                {sortieStats.pendingCaisse > 0 && (
+                  <div className="px-3 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800/60 dark:text-rose-300">
+                    <CreditCard size={13} className="text-rose-600 dark:text-rose-400" />
+                    <span className="text-[10px] uppercase tracking-wider">Attente Caisse</span>
+                    <span className="font-mono">{sortieStats.pendingCaisse}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Search, Status Filters & Department Filter Bar */}
+            <div className="pt-4 pb-2 space-y-3">
+              <div className="flex flex-col md:flex-row gap-2.5 items-stretch md:items-center justify-between">
+                {/* Search Bar */}
+                <div className="relative flex-1">
+                  <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={sortieSearchTerm}
+                    onChange={(e) => setSortieSearchTerm(e.target.value)}
+                    placeholder="Rechercher par nom de patient, identifiant (PAT/DME), service, médecin..."
+                    className={`w-full pl-10 pr-9 py-2.5 text-xs font-medium rounded-xl border outline-none transition-all ${
+                      theme === 'dark'
+                        ? 'bg-slate-800/80 border-slate-700 text-slate-100 placeholder:text-slate-500 focus:border-blue-500 focus:bg-slate-800'
+                        : 'bg-slate-50 border-slate-200 text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:bg-white'
+                    }`}
+                  />
+                  {sortieSearchTerm && (
+                    <button
+                      onClick={() => setSortieSearchTerm('')}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 rounded-md cursor-pointer"
+                      title="Effacer la recherche"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Department Filter & Sorting Tag */}
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <select
+                      value={sortieDepartmentFilter}
+                      onChange={(e) => setSortieDepartmentFilter(e.target.value)}
+                      className={`text-xs font-bold py-2.5 pl-8 pr-7 rounded-xl border outline-none transition-all appearance-none cursor-pointer ${
+                        theme === 'dark'
+                          ? 'bg-slate-800 border-slate-700 text-slate-200 focus:border-blue-500'
+                          : 'bg-white border-slate-200 text-slate-700 focus:border-blue-500 shadow-2xs'
+                      }`}
+                    >
+                      <option value="ALL">Tous les services ({availableSortieDepartments.length})</option>
+                      {availableSortieDepartments.map(dep => (
+                        <option key={dep} value={dep}>{dep}</option>
+                      ))}
+                    </select>
+                    <Filter size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                    <ChevronRight size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 rotate-90 pointer-events-none" />
+                  </div>
+
+                  <div className={`hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl text-[11px] font-bold border ${
+                    theme === 'dark' ? 'bg-slate-800/50 border-slate-700/60 text-slate-400' : 'bg-slate-50 border-slate-200/80 text-slate-500'
+                  }`}>
+                    <ArrowUpDown size={12} className="text-blue-500" />
+                    <span>Récents d'abord</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Quick Filter Chips */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                {[
+                  { id: 'ALL', label: `Tous (${sortieStats.total})` },
+                  { id: 'READY', label: `✓ Prêts pour Sortie (${sortieStats.ready})`, color: 'emerald' },
+                  { id: 'PENDING_CAISSE', label: `💳 Attente Caisse (${sortieStats.pendingCaisse})`, color: 'rose' },
+                  { id: 'PENDING_MEDICAL', label: `🩺 Attente Médicale (${sortieStats.pendingMedical})`, color: 'amber' }
+                ].map(chip => {
+                  const isActive = sortieStatusFilter === chip.id;
+                  return (
+                    <button
+                      key={chip.id}
+                      onClick={() => setSortieStatusFilter(chip.id as any)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border ${
+                        isActive
+                          ? chip.color === 'emerald'
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                            : chip.color === 'rose'
+                            ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                            : chip.color === 'amber'
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-xs'
+                            : 'bg-slate-900 text-white border-slate-900 dark:bg-white dark:text-slate-900 dark:border-white shadow-xs'
+                          : theme === 'dark'
+                          ? 'bg-slate-800/80 border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {chip.label}
+                    </button>
+                  );
+                })}
+
+                {(sortieSearchTerm || sortieStatusFilter !== 'ALL' || sortieDepartmentFilter !== 'ALL') && (
+                  <button
+                    onClick={() => {
+                      setSortieSearchTerm('');
+                      setSortieStatusFilter('ALL');
+                      setSortieDepartmentFilter('ALL');
+                    }}
+                    className="ml-auto text-xs font-bold text-blue-600 hover:text-blue-700 hover:underline flex items-center gap-1 cursor-pointer py-1"
+                  >
+                    <X size={12} />
+                    <span>Réinitialiser les filtres</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 3. Patients to Discharge Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 pt-3">
+              {filteredAndSortedPatientsToDischarge.map((patient, pIdx) => {
+                const isReady = Boolean(patient.medicalClearance && patient.hospitalizationClosed && patient.financialClearance);
+                const isProcessing = isProcessingDischarge === patient.id;
+                const patientName = patient.name || patient.patientName || 'Patient';
+                const patientInitial = (patientName.trim()[0] || 'P').toUpperCase();
+                const displayId = patient.patientId || patient.id;
+                const timeStr = formatSortieTime(patient);
+                const department = patient.department || patient.service || 'Consultation';
+                const doctorName = patient.doctorName || patient.dischargedBy || patient.user || '';
+
+                return (
+                  <div 
+                    key={patient.id || `disch-${pIdx}`} 
+                    className={`rounded-2xl border p-4 sm:p-5 transition-all flex flex-col justify-between relative group hover:shadow-md ${
+                      isReady 
+                        ? theme === 'dark'
+                          ? 'bg-slate-900/90 border-emerald-800/80 hover:border-emerald-500'
+                          : 'bg-gradient-to-b from-emerald-50/50 via-white to-white border-emerald-200 hover:border-emerald-300 shadow-2xs'
+                        : !patient.financialClearance
+                        ? theme === 'dark'
+                          ? 'bg-slate-900/90 border-slate-800 hover:border-rose-700/80'
+                          : 'bg-white border-slate-200 hover:border-rose-300 shadow-2xs'
+                        : theme === 'dark'
+                        ? 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+                        : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
+                    }`}
+                  >
+                    <div>
+                      {/* Top Row: Avatar + Name + Status Badge */}
+                      <div className="flex items-start justify-between gap-2.5 mb-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-black text-sm shrink-0 border ${
+                            isReady
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/80 dark:text-emerald-300 dark:border-emerald-800'
+                              : !patient.financialClearance
+                              ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/80 dark:text-rose-300 dark:border-rose-800'
+                              : 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950/80 dark:text-blue-300 dark:border-blue-800'
+                          }`}>
+                            {patientInitial}
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className={`text-sm sm:text-base font-black truncate leading-tight ${
+                              theme === 'dark' ? 'text-white' : 'text-slate-900'
+                            }`} title={patientName}>
+                              {patientName}
+                            </h3>
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500 mt-0.5">
+                              <span className="font-mono text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+                                {displayId}
+                              </span>
+                              <span>•</span>
+                              <span className="text-blue-600 dark:text-blue-400 font-bold truncate">{department}</span>
+                            </div>
+                          </div>
                         </div>
 
-                        {/* Compact 3-Column Criteria Strip */}
-                        <div className="grid grid-cols-3 gap-2 my-3">
-                          <div className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-left ${
-                            patient.medicalClearance ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800' : 'bg-white border-slate-200 text-slate-500'
-                          }`}>
-                            <Thermometer size={14} className="shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-[10px] font-bold uppercase opacity-75 leading-none">Médical</p>
-                              <p className="text-[11px] font-extrabold truncate mt-0.5">{patient.medicalClearance ? "Validé" : "Attente"}</p>
-                            </div>
-                          </div>
-                          <div className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-left ${
-                            patient.hospitalizationClosed ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800' : 'bg-white border-slate-200 text-slate-500'
-                          }`}>
-                            <Activity size={14} className="shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-[10px] font-bold uppercase opacity-75 leading-none">Séjour</p>
-                              <p className="text-[11px] font-extrabold truncate mt-0.5">{patient.hospitalizationClosed ? "Clos" : "Actif"}</p>
-                            </div>
-                          </div>
-                          <div className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-left ${
-                            patient.financialClearance ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-200 text-rose-700'
-                          }`}>
-                            <CreditCard size={14} className="shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-[10px] font-bold uppercase opacity-75 leading-none">Caisse</p>
-                              <p className="text-[11px] font-extrabold truncate mt-0.5">{patient.financialClearance ? "Soldée" : "Impayée"}</p>
-                            </div>
-                          </div>
-                        </div>
+                        {/* Status Badge */}
+                        {isReady ? (
+                          <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300/80 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 shrink-0 shadow-2xs">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            Prêt
+                          </span>
+                        ) : !patient.financialClearance ? (
+                          <span className="bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-300/80 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shrink-0">
+                            <CreditCard size={11} className="text-rose-600" /> Caisse
+                          </span>
+                        ) : (
+                          <span className="bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 border border-amber-300/80 px-2.5 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shrink-0">
+                            <Clock size={11} className="text-amber-600" /> Incomplet
+                          </span>
+                        )}
+                      </div>
 
-                        {dischargeError && dischargeError.patientId === patient.id && (
-                          <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2">
-                            <ShieldAlert className="text-rose-600 shrink-0 mt-0.5" size={14} />
-                            <p className="text-[11px] font-semibold text-rose-700 leading-snug">{dischargeError.message}</p>
+                      {/* Doctor & Date Row */}
+                      <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-500 dark:text-slate-400 pb-2.5 mb-2.5 border-b border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-1">
+                          <Clock size={12} className="text-slate-400 shrink-0" />
+                          <span className="font-medium">{timeStr}</span>
+                        </div>
+                        {doctorName && (
+                          <div className="flex items-center gap-1 font-semibold text-slate-600 dark:text-slate-300 truncate max-w-[180px]">
+                            <Stethoscope size={12} className="text-blue-500 shrink-0" />
+                            <span className="truncate">{doctorName}</span>
                           </div>
                         )}
                       </div>
-                      
-                      <div className="pt-2.5 border-t border-slate-200/70 flex gap-2">
-                        <button 
-                          onClick={() => handleDischarge(patient.id)}
-                          disabled={isProcessing}
-                          className="flex-1 bg-slate-900 hover:bg-emerald-600 text-white py-2 px-3 rounded-xl font-bold text-xs transition-all shadow-xs disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 cursor-pointer"
-                        >
-                          {isProcessing ? (
-                            <><Loader2 size={14} className="animate-spin" /> Traitement...</>
-                          ) : (
-                            <><CheckCircle size={14} /> Valider Sortie</>
-                          )}
-                        </button>
-                        <button 
-                          disabled={!isReady || isProcessing}
-                          onClick={() => handleGeneratePDF('autorisation_sortie', patient)}
-                          className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all shrink-0 ${
-                            isReady && !isProcessing
-                              ? "bg-white border border-slate-200 text-slate-700 hover:text-blue-600 hover:border-blue-300 cursor-pointer shadow-2xs"
-                              : "bg-slate-100 border border-slate-200 text-slate-300 cursor-not-allowed"
-                          }`}
-                          title="Imprimer l'Autorisation de Sortie"
-                        >
-                          <Printer size={15} />
-                        </button>
-                      </div>
-                   </div>
-                 )})}
 
-                 {patientsToDischarge.length === 0 && (
-                   <div className="col-span-full py-14 text-center bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center">
-                      <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center mb-3 shadow-2xs border border-slate-100">
-                        <LogOut size={22} className="text-slate-400" />
+                      {/* 3-Column Criteria Strip */}
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {/* Médical */}
+                        <div className={`p-2 rounded-xl border text-center transition-all ${
+                          patient.medicalClearance 
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300' 
+                            : 'bg-amber-50/70 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-800/60 dark:text-amber-300'
+                        }`}>
+                          <div className="flex items-center justify-center gap-1 mb-0.5">
+                            {patient.medicalClearance ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                            <span className="text-[9.5px] font-black uppercase tracking-wider">Avis Méd.</span>
+                          </div>
+                          <p className="text-[10.5px] font-extrabold truncate">
+                            {patient.medicalClearance ? "Accordé" : "En attente"}
+                          </p>
+                        </div>
+
+                        {/* Séjour / Hospitalisation */}
+                        <div className={`p-2 rounded-xl border text-center transition-all ${
+                          patient.hospitalizationClosed 
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300' 
+                            : 'bg-amber-50/70 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-800/60 dark:text-amber-300'
+                        }`}>
+                          <div className="flex items-center justify-center gap-1 mb-0.5">
+                            {patient.hospitalizationClosed ? <CheckCircle2 size={12} /> : <Activity size={12} />}
+                            <span className="text-[9.5px] font-black uppercase tracking-wider">Séjour</span>
+                          </div>
+                          <p className="text-[10.5px] font-extrabold truncate">
+                            {patient.hospitalizationClosed ? "Clôturé" : "Actif"}
+                          </p>
+                        </div>
+
+                        {/* Caisse / Finance */}
+                        <div className={`p-2 rounded-xl border text-center transition-all ${
+                          patient.financialClearance 
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300' 
+                            : 'bg-rose-50/80 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800/60 dark:text-rose-300'
+                        }`}>
+                          <div className="flex items-center justify-center gap-1 mb-0.5">
+                            {patient.financialClearance ? <CheckCircle2 size={12} /> : <CreditCard size={12} />}
+                            <span className="text-[9.5px] font-black uppercase tracking-wider">Caisse</span>
+                          </div>
+                          <p className="text-[10.5px] font-extrabold truncate">
+                            {patient.financialClearance ? "Soldée" : "À régler"}
+                          </p>
+                        </div>
                       </div>
-                      <h3 className="text-sm font-extrabold text-slate-900 mb-1">Aucune sortie en attente</h3>
-                      <p className="text-xs text-slate-500 font-medium">Les patients prêts pour la sortie administrative apparaîtront ici.</p>
-                   </div>
-                 )}
-              </div>
-           </div>
+
+                      {/* Financial Caution Notice if Unpaid */}
+                      {!patient.financialClearance && (
+                        <div className="mb-3 p-2 bg-rose-50/70 border border-rose-200/80 dark:bg-rose-950/30 dark:border-rose-900 rounded-xl flex items-center gap-1.5 text-rose-700 dark:text-rose-300 text-[10.5px] font-medium leading-tight">
+                          <AlertCircle size={13} className="text-rose-500 shrink-0" />
+                          <span>Paiement en attente à la Caisse avant autorisation finale.</span>
+                        </div>
+                      )}
+
+                      {/* Error notice if validation failed */}
+                      {dischargeError && dischargeError.patientId === patient.id && (
+                        <div className="mb-3 p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-2 animate-in fade-in">
+                          <ShieldAlert className="text-rose-600 shrink-0 mt-0.5" size={14} />
+                          <p className="text-[11px] font-semibold text-rose-700 leading-snug">{dischargeError.message}</p>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Bottom Action Strip */}
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-2">
+                      <button 
+                        onClick={() => handleDischarge(patient.id)}
+                        disabled={isProcessing}
+                        className={`flex-1 py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                          isReady
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 active:scale-[0.98]'
+                            : 'bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                      >
+                        {isProcessing ? (
+                          <><Loader2 size={14} className="animate-spin" /> Traitement...</>
+                        ) : (
+                          <><CheckCircle size={14} /> Valider Sortie</>
+                        )}
+                      </button>
+
+                      <button 
+                        disabled={!isReady || isProcessing}
+                        onClick={() => handleGeneratePDF('autorisation_sortie', patient)}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0 ${
+                          isReady && !isProcessing
+                            ? "bg-white border border-slate-200 text-slate-700 hover:text-blue-600 hover:border-blue-300 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-200 dark:hover:text-blue-400 cursor-pointer shadow-2xs"
+                            : "bg-slate-100 border border-slate-200 text-slate-300 dark:bg-slate-800/40 dark:border-slate-800 dark:text-slate-600 cursor-not-allowed"
+                        }`}
+                        title="Imprimer le Bon d'Autorisation de Sortie"
+                      >
+                        <Printer size={16} />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          const matchedPatient = patients.find(p => p.id === patient.patientId || p.id === patient.id) || {
+                            id: patient.patientId || patient.id,
+                            lastName: patient.name || patient.patientName || 'Patient',
+                            firstName: ''
+                          } as Patient;
+                          setSelectedPatientForHistory(matchedPatient);
+                          setActiveTab('historique');
+                        }}
+                        className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0 border cursor-pointer ${
+                          theme === 'dark'
+                            ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-blue-400 hover:border-slate-600'
+                            : 'bg-white border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 shadow-2xs'
+                        }`}
+                        title="Consulter l'historique complet de ce patient"
+                      >
+                        <History size={15} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Empty state: No patients at all */}
+              {patientsToDischarge.length === 0 && (
+                <div className="col-span-full py-16 text-center bg-slate-50/50 dark:bg-slate-900/40 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center">
+                  <div className="w-14 h-14 bg-white dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-3 shadow-xs border border-slate-100 dark:border-slate-700">
+                    <LogOut size={24} className="text-slate-400 dark:text-slate-500" />
+                  </div>
+                  <h3 className={`text-base font-black mb-1 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                    Aucun patient en attente de sortie
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium max-w-sm">
+                    Les patients libérés par les médecins ou sortis d'hospitalisation apparaîtront automatiquement ici pour validation administrative.
+                  </p>
+                </div>
+              )}
+
+              {/* Empty state: Filters returned 0 results */}
+              {patientsToDischarge.length > 0 && filteredAndSortedPatientsToDischarge.length === 0 && (
+                <div className="col-span-full py-14 text-center bg-slate-50/50 dark:bg-slate-900/40 rounded-3xl border border-dashed border-slate-200 dark:border-slate-800 flex flex-col items-center justify-center">
+                  <div className="w-12 h-12 bg-white dark:bg-slate-800 rounded-2xl flex items-center justify-center mb-2 shadow-xs border border-slate-100 dark:border-slate-700">
+                    <Search size={20} className="text-slate-400" />
+                  </div>
+                  <h3 className={`text-sm font-black mb-1 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                    Aucun patient ne correspond aux filtres
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mb-3">
+                    Modifiez vos critères de recherche ou réinitialisez les filtres.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setSortieSearchTerm('');
+                      setSortieStatusFilter('ALL');
+                      setSortieDepartmentFilter('ALL');
+                    }}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-xs"
+                  >
+                    Réinitialiser les filtres
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
