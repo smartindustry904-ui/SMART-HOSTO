@@ -1,4 +1,5 @@
-import { Role } from '../../types';
+import { Role, CustomRole } from '../../types';
+import { getCachedCustomRoles } from '../../hooks/useCustomRoles';
 
 export interface CanonicalModule {
   id: string; // Technical identifier
@@ -241,7 +242,44 @@ export const isModuleActiveAndAvailable = (
  * - Accueil / Secrétaire accesses Accueil.
  * - Comptable accesses Comptabilité, Caisse.
  */
-export const isUserAuthorizedForModule = (user: any, moduleRoleOrId: Role | string): boolean => {
+export const MODULE_KEY_MAP: Record<string, string> = {
+  'accueil': 'module_accueil',
+  'consultation': 'module_consultation',
+  'soins_infirmiers': 'module_consultation',
+  'hospitalisation': 'module_hospitalisation',
+  'pharmacie': 'module_pharmacie',
+  'caisse': 'module_caisse',
+  'comptabilite': 'module_caisse',
+  'urgences': 'module_urgence',
+  'laboratoire': 'module_laboratoire',
+  'imagerie': 'module_imagerie',
+  'maternite': 'module_maternite',
+  'bloc': 'module_bloc',
+  [Role.RECEPTION]: 'module_accueil',
+  [Role.DOCTOR]: 'module_consultation',
+  [Role.NURSE]: 'module_consultation',
+  [Role.INPATIENT]: 'module_hospitalisation',
+  [Role.PHARMACY]: 'module_pharmacie',
+  [Role.CASHIER]: 'module_caisse',
+  [Role.URGENCE]: 'module_urgence',
+  [Role.LAB]: 'module_laboratoire',
+  [Role.MATERNITY]: 'module_maternite',
+  [Role.ACCOUNTANT]: 'module_caisse',
+};
+
+export interface UserModulePermissions {
+  canRead: boolean;
+  canWrite: boolean;
+  canDelete: boolean;
+  canValidate: boolean;
+  isReadOnly: boolean;
+}
+
+export const isUserAuthorizedForModule = (
+  user: any, 
+  moduleRoleOrId: Role | string,
+  customRoles?: CustomRole[]
+): boolean => {
   if (!user) return false;
 
   const rawUserRole = (user.role || '').toUpperCase().trim();
@@ -268,8 +306,25 @@ export const isUserAuthorizedForModule = (user: any, moduleRoleOrId: Role | stri
     return false;
   }
 
-  // Resolve effective primary role:
-  // If user only has role_caissier in roles but role was set to default DOCTOR
+  // 1. Dynamic RBAC Check: If an admin edited a role or created custom permissions, enforce it live!
+  const targetMod = getModuleByRoleOrId(moduleRoleOrId);
+  const targetId = targetMod ? targetMod.id : String(moduleRoleOrId).toLowerCase();
+  const targetRole = targetMod ? targetMod.role : moduleRoleOrId;
+  const targetRbacKey = MODULE_KEY_MAP[targetId] || MODULE_KEY_MAP[targetRole as string] || `module_${targetId}`;
+
+  const rolesList = (customRoles && customRoles.length > 0) ? customRoles : getCachedCustomRoles();
+
+  for (const roleId of userRoles) {
+    const roleDef = rolesList.find(r => r.id === roleId);
+    if (roleDef && roleDef.permissions && roleDef.permissions[targetRbacKey]) {
+      const actions = roleDef.permissions[targetRbacKey];
+      if (Array.isArray(actions) && actions.length > 0) {
+        return true;
+      }
+    }
+  }
+
+  // 2. Resolve effective primary role for standard role enforcement
   let effectiveRole = rawUserRole;
   if (userRoles.includes('role_caissier') && !userRoles.includes('role_medecin') && !userRoles.includes('role_admin') && rawUserRole === Role.DOCTOR) {
     effectiveRole = Role.CASHIER;
@@ -283,38 +338,27 @@ export const isUserAuthorizedForModule = (user: any, moduleRoleOrId: Role | stri
     effectiveRole = Role.LAB;
   }
 
-  // Identify target module canonical role
-  const targetMod = getModuleByRoleOrId(moduleRoleOrId);
-  const targetRole = targetMod ? targetMod.role : moduleRoleOrId;
-
-  // 1. Check effective system role permissions
+  // 3. Fallback to standard system role mappings
   switch (effectiveRole) {
     case Role.CASHIER:
-      // A Caissier can ONLY access Caisse!
       return targetRole === Role.CASHIER;
 
     case Role.PHARMACY:
-      // A Pharmacien can ONLY access Pharmacie!
       return targetRole === Role.PHARMACY;
 
     case Role.LAB:
-      // A Laborantin can ONLY access Laboratoire!
       return targetRole === Role.LAB;
 
     case Role.RECEPTION:
-      // An Accueil agent can ONLY access Accueil!
       return targetRole === Role.RECEPTION;
 
     case Role.MATERNITY:
-      // A Sage-femme accesses Maternité and Hospitalisation
       return targetRole === Role.MATERNITY || targetRole === Role.INPATIENT;
 
     case Role.ACCOUNTANT:
-      // A Comptable accesses Comptabilité and Caisse
       return targetRole === Role.ACCOUNTANT || targetRole === Role.CASHIER;
 
     case Role.NURSE:
-      // An Infirmier accesses Soins Infirmiers, Hospitalisation, Urgences, and Accueil (for triage)
       return (
         targetRole === Role.NURSE ||
         targetRole === Role.INPATIENT ||
@@ -323,7 +367,6 @@ export const isUserAuthorizedForModule = (user: any, moduleRoleOrId: Role | stri
       );
 
     case Role.DOCTOR:
-      // A Médecin accesses Consultation, Soins, Hospitalisation, Urgences, Maternité, and Accueil
       return (
         targetRole === Role.DOCTOR ||
         targetRole === Role.NURSE ||
@@ -340,16 +383,82 @@ export const isUserAuthorizedForModule = (user: any, moduleRoleOrId: Role | stri
       return targetRole === Role.URGENCE || targetRole === Role.INPATIENT || targetRole === Role.NURSE;
   }
 
-  // 2. Custom RBAC roles check (if user has secondary roles configured in user.roles)
-  return userRoles.some(roleId => {
-    if (roleId === 'role_admin' || roleId === 'role_super_admin') return true;
-    if (roleId === 'role_caissier' && targetRole === Role.CASHIER) return true;
-    if (roleId === 'role_pharmacien' && targetRole === Role.PHARMACY) return true;
-    if (roleId === 'role_laborantin' && targetRole === Role.LAB) return true;
-    if ((roleId === 'role_secretaire' || roleId === 'role_accueil') && targetRole === Role.RECEPTION) return true;
-    if (roleId === 'role_medecin' && (targetRole === Role.DOCTOR || targetRole === Role.RECEPTION || targetRole === Role.INPATIENT || targetRole === Role.URGENCE || targetRole === Role.NURSE)) return true;
-    if (roleId === 'role_infirmier' && (targetRole === Role.NURSE || targetRole === Role.RECEPTION || targetRole === Role.INPATIENT || targetRole === Role.URGENCE)) return true;
-    if (roleId === 'role_chef_service' && (targetRole === Role.DOCTOR || targetRole === Role.INPATIENT || targetRole === Role.URGENCE)) return true;
-    return false;
-  });
+  return false;
+};
+
+/**
+ * Enforces dynamic role action attributes (read, write, delete, validate).
+ * If a user only has 'read' permission on a module, isReadOnly is true and write operations must be locked.
+ */
+export const getUserModulePermissions = (
+  user: any,
+  moduleRoleOrId: Role | string,
+  customRoles?: CustomRole[]
+): UserModulePermissions => {
+  if (!user) {
+    return { canRead: false, canWrite: false, canDelete: false, canValidate: false, isReadOnly: true };
+  }
+
+  const rawUserRole = (user.role || '').toUpperCase().trim();
+  const userRoles: string[] = Array.isArray(user.roles) ? user.roles : [];
+
+  const isAdmin = 
+    rawUserRole === Role.ADMIN ||
+    rawUserRole === Role.SUPER_ADMIN ||
+    rawUserRole === 'SUPER_ADMIN' ||
+    userRoles.includes('role_admin') ||
+    userRoles.includes('role_super_admin') ||
+    (user.username || '').toLowerCase() === 'superadmin' ||
+    (user.username || '').toLowerCase() === 'sa1';
+
+  if (isAdmin) {
+    return { canRead: true, canWrite: true, canDelete: true, canValidate: true, isReadOnly: false };
+  }
+
+  const targetMod = getModuleByRoleOrId(moduleRoleOrId);
+  const targetId = targetMod ? targetMod.id : String(moduleRoleOrId).toLowerCase();
+  const targetRole = targetMod ? targetMod.role : moduleRoleOrId;
+  const targetRbacKey = MODULE_KEY_MAP[targetId] || MODULE_KEY_MAP[targetRole as string] || `module_${targetId}`;
+
+  const rolesList = (customRoles && customRoles.length > 0) ? customRoles : getCachedCustomRoles();
+
+  let hasRead = false;
+  let hasWrite = false;
+  let hasDelete = false;
+  let hasValidate = false;
+  let explicitlyFoundInRbac = false;
+
+  for (const roleId of userRoles) {
+    const roleDef = rolesList.find(r => r.id === roleId);
+    if (roleDef && roleDef.permissions && roleDef.permissions[targetRbacKey]) {
+      const actions = roleDef.permissions[targetRbacKey];
+      if (Array.isArray(actions) && actions.length > 0) {
+        explicitlyFoundInRbac = true;
+        if (actions.includes('read')) hasRead = true;
+        if (actions.includes('write')) hasWrite = true;
+        if (actions.includes('delete')) hasDelete = true;
+        if (actions.includes('validate')) hasValidate = true;
+      }
+    }
+  }
+
+  if (explicitlyFoundInRbac) {
+    return {
+      canRead: hasRead,
+      canWrite: hasWrite,
+      canDelete: hasDelete,
+      canValidate: hasValidate,
+      isReadOnly: hasRead && !hasWrite
+    };
+  }
+
+  // Fallback default: if user is authorized by system role, they have standard read/write
+  const isAuthorized = isUserAuthorizedForModule(user, moduleRoleOrId, rolesList);
+  return {
+    canRead: isAuthorized,
+    canWrite: isAuthorized,
+    canDelete: false,
+    canValidate: false,
+    isReadOnly: !isAuthorized
+  };
 };

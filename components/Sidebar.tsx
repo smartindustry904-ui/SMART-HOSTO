@@ -58,6 +58,7 @@ import { Role, User, EmergencySubMenu, NurseSubMenu, ReceptionSubMenu, CashierSu
 import { useSystemAlerts } from '../hooks/useSystemAlerts';
 import { useHospitalServices } from '../hooks/useSettings';
 import { isModuleActiveAndAvailable, isUserAuthorizedForModule } from '../src/config/modules';
+import { useCustomRoles } from '../hooks/useCustomRoles';
 
 interface SidebarProps {
   user: User;
@@ -236,6 +237,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const { services } = useHospitalServices();
 
+  const { roles: customRoles } = useCustomRoles(user);
+
   // Filtrer les menus selon le statut d'activation du service et le rôle de l'utilisateur
   const filteredItems = menuConfig.filter(item => {
     // 1. Strict service activation check: a module linked to a service must be active in Firestore
@@ -244,7 +247,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
 
     // 2. Strict RBAC Access check
-    return isUserAuthorizedForModule(user, item.id);
+    return isUserAuthorizedForModule(user, item.id, customRoles);
   });
 
   const { alerts } = useSystemAlerts(user);

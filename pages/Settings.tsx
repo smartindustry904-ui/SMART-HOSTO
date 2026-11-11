@@ -61,13 +61,14 @@ import { Avatar } from '../components/common/Avatar';
 import { ImageUpload } from '../components/common/ImageUpload';
 import { StaffPerformanceModal } from '../components/profile/StaffPerformanceModal';
 import { AppearanceSettings } from './settings/AppearanceSettings';
+import { LicenseSettings } from './settings/LicenseSettings';
 import { db, sanitizeData, handleFirestoreError, OperationType } from '../src/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, where, addDoc, updateDoc, getDocs, limit, getDoc } from 'firebase/firestore';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface SettingsProps {
-  activeTab: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent';
-  setActiveTab: (tab: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent') => void;
+  activeTab: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent' | 'licence';
+  setActiveTab: (tab: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent' | 'licence') => void;
   user: User | null;
   onBackToDashboard?: () => void;
   theme?: 'light' | 'dark';
@@ -1069,6 +1070,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
               { id: 'users', label: 'Utilisateurs' },
               { id: 'roles', label: 'Rôles' },
               { id: 'establishment', label: 'Établissement' },
+              { id: 'licence', label: '💳 Licence & Abonnement' },
               { id: 'appearance', label: '🎨 Thèmes & Couleurs' },
               { id: 'referentials', label: 'Référentiels' },
               { id: 'cashier_settings', label: 'Caisse' },
@@ -1102,7 +1104,11 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
         {/* Content Area */}
         <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 min-h-[500px]">
           {activeTab === 'roles' && (
-            <RolesPermissions roles={roles} setRoles={setRoles} users={users} setUsers={setUsers} showMessage={showMessage} />
+            <RolesPermissions roles={roles} setRoles={setRoles} users={users} setUsers={setUsers} showMessage={showMessage} currentUser={user} />
+          )}
+
+          {activeTab === 'licence' && (
+            <LicenseSettings user={user} establishment={establishment} usersCount={users.length} />
           )}
 
           {activeTab === 'users' && (

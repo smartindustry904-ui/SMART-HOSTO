@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { db } from '../src/firebase';
 import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
 import { Role, User } from '../types';
+import { getActiveTenantId, belongsToTenant } from '../src/utils/tenant';
 
 export interface SystemAlert {
   id: string;
-  source: 'PHARMACY' | 'LAB' | 'EMERGENCY' | 'BEDS' | 'TRIAGE';
+  source: 'PHARMACY' | 'LAB' | 'EMERGENCY' | 'BEDS' | 'TRIAGE' | 'LICENCE';
   sourceLabel: string;
   title: string;
   message: string;
@@ -127,31 +128,38 @@ export const useSystemAlerts = (user: User | null) => {
     }
   });
 
-  // 1. Real-time Listeners for Pharmacy, Lab, Queues, Emergencies, Beds
+  const activeTenantId = getActiveTenantId(user);
+
+  // 1. Real-time Listeners for Pharmacy, Lab, Queues, Emergencies, Beds (Strictly isolated by clinic tenant)
   useEffect(() => {
     // Pharmacy inventory
     const unsubPharmacy = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
-      setPharmacyItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setPharmacyItems(items.filter(item => belongsToTenant(item, activeTenantId)));
     }, (err) => console.warn('Alerts: Error listening to pharmacy_inventory', err));
 
     // Lab requests
     const unsubLab = onSnapshot(collection(db, 'lab_requests'), (snap) => {
-      setLabRequests(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setLabRequests(items.filter(item => belongsToTenant(item, activeTenantId)));
     }, (err) => console.warn('Alerts: Error listening to lab_requests', err));
 
     // Service Queues (Triage / Waiting)
     const unsubQueues = onSnapshot(collection(db, 'service_queues'), (snap) => {
-      setQueueItems(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setQueueItems(items.filter(item => belongsToTenant(item, activeTenantId)));
     }, (err) => console.warn('Alerts: Error listening to service_queues', err));
 
     // Emergency Patients
     const unsubEmergencies = onSnapshot(collection(db, 'emergency_patients'), (snap) => {
-      setEmergencyPatients(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setEmergencyPatients(items.filter(item => belongsToTenant(item, activeTenantId)));
     }, (err) => console.warn('Alerts: Error listening to emergency_patients', err));
 
     // Beds Infrastructure
     const unsubBeds = onSnapshot(collection(db, 'beds'), (snap) => {
-      setBeds(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setBeds(items.filter(item => belongsToTenant(item, activeTenantId)));
     }, (err) => console.warn('Alerts: Error listening to beds', err));
 
     return () => {
@@ -161,7 +169,7 @@ export const useSystemAlerts = (user: User | null) => {
       unsubEmergencies();
       unsubBeds();
     };
-  }, []);
+  }, [activeTenantId]);
 
   // 2. Derive real-time alerts based on exact database states
   const rawAlerts = useMemo<SystemAlert[]>(() => {

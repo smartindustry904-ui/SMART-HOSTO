@@ -25,6 +25,7 @@ import { useSystemAlerts } from '../hooks/useSystemAlerts';
 import { SystemAlertsDropdown } from '../components/SystemAlertsDropdown';
 import { useHospitalServices } from '../hooks/useSettings';
 import { CANONICAL_MODULES, isModuleActiveAndAvailable, isUserAuthorizedForModule } from '../src/config/modules';
+import { useCustomRoles } from '../hooks/useCustomRoles';
 
 interface ModuleSelectorProps {
   user: User;
@@ -49,6 +50,7 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ user, onSelectModule, o
   
   // Real-time Firestore synchronization of hospital services
   const { services, loading: servicesLoading } = useHospitalServices();
+  const { roles: customRoles } = useCustomRoles(user);
 
   // Canonical icon and UI decoration map
   const moduleIcons: Record<string, any> = {
@@ -98,7 +100,7 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ user, onSelectModule, o
     if (!matchesSearch) return false;
 
     // 4. Strict RBAC Permission filter (each user only sees their authorized modules)
-    return isUserAuthorizedForModule(user, m.role);
+    return isUserAuthorizedForModule(user, m.role, customRoles);
   });
 
   return (

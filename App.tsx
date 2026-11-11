@@ -24,9 +24,11 @@ const ControlCenter = lazy(() => import('./pages/ControlCenter').then(m => ({ de
 
 import ForcePasswordChangeModal from './components/auth/ForcePasswordChangeModal';
 import { UserProfileModal } from './components/profile/UserProfileModal';
-import { Menu, LogOut, Bell, LayoutDashboard, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { Menu, LogOut, Bell, LayoutDashboard, CheckCircle2, AlertCircle, Info, X, AlertTriangle, CreditCard, ShieldAlert } from 'lucide-react';
 import { useSettings, useHospitalServices } from './hooks/useSettings';
 import { isModuleActiveAndAvailable, isUserAuthorizedForModule } from './src/config/modules';
+import { useHospitalLicense } from './hooks/useHospitalLicense';
+import { useCustomRoles } from './hooks/useCustomRoles';
 import { auth, db } from './src/firebase';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { collection, query, onSnapshot, orderBy, doc, getDoc } from 'firebase/firestore';
@@ -78,7 +80,7 @@ const App: React.FC = () => {
       setIsSidebarExpanded(true);
     }
   }, [isSidebarLocked]);
-  const [activeSettingsTab, setActiveSettingsTab] = useState<'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent' | 'appearance'>('users');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'users' | 'roles' | 'establishment' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent' | 'appearance' | 'licence'>('users');
   const [activeMaternityTab, setActiveMaternityTab] = useState<MaternitySubMenu>('dashboard');
   const [activeConsultationTab, setActiveConsultationTab] = useState<ConsultationSubMenu>('dashboard');
   const [activeEmergencyTab, setActiveEmergencyTab] = useState<EmergencySubMenu>('patients');
@@ -92,6 +94,8 @@ const App: React.FC = () => {
   const [notifications, setNotifications] = useState<{id: number, message: string, type: 'success' | 'error' | 'info'}[]>([]);
   const { establishment, cashierSettings: cashierSettingsGlobal, updateEstablishment } = useSettings();
   const { services: hospitalServicesList, loading: hospitalServicesLoading } = useHospitalServices();
+  const hospitalLicense = useHospitalLicense(user, establishment);
+  const { roles: customRoles } = useCustomRoles(user);
   const hospitalServicesRef = React.useRef(hospitalServicesList);
   hospitalServicesRef.current = hospitalServicesList;
 
@@ -131,7 +135,7 @@ const App: React.FC = () => {
             type: 'error'
           }
         }));
-      } else if (!isUserAuthorizedForModule(user, currentModule)) {
+      } else if (!isUserAuthorizedForModule(user, currentModule, customRoles)) {
         setCurrentModule('DASHBOARD');
         window.dispatchEvent(new CustomEvent('app-notification', {
           detail: {
@@ -681,7 +685,7 @@ const App: React.FC = () => {
     }
 
     // Protection RBAC stricte : vérifier si l'utilisateur est autorisé pour ce module
-    if (!isUserAuthorizedForModule(user, currentModule)) {
+    if (!isUserAuthorizedForModule(user, currentModule, customRoles)) {
       return <ModuleSelector user={user} onSelectModule={setCurrentModule} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
     }
 
@@ -880,30 +884,58 @@ const App: React.FC = () => {
     );
   }
 
-  // Cas 4 : Blocage explicite en cas de licence expirée pour le personnel médical
-  const isLicenseExpired = (user as any).isLicenseExpired;
-  const isLocalAdmin = user.role === Role.ADMIN || user.roles?.includes('role_admin');
+  // Contrôle de conformité de licence SaaS
+  const isLicenseExpired = hospitalLicense.isExpired;
+  const isLocalAdmin = user.role === Role.ADMIN || user.roles?.includes('role_admin') || (user as any).isMainAdmin === true;
+  const isSuperUser = isUserSuperAdmin(user);
 
-  if (isLicenseExpired && !isLocalAdmin) {
+  // Blocage temporaire d'accès en cas de licence expirée pour le personnel médical
+  if (isLicenseExpired && !isSuperUser && !isLocalAdmin) {
     return (
-      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center">
-        <div className="max-w-md bg-slate-900 border border-rose-500/30 p-8 rounded-3xl shadow-2xl space-y-4">
-          <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-2xl mx-auto flex items-center justify-center">
-            <AlertCircle size={36} />
+      <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6 text-center animate-in fade-in duration-300">
+        <div className="max-w-lg bg-slate-900 border border-rose-500/40 p-8 sm:p-10 rounded-3xl shadow-2xl space-y-6">
+          <div className="w-20 h-20 bg-rose-500/15 border border-rose-500/30 text-rose-500 rounded-3xl mx-auto flex items-center justify-center shadow-lg shadow-rose-500/20">
+            <ShieldAlert size={44} />
           </div>
-          <h2 className="text-2xl font-black text-white">Licence de l'Établissement Expirée</h2>
-          <p className="text-xs text-slate-400">
-            L'abonnement de votre structure hospitalière est arrivé à expiration ou a été suspendu par l'administration SmartHosto.
-          </p>
-          <div className="p-4 bg-slate-950/80 rounded-2xl border border-white/5 text-xs text-slate-300">
-            Veuillez contacter la direction de votre clinique ou le service commercial SmartHosto (contact@smarthosto.com) pour réactiver vos accès.
+
+          <div className="space-y-2">
+            <span className="px-3 py-1 bg-rose-500/20 text-rose-400 border border-rose-500/30 text-[10px] font-black uppercase tracking-widest rounded-full">
+              Accès Suspendu • Licence Expirée
+            </span>
+            <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              Abonnement Expiré
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-400 font-medium leading-relaxed">
+              La licence d'exploitation hospitalière de votre établissement (<strong>{hospitalLicense.clinicName}</strong>) est arrivée à échéance.
+            </p>
           </div>
-          <button
-            onClick={handleLogout}
-            className="w-full py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
-          >
-            Se déconnecter
-          </button>
+
+          <div className="p-4 bg-slate-950/80 rounded-2xl border border-white/10 text-xs text-slate-300 space-y-2 text-left">
+            <p className="font-bold text-rose-300 flex items-center gap-1.5">
+              <AlertTriangle size={15} /> Mesure de sécurité & continuité :
+            </p>
+            <p className="text-slate-400 leading-relaxed">
+              L'accès aux modules cliniques, médicaux et de facturation est temporairement verrouillé jusqu'au renouvellement de la licence. L'ensemble des dossiers médicaux et données patients restent intégralement protégés et sauvegardés.
+            </p>
+            <div className="pt-2 border-t border-white/10 text-[11px] text-slate-400">
+              Veuillez contacter l'administrateur principal de votre établissement ou le support commercial Smart Hosto au <span className="font-mono text-white font-bold">{hospitalLicense.contactPhone}</span>.
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            <button
+              onClick={handleLogout}
+              className="flex-1 py-3.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all cursor-pointer"
+            >
+              Se déconnecter
+            </button>
+            <a
+              href={`mailto:${hospitalLicense.contactEmail}?subject=Renouvellement%20Licence%20SmartHosto%20-%20${encodeURIComponent(hospitalLicense.clinicName)}`}
+              className="flex-1 py-3.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-md shadow-rose-600/30 cursor-pointer"
+            >
+              Contacter le support
+            </a>
+          </div>
         </div>
       </div>
     );
@@ -932,14 +964,49 @@ const App: React.FC = () => {
           </button>
         </div>
       )}
-      {isLicenseExpired && isLocalAdmin && (
-        <div className="fixed top-0 left-0 right-0 z-50 bg-rose-600 text-white text-xs font-bold px-4 py-2 flex items-center justify-between shadow-lg">
-          <div className="flex items-center gap-2">
-            <AlertCircle size={15} />
-            <span>ATTENTION : La licence de votre établissement est expirée. Contactez le Super Administrateur pour régulariser votre abonnement.</span>
+      {/* 1. Alerte critique d'expiration de licence pour l'administrateur de l'établissement */}
+      {isLicenseExpired && isLocalAdmin && !isSuperUser && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-rose-700 via-rose-600 to-rose-700 text-white text-xs font-bold px-4 py-3 flex items-center justify-between shadow-xl border-b border-rose-400/40">
+          <div className="flex items-center gap-2.5">
+            <ShieldAlert size={18} className="text-white shrink-0 animate-bounce" />
+            <span>
+              <strong>LICENCE EXPIRÉE :</strong> La licence de votre établissement ({hospitalLicense.clinicName}) est arrivée à échéance. L'accès du personnel est suspendu. Veuillez régulariser votre abonnement.
+            </span>
           </div>
-          <button onClick={() => setCurrentModule('SETTING')} className="underline text-xs cursor-pointer">
-            Voir paramètres
+          <button 
+            onClick={() => {
+              setCurrentModule('SETTING');
+              setActiveSettingsTab('licence');
+            }} 
+            className="px-3.5 py-1.5 bg-white text-rose-700 rounded-lg text-xs font-black uppercase tracking-wider hover:bg-rose-50 transition-colors shadow-sm shrink-0 cursor-pointer"
+          >
+            Gérer ma licence
+          </button>
+        </div>
+      )}
+
+      {/* 2. Bandeau d'avertissement quand la licence approche de son expiration (30 jours ou moins) */}
+      {hospitalLicense.isNearingExpiration && !isLicenseExpired && !isSuperUser && (
+        <div className={`fixed top-0 left-0 right-0 z-50 text-xs font-bold px-4 py-2.5 flex items-center justify-between shadow-md transition-all ${
+          hospitalLicense.isCriticalExpiration
+            ? 'bg-gradient-to-r from-rose-600 via-amber-600 to-rose-700 text-white border-b border-rose-400'
+            : 'bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-amber-950 border-b border-amber-300'
+        }`}>
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle size={18} className="shrink-0" />
+            <span>
+              <strong>Avertissement Échéance :</strong> Votre abonnement hospitalier ({hospitalLicense.planName}) expire dans{' '}
+              <span className="font-black underline decoration-2">{hospitalLicense.daysRemaining} jour{hospitalLicense.daysRemaining > 1 ? 's' : ''}</span>. Renouvelez dès maintenant pour garantir la continuité opérationnelle.
+            </span>
+          </div>
+          <button 
+            onClick={() => {
+              setCurrentModule('SETTING');
+              setActiveSettingsTab('licence');
+            }} 
+            className="px-3 py-1 rounded-lg bg-black/15 hover:bg-black/25 text-current text-xs font-black uppercase tracking-wider transition-colors shrink-0 cursor-pointer"
+          >
+            Détails de la licence
           </button>
         </div>
       )}

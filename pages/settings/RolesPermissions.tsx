@@ -2,6 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { CustomRole } from '../../types';
 import { DEFAULT_ROLES, PERMISSION_MODULES, MODULE_ACTIONS, GLOBAL_PERMISSIONS } from '../../constants/rbac';
 import { Shield, Plus, Edit2, Trash2, Copy, Check, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { db, sanitizeData } from '../../src/firebase';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { getActiveTenantId, stampTenantData } from '../../src/utils/tenant';
 
 interface RolesPermissionsProps {
   roles: CustomRole[];
@@ -9,12 +12,15 @@ interface RolesPermissionsProps {
   users: any[];
   setUsers: (users: any[]) => void;
   showMessage: (type: 'success' | 'error', text: string) => void;
+  currentUser?: any;
 }
 
-const RolesPermissions: React.FC<RolesPermissionsProps> = ({ roles, setRoles, users, setUsers, showMessage }) => {
+const RolesPermissions: React.FC<RolesPermissionsProps> = ({ roles, setRoles, users, setUsers, showMessage, currentUser }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<CustomRole | null>(null);
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
+
+  const activeTenantId = getActiveTenantId(currentUser);
 
   // Initialize default roles if empty
   useEffect(() => {
@@ -45,7 +51,7 @@ const RolesPermissions: React.FC<RolesPermissionsProps> = ({ roles, setRoles, us
     setEditingRole(null);
   };
 
-  const handleSaveRole = (e: React.FormEvent) => {
+  const handleSaveRole = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingRole || !editingRole.name.trim()) return;
 
@@ -55,23 +61,42 @@ const RolesPermissions: React.FC<RolesPermissionsProps> = ({ roles, setRoles, us
       return;
     }
 
-    const updatedRole = { ...editingRole, updatedAt: new Date().toISOString() };
+    const updatedRole: CustomRole = { 
+      ...editingRole, 
+      tenantId: activeTenantId,
+      clinicId: activeTenantId,
+      hospital_id: activeTenantId,
+      updatedAt: new Date().toISOString() 
+    } as any;
     
+    // Save to Firestore so changes persist and apply live to all users!
+    try {
+      await setDoc(doc(db, 'hospital_roles', updatedRole.id), sanitizeData(stampTenantData(updatedRole, currentUser)), { merge: true });
+    } catch (err) {
+      console.warn("Notice: Error saving role to Firestore, will update locally:", err);
+    }
+
     if (roles.some(r => r.id === updatedRole.id)) {
       setRoles(roles.map(r => r.id === updatedRole.id ? updatedRole : r));
-      showMessage('success', 'Rôle modifié avec succès');
+      showMessage('success', 'Rôle et habilitations modifiés avec succès. Les accès des utilisateurs associés sont immédiatement actualisés.');
     } else {
       setRoles([...roles, updatedRole]);
-      showMessage('success', 'Rôle créé avec succès');
+      showMessage('success', 'Nouveau rôle créé et enregistré avec succès');
     }
     
     handleCloseModal();
   };
 
-  const handleDeleteRole = (id: string) => {
+  const handleDeleteRole = async (id: string) => {
     if (id === 'role_admin') {
       showMessage('error', 'Impossible de supprimer le rôle Administrateur principal (protection système)');
       return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'hospital_roles', id));
+    } catch (err) {
+      console.warn("Notice: Error deleting role from Firestore:", err);
     }
 
     // Remove the role from any users that might have it assigned
@@ -87,15 +112,25 @@ const RolesPermissions: React.FC<RolesPermissionsProps> = ({ roles, setRoles, us
     showMessage('success', 'Rôle supprimé avec succès');
   };
 
-  const handleDuplicateRole = (role: CustomRole) => {
+  const handleDuplicateRole = async (role: CustomRole) => {
     const newRole: CustomRole = {
       ...role,
       id: Math.random().toString(36).substr(2, 9),
       name: `${role.name} (Copie)`,
       isSystem: false,
+      tenantId: activeTenantId,
+      clinicId: activeTenantId,
+      hospital_id: activeTenantId,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
-    };
+    } as any;
+
+    try {
+      await setDoc(doc(db, 'hospital_roles', newRole.id), sanitizeData(stampTenantData(newRole, currentUser)));
+    } catch (err) {
+      console.warn("Notice: Error saving duplicated role:", err);
+    }
+
     setRoles([...roles, newRole]);
     showMessage('success', 'Rôle dupliqué avec succès');
   };
