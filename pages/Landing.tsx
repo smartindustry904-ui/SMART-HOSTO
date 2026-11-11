@@ -46,10 +46,10 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
 
   const t = {
     FR: {
-      badge: "Système d'Information Hospitalier • Développé pour le Terrain Africain",
-      heroPre: "PARCE QUE CHAQUE SECONDE",
-      heroGrad: "SAUVE UNE VIE EN AFRIQUE",
-      heroDesc: "Même sans connexion Internet, la vie n'attend pas. SmartHosto est le Système d'Information Hospitalier résilient pensé pour le courage des soignants africains : continuité clinique absolue, zéro fuite de recettes en caisse et souveraineté totale des données de santé.",
+      badge: "Système d'Information Hospitalier • Haute Disponibilité",
+      heroPre: "CHAQUE SECONDE COMPTE,",
+      heroGrad: "LA VIE N'ATTEND PAS",
+      heroDesc: "Le Système d'Information Hospitalier pensé pour le terrain : continuité clinique absolue même sans Internet, zéro fuite de recettes et traçabilité médicale intégrale.",
       navAbout: "Cockpit Médical",
       navServices: "Mode Hors-Ligne",
       navModules: "Spécialités Cliniques",
@@ -59,17 +59,17 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
       placeholderUser: "Identifiant ou Nom d'utilisateur (ex: admin)",
       placeholderPass: "Mot de passe",
       errorAuth: "Identifiants incorrects.",
-      footerDesc: "SmartHosto SIH • Technologie médicale de pointe au service de la santé en Afrique.",
+      footerDesc: "SmartHosto SIH • Technologie médicale de pointe au service des établissements de santé.",
       ctaPrimary: "Ouvrir Session Clinique",
       ctaDemo: "Découvrir le Cockpit",
-      offlinePill: "100% Offline-First (0ms)",
-      trustCountries: "Déployé & Optimisé pour les Cliniques et Hôpitaux d'Afrique : Sénégal • Côte d'Ivoire • Cameroun • RDC • Gabon • Bénin • Togo • Guinée",
+      offlinePill: "100% Hors-Ligne (0ms)",
+      trustCountries: "Déployé & Éprouvé en Milieu Hospitalier Privé & Public",
     },
     EN: {
-      badge: "Hospital Information System • Engineered for African Healthcare",
-      heroPre: "BECAUSE EVERY SECOND",
-      heroGrad: "SAVES A LIFE IN AFRICA",
-      heroDesc: "Even when the network drops, life cannot wait. SmartHosto is the resilient Hospital Information System built for the dedication of African healthcare professionals: unbroken electronic health records, zero revenue leakage, and clinical data sovereignty.",
+      badge: "Hospital Information System • High Availability",
+      heroPre: "EVERY SECOND COUNTS,",
+      heroGrad: "LIFE DOES NOT WAIT",
+      heroDesc: "The next-generation Hospital Information System built for real-world care: uninterrupted clinical continuity even offline, zero revenue leakage, and complete electronic medical records.",
       navAbout: "Clinical Cockpit",
       navServices: "Offline-First Mode",
       navModules: "Clinical Modules",
@@ -79,11 +79,11 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
       placeholderUser: "Username or Professional ID (e.g. admin)",
       placeholderPass: "Password",
       errorAuth: "Invalid credentials.",
-      footerDesc: "SmartHosto HIS • Advanced medical technology empowering African healthcare.",
+      footerDesc: "SmartHosto HIS • Advanced medical technology empowering healthcare facilities.",
       ctaPrimary: "Open Clinical Session",
       ctaDemo: "Explore Cockpit",
       offlinePill: "100% Offline-First (0ms)",
-      trustCountries: "Engineered & Optimized for African Hospitals: Senegal • Ivory Coast • Cameroon • DRC • Gabon • Benin • Togo • Guinea",
+      trustCountries: "Deployed & Proven Across Private & Public Hospitals",
     }
   };
 
@@ -378,10 +378,17 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
             name: 'Administrateur',
             role: Role.ADMIN,
             roles: ['role_admin'],
+            clinicId: 'clinic-principal',
+            hospital_id: 'clinic-principal',
+            structureName: 'Hôpital Central SmartHosto',
             status: 'ACTIVE',
             profession: 'Admin SYSTEM',
             createdAt: new Date().toISOString()
           };
+          if (!matchedUser.clinicId && !matchedUser.hospital_id) {
+            matchedUser.clinicId = 'clinic-principal';
+            matchedUser.hospital_id = 'clinic-principal';
+          }
           isPasswordValid = true;
           try {
             await setDoc(doc(db, 'hospital_users', matchedUser.id), sanitizeData(matchedUser), { merge: true });
@@ -474,6 +481,12 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
           }
         }
 
+        // Ensure non-superadmin users have their clinic context bound to the active primary clinic if not specified
+        if (matchedUser.role !== Role.SUPER_ADMIN && !matchedUser.clinicId && !matchedUser.hospital_id) {
+          matchedUser.clinicId = 'clinic-principal';
+          matchedUser.hospital_id = 'clinic-principal';
+        }
+
         const authenticatedUser = { ...matchedUser, lastLogin: new Date().toISOString() };
         if (!authenticatedUser.forcePasswordChange) {
           delete authenticatedUser.password;
@@ -532,7 +545,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
                 Smart<span className="text-emerald-500">Hosto</span>
               </span>
               <span className="text-[10px] font-extrabold text-amber-500 uppercase tracking-widest mt-1 block">
-                SIH Afrique • Excellence Clinique
+                SmartHosto SIH • Excellence Médicale
               </span>
             </div>
           </div>
@@ -642,13 +655,13 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
               </div>
             </div>
 
-            {/* African Healthcare 4 Value Pillars */}
+            {/* 4 Value Pillars */}
             <div className="grid grid-cols-2 gap-3 pt-2">
               {[
-                { icon: Zap, title: "0 ms Hors-Ligne", desc: "Zéro arrêt clinique lors des pannes Internet" },
+                { icon: Zap, title: "0 ms Hors-Ligne", desc: "Continuité clinique totale sans coupure réseau" },
                 { icon: ShieldCheck, title: "Caisse Sans Fuite", desc: "Encaissements & quittances certifiés en FCFA" },
-                { icon: Stethoscope, title: "DME Continu", desc: "Triage, CPN, Urgences, Labo, Pharmacie & Sorties" },
-                { icon: Building2, title: "Souveraineté des Soins", desc: "Données de santé des patients africains protégées" }
+                { icon: Stethoscope, title: "DME Intégré", desc: "Triage, CPN, Urgences, Labo, Pharmacie & Sorties" },
+                { icon: Building2, title: "Souveraineté des Données", desc: "Dossiers patients & données de santé sécurisés" }
               ].map((item, i) => (
                 <div key={i} className={`p-3.5 border rounded-2xl backdrop-blur-md transition-all ${
                   theme === 'dark' 
@@ -665,7 +678,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
             </div>
           </motion.div>
 
-          {/* Right Column: Realistic African Hospital Cockpit Preview */}
+          {/* Right Column: Realistic Hospital Cockpit Preview */}
           <motion.div 
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -687,10 +700,10 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
                     </div>
                     <div>
                       <h3 className="text-sm font-black text-white flex items-center gap-2">
-                        <span>Hôpital Général Saint-Luc</span>
+                        <span>Clinique Médicale du Golf</span>
                         <span className="text-[10px] font-bold px-2 py-0.2 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Actif</span>
                       </h3>
-                      <p className="text-[11px] text-zinc-400">Cockpit Médical Central • Dakar / Abidjan / Douala</p>
+                      <p className="text-[11px] text-zinc-400">Cockpit Clinique & Administratif • Yaoundé / Douala</p>
                     </div>
                   </div>
 
@@ -716,7 +729,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
                   ))}
                 </div>
 
-                {/* Live African Patient Feed */}
+                {/* Live Patient Feed */}
                 <div className="p-4 space-y-2.5">
                   <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400 px-1">
                     <span>Flux Clinique & Admissions en Temps Réel</span>
@@ -726,9 +739,9 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
                   </div>
 
                   {[
-                    { name: "Mamadou Diallo", dme: "DME-2026-0038", service: "Consultation Cardiologie", fee: "15 000 FCFA", status: "En caisse", color: "border-blue-500/30 text-blue-300" },
-                    { name: "Aïssatou Traoré", dme: "DME-2026-0041", service: "Suivi Maternité / CPN", fee: "8 000 FCFA", status: "Consultation", color: "border-emerald-500/30 text-emerald-300" },
-                    { name: "Koffi Mensah", dme: "DME-2026-0044", service: "Urgences Vitales / Triage", fee: "25 000 FCFA", status: "Prise en charge", color: "border-amber-500/30 text-amber-300" }
+                    { name: "Pauline Ngo Bikoi", dme: "DME-2026-0038", service: "Maternité / Suivi CPN", fee: "12 000 FCFA", status: "Consultation", color: "border-emerald-500/30 text-emerald-300" },
+                    { name: "Jean-Paul Kamga", dme: "DME-2026-0041", service: "Consultation Cardiologie", fee: "18 000 FCFA", status: "En caisse", color: "border-blue-500/30 text-blue-300" },
+                    { name: "Madeleine Mbida", dme: "DME-2026-0044", service: "Urgences Vitales / Triage", fee: "25 000 FCFA", status: "Prise en charge", color: "border-amber-500/30 text-amber-300" }
                   ].map((p, idx) => (
                     <div key={idx} className="p-2.5 bg-[#121622] border border-white/10 rounded-xl flex items-center justify-between text-xs hover:border-emerald-500/40 transition-colors">
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -756,7 +769,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
                     <CheckCircle2 size={13} className="text-emerald-400" />
                     <span>Traçabilité chirurgicale & médicamenteuse garantie</span>
                   </span>
-                  <span className="font-bold text-amber-400 font-mono">Devises : FCFA • GNF • CDF • USD</span>
+                  <span className="font-bold text-amber-400 font-mono">Devises : FCFA • XAF • USD</span>
                 </div>
               </div>
             </div>
@@ -765,7 +778,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
         </div>
       </main>
 
-      {/* Footer with African Footprint */}
+      {/* Footer */}
       <footer className={`relative z-20 px-6 sm:px-10 py-4 border-t backdrop-blur-md flex flex-col sm:flex-row justify-between items-center gap-2 text-center sm:text-left ${
         theme === 'dark' ? 'border-white/15 bg-[#0a0c12]/95' : 'border-slate-200/80 bg-white/95'
       }`}>
@@ -774,7 +787,7 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
         </p>
         <div className="flex gap-3 items-center">
           <span className={`text-xs font-bold ${theme === 'dark' ? 'text-zinc-300' : 'text-slate-700'}`}>
-            {content.trustCountries.split(':')[0]}
+            {content.trustCountries}
           </span>
           <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" title="Système Opérationnel" />
         </div>

@@ -659,6 +659,7 @@ export interface EstablishmentConfig {
   licence_id?: string;
   licenceId?: string;
   hospital_id?: string;
+  clinicId?: string;
   tenantId?: string;
   
   // Print / Ticket / Receipt Format Configuration

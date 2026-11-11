@@ -60,16 +60,16 @@ export function getActiveTenantId(user?: User | null, establishment?: Establishm
     } catch {}
   }
 
-  return estTenant ? String(estTenant).trim() : 'default_hospital';
+  return estTenant && estTenant !== 'default_hospital' ? String(estTenant).trim() : 'clinic-principal';
 }
 
 /**
  * Checks whether an entity belongs to the given tenant ID.
  * Strict isolation rules:
  *   - If tenantId is 'ALL' (SuperAdmin global view): matches everything.
- *   - If tenantId is 'default_hospital': matches items with no tenant OR explicitly 'default_hospital'.
- *   - If tenantId is a specific hospital (e.g. 'tenant_saintluc_456'): ONLY matches items that
- *     explicitly have clinicId or hospital_id === tenantId.
+ *   - If item has NO tenant specified (!cleanItemTenant): NEVER matches any specific clinic.
+ *     This strictly eliminates old untagged/dummy records from legacy sessions or past testing.
+ *   - Matches strictly when cleanItemTenant === tenantId (or clinic-principal / default_hospital equivalence).
  */
 export function belongsToTenant(item: any, tenantId: string): boolean {
   if (!item) return false;
@@ -83,8 +83,16 @@ export function belongsToTenant(item: any, tenantId: string): boolean {
 
   const cleanItemTenant = itemTenant ? String(itemTenant).trim() : '';
 
-  if (tenantId === 'default_hospital') {
-    return !cleanItemTenant || cleanItemTenant === 'default_hospital';
+  // Strict isolation: if an item has NO tenant tag, reject it so legacy/dummy records never bleed into notifications
+  if (!cleanItemTenant) {
+    return false;
+  }
+
+  // Primary clinic alias equivalence
+  const isTargetPrimary = tenantId === 'clinic-principal' || tenantId === 'default_hospital';
+  const isItemPrimary = cleanItemTenant === 'clinic-principal' || cleanItemTenant === 'default_hospital';
+  if (isTargetPrimary && isItemPrimary) {
+    return true;
   }
 
   return cleanItemTenant === tenantId;
