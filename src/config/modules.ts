@@ -318,10 +318,7 @@ export const isUserAuthorizedForModule = (
     const roleDef = rolesList.find(r => r.id === roleId);
     if (roleDef && roleDef.permissions) {
       let actions = roleDef.permissions[targetRbacKey];
-      // Backward compatibility fallback for legacy roles
-      if ((!actions || actions.length === 0) && targetRbacKey === 'module_comptabilite') {
-        actions = roleDef.permissions['module_caisse'];
-      }
+      // Only fall back to consultation for legacy nursing roles if unconfigured
       if ((!actions || actions.length === 0) && targetRbacKey === 'module_soins_infirmiers') {
         actions = roleDef.permissions['module_consultation'];
       }
@@ -441,9 +438,6 @@ export const getUserModulePermissions = (
     const roleDef = rolesList.find(r => r.id === roleId);
     if (roleDef && roleDef.permissions) {
       let actions = roleDef.permissions[targetRbacKey];
-      if ((!actions || actions.length === 0) && targetRbacKey === 'module_comptabilite') {
-        actions = roleDef.permissions['module_caisse'];
-      }
       if ((!actions || actions.length === 0) && targetRbacKey === 'module_soins_infirmiers') {
         actions = roleDef.permissions['module_consultation'];
       }
