@@ -41,6 +41,7 @@ import {
 import { collection, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, sanitizeData } from '../../src/firebase';
 import { useSettings } from '../../hooks/useSettings';
+import { stampTenantData } from '../../src/utils/tenant';
 
 interface AccountingDepensesTabProps {
   expenses: HospitalExpense[];
@@ -442,7 +443,7 @@ export const AccountingDepensesTab: React.FC<AccountingDepensesTabProps> = ({
 
           // 3. Log to supplier_payments
           const suppPayId = `PAY-SUPP-${Date.now()}`;
-          const suppPayDoc: SupplierPayment = {
+          const suppPayDoc: SupplierPayment = stampTenantData({
             id: suppPayId,
             supplierId: selectedSupplier?.id || 'DIV',
             supplierName: beneficiary.trim(),
@@ -454,7 +455,7 @@ export const AccountingDepensesTab: React.FC<AccountingDepensesTabProps> = ({
             reference: reference,
             paidBy: user?.name || 'Comptable',
             createdAt: now.toISOString()
-          };
+          }, user);
           await setDoc(doc(db, 'supplier_payments', suppPayId), sanitizeData(suppPayDoc));
         }
       } else if (selectedCategory === 'SALAIRES') {
@@ -476,8 +477,9 @@ export const AccountingDepensesTab: React.FC<AccountingDepensesTabProps> = ({
         expenseDoc.metadata!.billNumber = billNumber.trim();
       }
 
-      // Save to universal 'expenses' collection
-      await setDoc(doc(db, 'expenses', expenseId), sanitizeData(expenseDoc));
+      // Save to universal 'expenses' collection stamped with tenant ID
+      const stampedExpenseDoc = stampTenantData(expenseDoc, user);
+      await setDoc(doc(db, 'expenses', expenseId), sanitizeData(stampedExpenseDoc));
 
       setIsNewPaymentModalOpen(false);
     } catch (err) {
@@ -563,7 +565,7 @@ export const AccountingDepensesTab: React.FC<AccountingDepensesTabProps> = ({
         });
       } else {
         const newId = `SUPP-${Date.now()}`;
-        const newSupplier: Supplier = {
+        const newSupplier: Supplier = stampTenantData({
           id: newId,
           ...supplierFormData,
           outstandingDebt: 0,
@@ -571,7 +573,7 @@ export const AccountingDepensesTab: React.FC<AccountingDepensesTabProps> = ({
           totalBought: 0,
           historyCount: 0,
           createdAt: new Date().toISOString()
-        };
+        }, user);
         await setDoc(doc(db, 'suppliers', newId), sanitizeData(newSupplier));
       }
 

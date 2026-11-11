@@ -22,6 +22,7 @@ import {
 import { Supplier, SupplierInvoice, SupplierPayment } from '../../types';
 import { collection, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, sanitizeData } from '../../src/firebase';
+import { stampTenantData } from '../../src/utils/tenant';
 
 interface AccountingFournisseursTabProps {
   suppliers: Supplier[];
@@ -127,7 +128,7 @@ export const AccountingFournisseursTab: React.FC<AccountingFournisseursTabProps>
       } else {
         // Create new
         const newId = `SUPP-${Date.now()}`;
-        const newSupplier: Supplier = {
+        const newSupplier: Supplier = stampTenantData({
           id: newId,
           ...supplierFormData,
           outstandingDebt: 0,
@@ -135,7 +136,7 @@ export const AccountingFournisseursTab: React.FC<AccountingFournisseursTabProps>
           totalBought: 0,
           historyCount: 0,
           createdAt: new Date().toISOString()
-        };
+        }, user);
         await setDoc(doc(db, 'suppliers', newId), sanitizeData(newSupplier));
       }
 
@@ -185,7 +186,7 @@ export const AccountingFournisseursTab: React.FC<AccountingFournisseursTabProps>
 
       // 1. Record Supplier Payment Document
       const paymentId = `PAY-SUPP-${Date.now()}`;
-      const paymentDoc: SupplierPayment = {
+      const paymentDoc: SupplierPayment = stampTenantData({
         id: paymentId,
         supplierId: selectedInvoiceForPayment.supplierId,
         supplierName: selectedInvoiceForPayment.supplierName,
@@ -197,7 +198,7 @@ export const AccountingFournisseursTab: React.FC<AccountingFournisseursTabProps>
         date: new Date().toISOString(),
         paidBy: user?.name || 'Comptable',
         createdAt: new Date().toISOString()
-      };
+      }, user);
       await setDoc(doc(db, 'supplier_payments', paymentId), sanitizeData(paymentDoc));
 
       // 2. Update Invoice Document

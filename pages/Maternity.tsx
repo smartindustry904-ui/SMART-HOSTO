@@ -230,14 +230,15 @@ const Maternity: React.FC<MaternityProps> = ({
     return queueEmergencies + admissionEmergencies;
   }, [maternityQueue, admissions]);
 
-  // Load pharmacy inventory for prescription tool
+  // Load pharmacy inventory for prescription tool - strict tenant isolation, ZERO dummy data
   useEffect(() => {
     const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
-      if (!snap.empty) {
-        const list = snap.docs.map(doc => {
+      const list = snap.docs
+        .map(doc => {
           const d = doc.data();
           return {
             id: doc.id,
+            ...d,
             name: d.name || d.nomCommercial || d.nom,
             dosage: d.dosage || (d.dosageValeur ? `${d.dosageValeur} ${d.dosageUnite || ''}`.trim() : ''),
             price: parseFloat(d.price) || parseFloat(d.prixVente) || 0,
@@ -245,19 +246,12 @@ const Maternity: React.FC<MaternityProps> = ({
             quantityPerBox: parseInt(d.unitesParConditionnement) || 1,
             forms: d.forms || (d.formeGalenique ? [d.formeGalenique] : ['Comprimé'])
           } as Medication;
-        });
-        setMedications(list);
-      } else {
-        setMedications([
-          { id: '1', name: 'Paracétamol', dosage: '500mg', price: 500, stock: 100, quantityPerBox: 16 },
-          { id: '2', name: 'Amoxicilline', dosage: '1g', price: 2500, stock: 50, quantityPerBox: 14 },
-          { id: '3', name: 'Ocytocine', dosage: '10 UI/ml', price: 1500, stock: 40, quantityPerBox: 10 },
-          { id: '4', name: 'Fer + Acide Folique', dosage: '200mg/0.4mg', price: 1200, stock: 150, quantityPerBox: 30 }
-        ]);
-      }
+        })
+        .filter(med => belongsToTenant(med, activeTenantId));
+      setMedications(list);
     });
     return () => unsubMeds();
-  }, []);
+  }, [activeTenantId]);
 
   // Handlers from WaitingRoomTab
   const handleSelectPatientForCpn = (patient: any) => {

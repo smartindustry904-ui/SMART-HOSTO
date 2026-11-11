@@ -26,6 +26,7 @@ import { useSettings } from '../hooks/useSettings';
 import { MicroHeader } from '../components/common/MicroHeader';
 import { collection, query, onSnapshot, orderBy } from 'firebase/firestore';
 import { db } from '../src/firebase';
+import { getActiveTenantId, belongsToTenant } from '../src/utils/tenant';
 
 import { AccountingDashboardTab } from './accounting/AccountingDashboardTab';
 import { AccountingTresorerieTab } from './accounting/AccountingTresorerieTab';
@@ -69,6 +70,7 @@ export const Accounting: React.FC<AccountingProps> = ({
 
   const { establishment } = useSettings();
   const currency = establishment?.currency || 'FCFA';
+  const activeTenantId = getActiveTenantId(user, establishment);
 
   // Live Database Collections State - Pure real-time listeners, ZERO dummy data
   const [cashierSessions, setCashierSessions] = useState<CashierSession[]>([]);
@@ -94,7 +96,9 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubSessions = onSnapshot(
       collection(db, 'cashier_sessions'),
       (snapshot) => {
-        const sorted = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CashierSession));
+        const sorted = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as CashierSession))
+          .filter(item => belongsToTenant(item, activeTenantId));
         sorted.sort((a, b) => new Date(b.closedAt || b.openedAt || 0).getTime() - new Date(a.closedAt || a.openedAt || 0).getTime());
         setCashierSessions(sorted);
       },
@@ -105,7 +109,9 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubTransactions = onSnapshot(
       collection(db, 'cashier_transactions'),
       (snapshot) => {
-        const txs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as CashierTransaction));
+        const txs = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as CashierTransaction))
+          .filter(item => belongsToTenant(item, activeTenantId));
         txs.sort((a: any, b: any) => new Date(b.date || b.timestamp || b.createdAt || 0).getTime() - new Date(a.date || a.timestamp || a.createdAt || 0).getTime());
         setCashierTransactions(txs);
       },
@@ -116,7 +122,9 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubPaymentRequests = onSnapshot(
       collection(db, 'payment_requests'),
       (snapshot) => {
-        const prs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as PaymentRequest));
+        const prs = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as PaymentRequest))
+          .filter(item => belongsToTenant(item, activeTenantId));
         prs.sort((a: any, b: any) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime());
         setPaymentRequests(prs);
       },
@@ -127,7 +135,10 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubPatients = onSnapshot(
       collection(db, 'patients'),
       (snapshot) => {
-        setPatients(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Patient)));
+        const pts = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as Patient))
+          .filter(item => belongsToTenant(item, activeTenantId));
+        setPatients(pts);
       },
       (error) => console.warn("Error fetching patients:", error)
     );
@@ -136,7 +147,10 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubDettes = onSnapshot(
       collection(db, 'dettes_patient'),
       (snapshot) => {
-        setDettes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DettePatient)));
+        const dts = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as DettePatient))
+          .filter(item => belongsToTenant(item, activeTenantId));
+        setDettes(dts);
       },
       (error) => console.warn("Error fetching dettes_patient:", error)
     );
@@ -145,7 +159,10 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubAvoirs = onSnapshot(
       collection(db, 'avoirs_patient'),
       (snapshot) => {
-        setAvoirs(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AvoirPatient)));
+        const avs = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as AvoirPatient))
+          .filter(item => belongsToTenant(item, activeTenantId));
+        setAvoirs(avs);
       },
       (error) => console.warn("Error fetching avoirs_patient:", error)
     );
@@ -154,7 +171,10 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubSuppliers = onSnapshot(
       collection(db, 'suppliers'),
       (snapshot) => {
-        setSuppliers(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Supplier)));
+        const sups = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as Supplier))
+          .filter(item => belongsToTenant(item, activeTenantId));
+        setSuppliers(sups);
       },
       (error) => console.warn("Error fetching suppliers:", error)
     );
@@ -163,7 +183,9 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubInvoices = onSnapshot(
       collection(db, 'supplier_invoices'),
       (snapshot) => {
-        const invs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SupplierInvoice));
+        const invs = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as SupplierInvoice))
+          .filter(item => belongsToTenant(item, activeTenantId));
         invs.sort((a: any, b: any) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime());
         setSupplierInvoices(invs);
       },
@@ -174,7 +196,9 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubPayments = onSnapshot(
       collection(db, 'supplier_payments'),
       (snapshot) => {
-        const pymts = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as SupplierPayment));
+        const pymts = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as SupplierPayment))
+          .filter(item => belongsToTenant(item, activeTenantId));
         pymts.sort((a: any, b: any) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime());
         setSupplierPayments(pymts);
       },
@@ -185,7 +209,9 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubExpenses = onSnapshot(
       collection(db, 'expenses'),
       (snapshot) => {
-        const exps = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as HospitalExpense));
+        const exps = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as HospitalExpense))
+          .filter(item => belongsToTenant(item, activeTenantId));
         exps.sort((a, b) => new Date(b.createdAt || b.date || 0).getTime() - new Date(a.createdAt || a.date || 0).getTime());
         setExpenses(exps);
       },
@@ -196,7 +222,10 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubUsers = onSnapshot(
       collection(db, 'hospital_users'),
       (snapshot) => {
-        setHospitalUsers(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as User)));
+        const usrs = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as User))
+          .filter(item => belongsToTenant(item, activeTenantId));
+        setHospitalUsers(usrs);
       },
       (error) => console.warn("Error fetching hospital_users:", error)
     );
@@ -205,7 +234,10 @@ export const Accounting: React.FC<AccountingProps> = ({
     const unsubConsultations = onSnapshot(
       collection(db, 'consultations'),
       (snapshot) => {
-        setConsultations(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        const cslts = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(item => belongsToTenant(item, activeTenantId));
+        setConsultations(cslts);
       },
       (error) => console.warn("Error fetching consultations:", error)
     );
@@ -224,7 +256,7 @@ export const Accounting: React.FC<AccountingProps> = ({
       unsubUsers();
       unsubConsultations();
     };
-  }, []);
+  }, [activeTenantId]);
 
   const tabLabels: Record<string, string> = {
     dashboard: 'Tableau de Bord',

@@ -13,6 +13,7 @@ import {
   EmergencyVitalSign, EmergencyCare, EmergencyFollowUp, 
   EmergencyDischarge, User as UserType 
 } from '../types';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 import { PatientsListTab } from './emergency/PatientsListTab';
 import { PriseEnChargeTab } from './emergency/PriseEnChargeTab';
 import { HistoriqueTab } from './emergency/HistoriqueTab';
@@ -39,13 +40,16 @@ const Emergency: React.FC<EmergencyProps> = ({
   const [encounters, setEncounters] = useState<EmergencyEncounter[]>([]);
   const [selectedEncounterId, setSelectedEncounterId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const activeTenantId = getActiveTenantId(user);
 
   // Real-time listener for emergency encounters
   useEffect(() => {
     setIsLoading(true);
     const q = query(collection(db, 'emergency_patients'), orderBy('arrivalTimestamp', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: EmergencyEncounter[] = snapshot.docs.map(docSnap => {
+      const list: EmergencyEncounter[] = snapshot.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
         const d = docSnap.data();
         
         // Map legacy or current data to V1 EmergencyEncounter
@@ -149,7 +153,7 @@ const Emergency: React.FC<EmergencyProps> = ({
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [activeTenantId]);
 
   // Selected encounter
   const selectedEncounter = useMemo(() => {
@@ -229,7 +233,7 @@ const Emergency: React.FC<EmergencyProps> = ({
       if (billToCashier) {
         const payDocRef = doc(collection(db, 'payment_requests'));
         const actFee = 5000;
-        await setDoc(payDocRef, sanitizeData({
+        await setDoc(payDocRef, sanitizeData(stampTenantData({
           id: payDocRef.id,
           patientId: encounter.patientId,
           patientDme: encounter.patientDme,
@@ -265,7 +269,7 @@ const Emergency: React.FC<EmergencyProps> = ({
           practitionerId: user?.id || '',
           practitionerName: user?.name || 'Soignant Urgences',
           practitionerRole: user?.role || 'MEDECIN'
-        }));
+        }, user)));
       }
 
       return true;
@@ -352,7 +356,7 @@ const Emergency: React.FC<EmergencyProps> = ({
       // If orientation is Hospitalisation, create request in hospitalisation_requests
       if (discharge.orientation === 'Hospitalisation') {
         const hospDocRef = doc(collection(db, 'hospitalisation_requests'));
-        await setDoc(hospDocRef, sanitizeData({
+        await setDoc(hospDocRef, sanitizeData(stampTenantData({
           id: hospDocRef.id,
           patientId: encounter.patientId,
           patientDme: encounter.patientDme,
@@ -363,12 +367,12 @@ const Emergency: React.FC<EmergencyProps> = ({
           status: 'pending',
           createdAt: new Date().toISOString(),
           requestedBy: discharge.professional || user?.name || 'Praticien Urgences'
-        }));
+        }, user)));
       }
 
       // Log in audit_logs
       const auditDocRef = doc(collection(db, 'audit_logs'));
-      await setDoc(auditDocRef, sanitizeData({
+      await setDoc(auditDocRef, sanitizeData(stampTenantData({
         id: auditDocRef.id,
         action: `Sortie Urgences validée - Orientation: ${discharge.orientation}`,
         patientId: encounter.patientId,
@@ -377,7 +381,7 @@ const Emergency: React.FC<EmergencyProps> = ({
         timestamp: new Date().toISOString(),
         date: discharge.date,
         time: discharge.time
-      }));
+      }, user)));
 
       return true;
     } catch (err) {
