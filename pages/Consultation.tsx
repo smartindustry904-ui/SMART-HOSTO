@@ -1931,7 +1931,9 @@ const Consultation: React.FC<ConsultationProps> = ({
       return false;
     }
     
-    return p.status === 'waiting' || p.status === 'waiting_triage' || !p.status;
+    // Patients waiting for doctor consultation must have finished nurse triage (status === 'waiting')
+    // Patients with status === 'waiting_triage' are currently at Soins Infirmiers (Nurse Triage)
+    return p.status === 'waiting' || !p.status;
   });
 
   const uniqueWaitingMap = new Map<string, any>();

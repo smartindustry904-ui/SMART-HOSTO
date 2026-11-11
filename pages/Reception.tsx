@@ -1511,7 +1511,17 @@ const Reception: React.FC<ReceptionProps> = ({
         targetSpeciality = 'Gynécologie';
       }
 
-      const effectiveSendToNurseTriage = isMaternityService ? false : sendToNurseTriage;
+      // Standard consultations MUST systematically pass through Nurse Triage (Soins Infirmiers)
+      // so that vital signs (BP, Temp, Pulse, SpO2, Weight) are measured by the nurse before doctor consultation
+      const isConsultationRecourse = 
+        !isMaternityService && (
+          selectedMotif?.category === 'CONSULTATIONS' ||
+          visitMotif === 'CONSULTATION' ||
+          targetService === 'Consultation' ||
+          isGynecoRecourse
+        );
+
+      const effectiveSendToNurseTriage = isMaternityService ? false : (sendToNurseTriage || isConsultationRecourse);
 
       // Write database actions in parallel! (Stamped with active hospital structure)
       const tenantStampedPatient = stampTenantData(finalPatient, user, establishment);
@@ -2603,7 +2613,7 @@ const Reception: React.FC<ReceptionProps> = ({
                 </div>
                 <h2 className="text-lg sm:text-xl font-extrabold mb-1.5 tracking-tight text-slate-900">Orientation & Pro-forma Émise</h2>
                 <p className="text-slate-500 text-xs sm:text-sm font-medium mb-6 max-w-md mx-auto">
-                  La Fiche d'Orientation a été générée. Le patient peut maintenant régler à la <strong>Caisse centrale</strong>.
+                  La Fiche d'Orientation a été générée. Le patient peut maintenant régler à la <strong>Caisse centrale</strong> puis se présenter aux <strong>Soins Infirmiers (Triage)</strong> pour la prise des constantes avant sa consultation.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-3 justify-center max-w-md mx-auto">
                    <button onClick={() => setShowProforma(true)} className="flex-1 bg-slate-900 text-white py-3 px-4 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm hover:bg-slate-800 transition-all cursor-pointer"><Printer size={16} /> Imprimer Pro-forma</button>
