@@ -10,11 +10,13 @@ import {
   User as UserIcon, ArrowRightLeft,
   Scale, Thermometer, Info, Award, Settings,
   TrendingUp, Home, Loader2, ArrowLeft, History,
-  Bed, Syringe, Sparkles
+  Bed, Syringe, Sparkles, Lock
 } from 'lucide-react';
 import { Patient, VisitMotif, Role, User as UserType, PatientStatus, LabExamRequest, PaymentRequest, Service, MedicalAct } from '../types';
 import LabExamRequestForm from '../components/LabExamRequestForm';
 import { useSettings, useHospitalServices, useMedicalActs, getDefaultServices, getDefaultMedicalActs } from '../hooks/useSettings';
+import { useCustomRoles } from '../hooks/useCustomRoles';
+import { getUserModulePermissions } from '../src/config/modules';
 import { Avatar } from '../components/common/Avatar';
 import { PrintReceiptModal, PrintableReceiptData } from '../components/common/PrintReceiptModal';
 
@@ -419,6 +421,8 @@ const Reception: React.FC<ReceptionProps> = ({
   const { acts: medicalActs } = useMedicalActs();
   const currency = establishment?.currency || 'CFA';
   const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+  const { roles: customRoles } = useCustomRoles(user);
+  const permissions = useMemo(() => getUserModulePermissions(user, Role.RECEPTION, customRoles), [user, customRoles]);
   const [step, setStep] = useState<'search' | 'register' | 'triage' | 'payment' | 'summary'>('search');
   const [duplicateModalData, setDuplicateModalData] = useState<{ isDuplicate: boolean; matchedPatient: Patient | null; reason: string } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -1206,11 +1210,20 @@ const Reception: React.FC<ReceptionProps> = ({
 
   const handleSelectPatient = (p: Patient) => {
     setCurrentPatient(p);
-    setStep('triage');
+    if (!permissions.canWrite) {
+      setSelectedPatientForHistory(p);
+      setActiveTab('historique');
+    } else {
+      setStep('triage');
+    }
     setSearchQuery('');
   };
 
   const finalizeAdmission = async (sendToNurseTriage: boolean = false) => {
+    if (!permissions.canWrite) {
+      alert("Action non autorisée : votre rôle dispose d'un accès en lecture seule.");
+      return;
+    }
     const todayStr = new Date().toISOString().split('T')[0];
     const timeStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     
@@ -1665,6 +1678,10 @@ const Reception: React.FC<ReceptionProps> = ({
 
   const handleDischarge = async (id: string) => {
     if (isProcessingDischarge) return;
+    if (!permissions.canWrite) {
+      setDischargeError({ patientId: id, message: "Action non autorisée : votre rôle dispose d'un accès en lecture seule." });
+      return;
+    }
     const patient = patientsToDischarge.find(p => p.id === id);
     if (!patient) return;
 
@@ -1840,6 +1857,16 @@ const Reception: React.FC<ReceptionProps> = ({
       />
 
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        {permissions.isReadOnly && (
+          <div className="mx-4 sm:mx-6 mt-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3 text-amber-700 dark:text-amber-400 text-xs font-semibold animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Lock size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+              <span>
+                <strong>Mode Lecture Seule :</strong> Vous disposez d'un accès en consultation uniquement pour le module Accueil. La création de dossiers, l'orientation et la validation de sorties sont verrouillées.
+              </span>
+            </div>
+          </div>
+        )}
       {activeTab === 'dashboard' && (
         <ReceptionDashboard 
           theme={theme}
@@ -1950,17 +1977,24 @@ const Reception: React.FC<ReceptionProps> = ({
                         Recherchez un patient existant par nom, prénom, téléphone ou N° DME
                       </p>
                     </div>
-                    <button 
-                      onClick={async () => { 
-                        const ids = await getNextSequentialIdsAndAssign(); 
-                        setCurrentPatient({ id: ids.dmeId, patientId: ids.patientId, gender: 'M', maritalStatus: 'CELIBATAIRE', vitals: { bpSys: 120, bpDia: 80, heartRate: 75, respRate: 18, pulse: 75, spo2: 98, temp: 37, height: 170, weight: 70, bmi: 24.2, waistCirc: 85 } }); 
-                        setStep('register'); 
-                      }} 
-                      className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
-                    >
-                      <UserPlus size={15} />
-                      <span>Nouveau Dossier DME</span>
-                    </button>
+                    {!permissions.canWrite ? (
+                      <div className="px-3.5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-500 rounded-xl font-bold text-xs flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 shrink-0">
+                        <Lock size={14} className="text-slate-400" />
+                        <span>Lecture Seule</span>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={async () => { 
+                          const ids = await getNextSequentialIdsAndAssign(); 
+                          setCurrentPatient({ id: ids.dmeId, patientId: ids.patientId, gender: 'M', maritalStatus: 'CELIBATAIRE', vitals: { bpSys: 120, bpDia: 80, heartRate: 75, respRate: 18, pulse: 75, spo2: 98, temp: 37, height: 170, weight: 70, bmi: 24.2, waistCirc: 85 } }); 
+                          setStep('register'); 
+                        }} 
+                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
+                      >
+                        <UserPlus size={15} />
+                        <span>Nouveau Dossier DME</span>
+                      </button>
+                    )}
                   </div>
 
                   <div className="relative mb-4">
@@ -2017,15 +2051,31 @@ const Reception: React.FC<ReceptionProps> = ({
                                 <History size={13} />
                                 <span className="hidden sm:inline">Historique</span>
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => handleSelectPatient(p)}
-                                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
-                                title="Orienter ce patient"
-                              >
-                                <span>Orienter</span>
-                                <ChevronRight size={14} />
-                              </button>
+                              {!permissions.canWrite ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedPatientForHistory(p);
+                                    setActiveTab('historique');
+                                  }}
+                                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                                  title="Consulter le dossier de ce patient"
+                                >
+                                  <span>Consulter</span>
+                                  <ChevronRight size={14} />
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleSelectPatient(p)}
+                                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                                  title="Orienter ce patient"
+                                >
+                                  <span>Orienter</span>
+                                  <ChevronRight size={14} />
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -2034,6 +2084,11 @@ const Reception: React.FC<ReceptionProps> = ({
                           <p className="text-slate-400 font-semibold text-xs">Aucun dossier trouvé pour « {searchQuery} »</p>
                         </div>
                       )}
+                    </div>
+                  ) : !permissions.canWrite ? (
+                    <div className="w-full py-4 px-4 border border-dashed border-slate-200 bg-slate-50/50 rounded-xl flex items-center justify-center gap-2 text-slate-400 text-xs font-medium">
+                      <Lock size={15} />
+                      <span>Mode Consultation : Création de nouveau dossier réservée au personnel d'accueil avec droits d'écriture.</span>
                     </div>
                   ) : (
                     <button 
@@ -2068,6 +2123,13 @@ const Reception: React.FC<ReceptionProps> = ({
                     ← Retour
                   </button>
                 </div>
+
+                {!permissions.canWrite && (
+                  <div className="mb-4 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center gap-2 text-amber-700 text-xs font-bold">
+                    <Lock size={16} className="text-amber-600 shrink-0" />
+                    <span>Création de dossier verrouillée : votre rôle dispose d'un accès en lecture seule pour l'accueil.</span>
+                  </div>
+                )}
 
                 {/* Live Anti-Doublon Banner */}
                 {liveDuplicate.isDuplicate && liveDuplicate.matchedPatient && (
@@ -2189,8 +2251,9 @@ const Reception: React.FC<ReceptionProps> = ({
 
                 <div className="flex justify-end">
                   <button 
-                    disabled={!currentPatient.lastName?.trim() || !currentPatient.firstName?.trim() || !currentPatient.birthDate}
+                    disabled={!permissions.canWrite || !currentPatient.lastName?.trim() || !currentPatient.firstName?.trim() || !currentPatient.birthDate}
                     onClick={() => {
+                      if (!permissions.canWrite) return;
                       const dupCheck = checkDuplicatePatient(currentPatient);
                       if (dupCheck.isDuplicate && dupCheck.matchedPatient) {
                         setDuplicateModalData(dupCheck);
@@ -2415,25 +2478,32 @@ const Reception: React.FC<ReceptionProps> = ({
                         </div>
                       </div>
 
-                      <button 
-                        disabled={isSaving}
-                        onClick={() => {
-                          finalizeAdmission(false);
-                        }}
-                        className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-md disabled:opacity-50 cursor-pointer shrink-0"
-                      >
-                        {isSaving ? (
-                          <>
-                            <Loader2 size={15} className="animate-spin" />
-                            <span>Validation...</span>
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 size={16} /> 
-                            <span>Valider Admission & Pro-forma</span>
-                          </>
-                        )}
-                      </button>
+                      {!permissions.canWrite ? (
+                        <div className="w-full sm:w-auto bg-slate-100 text-slate-500 border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shrink-0">
+                          <Lock size={15} />
+                          <span>Lecture Seule (Validation Désactivée)</span>
+                        </div>
+                      ) : (
+                        <button 
+                          disabled={isSaving}
+                          onClick={() => {
+                            finalizeAdmission(false);
+                          }}
+                          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-md disabled:opacity-50 cursor-pointer shrink-0"
+                        >
+                          {isSaving ? (
+                            <>
+                              <Loader2 size={15} className="animate-spin" />
+                              <span>Validation...</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 size={16} /> 
+                              <span>Valider Admission & Pro-forma</span>
+                            </>
+                          )}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2826,15 +2896,18 @@ const Reception: React.FC<ReceptionProps> = ({
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-2">
                       <button 
                         onClick={() => handleDischarge(patient.id)}
-                        disabled={isProcessing}
+                        disabled={isProcessing || !permissions.canWrite}
+                        title={!permissions.canWrite ? "Action verrouillée en lecture seule" : undefined}
                         className={`flex-1 py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
-                          isReady
+                          isReady && permissions.canWrite
                             ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 active:scale-[0.98]'
                             : 'bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700'
                         } disabled:opacity-50 disabled:cursor-not-allowed`}
                       >
                         {isProcessing ? (
                           <><Loader2 size={14} className="animate-spin" /> Traitement...</>
+                        ) : !permissions.canWrite ? (
+                          <><Lock size={14} /> Lecture Seule</>
                         ) : (
                           <><CheckCircle size={14} /> Valider Sortie</>
                         )}
@@ -2926,10 +2999,10 @@ const Reception: React.FC<ReceptionProps> = ({
           user={user}
           establishment={establishment}
           selectedPatient={selectedPatientForHistory}
-          onSelectPatientForAdmission={(p) => {
+          onSelectPatientForAdmission={permissions.canWrite ? (p) => {
             handleSelectPatient(p);
             setActiveTab('triage');
-          }}
+          } : undefined}
           theme={theme}
         />
       )}
@@ -3049,6 +3122,10 @@ const Reception: React.FC<ReceptionProps> = ({
           requestingService="Accueil"
           onClose={() => setShowLabExamForm(false)}
           onSave={async (request) => {
+            if (!permissions.canWrite) {
+              alert("Action non autorisée en mode lecture seule.");
+              return;
+            }
             const newRequest: LabExamRequest = {
               ...request,
               id: `REQ-${Date.now()}`,

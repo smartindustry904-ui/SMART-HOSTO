@@ -222,10 +222,10 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
         `}</style>
       )}
 
-      <div className={`ticket-print-wrapper bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-200 transition-all ${
+      <div className={`ticket-print-wrapper bg-white rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 transition-all ${
         selectedFormat === 'THERMAL_80MM' 
-          ? 'w-full max-w-md print-format-thermal' 
-          : 'w-full max-w-4xl print-format-a4'
+          ? 'w-full max-w-[86mm] h-auto max-h-[94vh] print-format-thermal' 
+          : 'w-full max-w-4xl lg:max-w-5xl h-auto max-h-[94vh] print-format-a4'
       }`}>
         
         {/* MODAL CONTROL HEADER (NO-PRINT) */}
@@ -283,7 +283,11 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
         </div>
 
         {/* TICKET / INVOICE BODY */}
-        <div className="ticket-scroll-area flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100/60 custom-scrollbar flex justify-center">
+        <div className={`ticket-scroll-area flex-1 overflow-y-auto custom-scrollbar flex justify-center ${
+          selectedFormat === 'THERMAL_80MM' 
+            ? 'p-2 sm:p-3 bg-white' 
+            : 'p-4 sm:p-6 bg-slate-100/60'
+        }`}>
 
           {/* ========================================================= */}
           {/* OPTION A: SUPERMARKET THERMAL RECEIPT (80mm)             */}
@@ -291,7 +295,7 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
           {selectedFormat === 'THERMAL_80MM' && (
             <div 
               id="thermal-receipt"
-              className="bg-white p-5 shadow-sm border border-slate-200 text-slate-900 font-mono text-xs w-full max-w-[80mm] space-y-3"
+              className="bg-white p-4 sm:p-5 text-slate-900 font-mono text-xs w-full max-w-[80mm] space-y-3"
               style={{ width: '80mm', maxWidth: '100%', margin: '0 auto' }}
             >
               {/* Header */}
@@ -449,7 +453,7 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
           {selectedFormat === 'A4' && (
             <div 
               id="a4-receipt"
-              className="bg-white p-8 sm:p-12 shadow-sm border border-slate-200 text-slate-900 w-full max-w-4xl space-y-6 font-sans"
+              className="bg-white p-6 sm:p-10 shadow-sm border border-slate-200 rounded-2xl text-slate-900 w-full max-w-full space-y-6 font-sans"
             >
               {/* A4 Official Hospital Header */}
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-6 gap-6">
@@ -609,24 +613,6 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
                       <span>{formatMoney(receipt.newDebt)} {currency}</span>
                     </div>
                   )}
-                </div>
-              </div>
-
-              {/* Official Signatures & Stamp Blocks */}
-              <div className="grid grid-cols-3 gap-6 pt-6 border-t border-slate-200 text-center">
-                <div className="border border-slate-200 rounded-2xl p-4 min-h-[100px] flex flex-col justify-between">
-                  <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Pour le Patient</p>
-                  <p className="text-[10px] text-slate-400 italic">Signature & mention "Bon pour accord"</p>
-                </div>
-                <div className="border border-slate-200 rounded-2xl p-4 min-h-[100px] flex flex-col justify-between">
-                  <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Caissier / Opérateur</p>
-                  <p className="text-xs font-bold text-slate-800 uppercase">{receipt.operatorName || 'Caissier Principal'}</p>
-                </div>
-                <div className="border border-slate-200 rounded-2xl p-4 min-h-[100px] flex flex-col justify-between">
-                  <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">Cachet de l'Établissement</p>
-                  <div className="w-12 h-12 mx-auto rounded-full border border-dashed border-slate-300 flex items-center justify-center text-[9px] text-slate-400">
-                    CACHET
-                  </div>
                 </div>
               </div>
 
