@@ -2112,6 +2112,7 @@ const Consultation: React.FC<ConsultationProps> = ({
 
           {activeMenu === 'PATIENT_DIRECTORY' && (
             <PatientDirectory 
+              user={user}
               onSelectPatient={(p) => {
                 setActivePatient(p);
                 setConsultationTab('GENERAL');
