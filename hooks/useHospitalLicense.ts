@@ -3,6 +3,7 @@ import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../src/firebase';
 import { User, EstablishmentConfig, Licence } from '../types';
 import { getActiveTenantId, belongsToTenant } from '../src/utils/tenant';
+import { SAAS_PLANS, SaaSPlanId } from '../src/config/plans';
 
 export interface HospitalLicenseInfo {
   clinicId: string;
@@ -19,6 +20,7 @@ export interface HospitalLicenseInfo {
   maxUsers: number;
   monthlyPriceFCFA: number;
   features: string[];
+  licensedServiceIds: string[];
   contactEmail: string;
   contactPhone: string;
   loading: boolean;
@@ -133,6 +135,47 @@ export function useHospitalLicense(user?: User | null, establishment?: Establish
         ? 'WARNING' 
         : 'ACTIVE';
 
+    // Compute authorized/licensed service IDs for this hospital
+    let licensedServiceIds: string[] = [];
+
+    // 1. Check servicesConfig in record
+    if (activeHospitalRecord?.servicesConfig) {
+      Object.entries(activeHospitalRecord.servicesConfig).forEach(([srvId, cfg]: [string, any]) => {
+        if (cfg?.is_active === true || cfg?.status === 'active' || cfg?.isAuthorized === true) {
+          licensedServiceIds.push(srvId.toUpperCase());
+        }
+      });
+    }
+
+    // 2. Check activatedModules
+    if (activeHospitalRecord?.activatedModules) {
+      Object.entries(activeHospitalRecord.activatedModules).forEach(([modKey, isActive]) => {
+        if (isActive && modKey.startsWith('SRV-')) {
+          licensedServiceIds.push(modKey.toUpperCase());
+        }
+      });
+    }
+
+    // 3. Check includedServiceIds in activeHospitalRecord
+    if (Array.isArray(activeHospitalRecord?.includedServiceIds) && activeHospitalRecord.includedServiceIds.length > 0) {
+      licensedServiceIds.push(...activeHospitalRecord.includedServiceIds.map((s: string) => s.toUpperCase()));
+    }
+
+    // 4. Check matchedLicence
+    if (Array.isArray(matchedLicence?.includedServiceIds) && matchedLicence.includedServiceIds.length > 0) {
+      licensedServiceIds.push(...matchedLicence.includedServiceIds.map((s: string) => s.toUpperCase()));
+    }
+
+    // 5. Check SaaS plan catalog fallback
+    const planKey = (activeHospitalRecord?.licenseType || cleanPlanName) as SaaSPlanId;
+    const planDef = SAAS_PLANS[planKey] || SAAS_PLANS[cleanPlanName as SaaSPlanId] || SAAS_PLANS.STANDARD;
+    if (licensedServiceIds.length === 0 && planDef?.includedServiceIds) {
+      licensedServiceIds = [...planDef.includedServiceIds];
+    }
+
+    // Deduplicate
+    licensedServiceIds = Array.from(new Set(licensedServiceIds));
+
     return {
       clinicId: activeTenantId,
       clinicName: activeHospitalRecord?.name || establishment?.name || 'Votre Établissement',
@@ -160,6 +203,7 @@ export function useHospitalLicense(user?: User | null, establishment?: Establish
         'États financiers & Rapports d\'activité',
         'Sauvegarde Cloud & Isolation multi-tenant sécurisée'
       ],
+      licensedServiceIds,
       contactEmail: 'contact@smarthosto.com',
       contactPhone: '+237 222 33 44 55',
       loading

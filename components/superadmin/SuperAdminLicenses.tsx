@@ -27,7 +27,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { SAAS_PLANS, SaaSPlanId, SaaSPlan, calculateLicensePriceForUsers, recommendPlanForUserCount, buildClinicEntitlementMaps } from '../../src/config/plans';
-import { CANONICAL_MODULES, hasImplementedModule } from '../../src/config/modules';
+import { CANONICAL_MODULES, hasImplementedModule, getModuleForService } from '../../src/config/modules';
 import { ClinicTenant } from '../../pages/ControlCenter';
 import { db, sanitizeData } from '../../src/firebase';
 import { doc, setDoc, updateDoc, collection, addDoc } from 'firebase/firestore';
@@ -716,7 +716,7 @@ export const SuperAdminLicenses: React.FC<SuperAdminLicensesProps> = ({
                             isImpl ? 'bg-slate-800 text-slate-300' : 'bg-rose-500/20 text-rose-300'
                           }`}
                         >
-                          {srvId} {isImpl ? '✓' : '⚠️'}
+                          {getModuleForService(srvId)?.label || srvId} {isImpl ? '✓' : '⚠️'}
                         </span>
                       );
                     })}

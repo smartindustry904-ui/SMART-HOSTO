@@ -128,7 +128,7 @@ export const CANONICAL_MODULES: CanonicalModule[] = [
     description: 'Gestion financière, trésorerie, rapprochement et RH',
     componentName: 'Accounting',
     status: 'IMPLEMENTED',
-    serviceId: 'SRV-CAISSE', // Administrative financial module linked to cashier/finances
+    serviceId: 'SRV-COMPTABILITE', // Independent administrative financial module
     defaultAccessRoles: [Role.ADMIN, Role.SUPER_ADMIN, Role.ACCOUNTANT],
     color: 'orange'
   },
@@ -245,11 +245,11 @@ export const isModuleActiveAndAvailable = (
 export const MODULE_KEY_MAP: Record<string, string> = {
   'accueil': 'module_accueil',
   'consultation': 'module_consultation',
-  'soins_infirmiers': 'module_consultation',
+  'soins_infirmiers': 'module_soins_infirmiers',
   'hospitalisation': 'module_hospitalisation',
   'pharmacie': 'module_pharmacie',
   'caisse': 'module_caisse',
-  'comptabilite': 'module_caisse',
+  'comptabilite': 'module_comptabilite',
   'urgences': 'module_urgence',
   'laboratoire': 'module_laboratoire',
   'imagerie': 'module_imagerie',
@@ -257,14 +257,14 @@ export const MODULE_KEY_MAP: Record<string, string> = {
   'bloc': 'module_bloc',
   [Role.RECEPTION]: 'module_accueil',
   [Role.DOCTOR]: 'module_consultation',
-  [Role.NURSE]: 'module_consultation',
+  [Role.NURSE]: 'module_soins_infirmiers',
   [Role.INPATIENT]: 'module_hospitalisation',
   [Role.PHARMACY]: 'module_pharmacie',
   [Role.CASHIER]: 'module_caisse',
   [Role.URGENCE]: 'module_urgence',
   [Role.LAB]: 'module_laboratoire',
   [Role.MATERNITY]: 'module_maternite',
-  [Role.ACCOUNTANT]: 'module_caisse',
+  [Role.ACCOUNTANT]: 'module_comptabilite',
 };
 
 export interface UserModulePermissions {
@@ -316,8 +316,15 @@ export const isUserAuthorizedForModule = (
 
   for (const roleId of userRoles) {
     const roleDef = rolesList.find(r => r.id === roleId);
-    if (roleDef && roleDef.permissions && roleDef.permissions[targetRbacKey]) {
-      const actions = roleDef.permissions[targetRbacKey];
+    if (roleDef && roleDef.permissions) {
+      let actions = roleDef.permissions[targetRbacKey];
+      // Backward compatibility fallback for legacy roles
+      if ((!actions || actions.length === 0) && targetRbacKey === 'module_comptabilite') {
+        actions = roleDef.permissions['module_caisse'];
+      }
+      if ((!actions || actions.length === 0) && targetRbacKey === 'module_soins_infirmiers') {
+        actions = roleDef.permissions['module_consultation'];
+      }
       if (Array.isArray(actions) && actions.length > 0) {
         return true;
       }
@@ -336,6 +343,8 @@ export const isUserAuthorizedForModule = (
     effectiveRole = Role.PHARMACY;
   } else if (userRoles.includes('role_laborantin') && !userRoles.includes('role_medecin') && !userRoles.includes('role_admin') && rawUserRole === Role.DOCTOR) {
     effectiveRole = Role.LAB;
+  } else if (userRoles.includes('role_comptable') && !userRoles.includes('role_medecin') && !userRoles.includes('role_admin')) {
+    effectiveRole = Role.ACCOUNTANT;
   }
 
   // 3. Fallback to standard system role mappings
@@ -356,7 +365,7 @@ export const isUserAuthorizedForModule = (
       return targetRole === Role.MATERNITY || targetRole === Role.INPATIENT;
 
     case Role.ACCOUNTANT:
-      return targetRole === Role.ACCOUNTANT || targetRole === Role.CASHIER;
+      return targetRole === Role.ACCOUNTANT;
 
     case Role.NURSE:
       return (
@@ -430,8 +439,14 @@ export const getUserModulePermissions = (
 
   for (const roleId of userRoles) {
     const roleDef = rolesList.find(r => r.id === roleId);
-    if (roleDef && roleDef.permissions && roleDef.permissions[targetRbacKey]) {
-      const actions = roleDef.permissions[targetRbacKey];
+    if (roleDef && roleDef.permissions) {
+      let actions = roleDef.permissions[targetRbacKey];
+      if ((!actions || actions.length === 0) && targetRbacKey === 'module_comptabilite') {
+        actions = roleDef.permissions['module_caisse'];
+      }
+      if ((!actions || actions.length === 0) && targetRbacKey === 'module_soins_infirmiers') {
+        actions = roleDef.permissions['module_consultation'];
+      }
       if (Array.isArray(actions) && actions.length > 0) {
         explicitlyFoundInRbac = true;
         if (actions.includes('read')) hasRead = true;

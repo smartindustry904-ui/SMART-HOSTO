@@ -72,7 +72,8 @@ export const SAAS_PLANS: Record<SaaSPlanId, SaaSPlan> = {
       'SRV-INFIRMIER',
       'SRV-LABO',
       'SRV-PHARMACIE',
-      'SRV-CAISSE'
+      'SRV-CAISSE',
+      'SRV-COMPTABILITE'
     ]
   },
   PREMIUM: {
@@ -94,7 +95,8 @@ export const SAAS_PLANS: Record<SaaSPlanId, SaaSPlan> = {
       'SRV-MATERNITE',
       'SRV-LABO',
       'SRV-PHARMACIE',
-      'SRV-CAISSE'
+      'SRV-CAISSE',
+      'SRV-COMPTABILITE'
     ]
   },
   ENTERPRISE: {
@@ -116,7 +118,8 @@ export const SAAS_PLANS: Record<SaaSPlanId, SaaSPlan> = {
       'SRV-MATERNITE',
       'SRV-LABO',
       'SRV-PHARMACIE',
-      'SRV-CAISSE'
+      'SRV-CAISSE',
+      'SRV-COMPTABILITE'
     ]
   }
 };
@@ -222,6 +225,7 @@ export const computeStructureEntitlements = (
     { id: 'SRV-LABO', name: 'Laboratoire', type: 'technique', description: 'Analyses biomédicales et examens' },
     { id: 'SRV-PHARMACIE', name: 'Pharmacie', type: 'technique', description: 'Gestion des stocks et délivrance d\'ordonnances' },
     { id: 'SRV-CAISSE', name: 'Caisse & Facturation', type: 'administratif', description: 'Facturation, encaissements et reçus' },
+    { id: 'SRV-COMPTABILITE', name: 'Comptabilité', type: 'administratif', description: 'Gestion financière, trésorerie et bilans' },
     // Un-implemented services
     { id: 'SRV-DERMATOLOGIE', name: 'Dermatologie', type: 'specialise', description: 'Maladies de la peau (intégré aux consultations)' },
     { id: 'SRV-CARDIOLOGIE', name: 'Cardiologie', type: 'specialise', description: 'Maladies cardiovasculaires' },

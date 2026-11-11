@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { CustomRole } from '../../types';
 import { DEFAULT_ROLES, PERMISSION_MODULES, MODULE_ACTIONS, GLOBAL_PERMISSIONS } from '../../constants/rbac';
-import { Shield, Plus, Edit2, Trash2, Copy, Check, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Shield, Plus, Edit2, Trash2, Copy, Check, X, ChevronDown, ChevronUp, Lock } from 'lucide-react';
 import { db, sanitizeData } from '../../src/firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { getActiveTenantId, stampTenantData } from '../../src/utils/tenant';
+import { useHospitalLicense } from '../../hooks/useHospitalLicense';
+import { useHospitalServices } from '../../hooks/useSettings';
 
 interface RolesPermissionsProps {
   roles: CustomRole[];
@@ -21,6 +23,30 @@ const RolesPermissions: React.FC<RolesPermissionsProps> = ({ roles, setRoles, us
   const [expandedModules, setExpandedModules] = useState<Record<string, boolean>>({});
 
   const activeTenantId = getActiveTenantId(currentUser);
+  const licenseInfo = useHospitalLicense(currentUser);
+  const { services } = useHospitalServices();
+
+  // Strict license-based filtering: only modules included in the hospital's active license are visible in Roles
+  const visiblePermissionModules = useMemo(() => {
+    return PERMISSION_MODULES.filter(module => {
+      if (!module.serviceId) return true;
+
+      const licensedServices = licenseInfo.licensedServiceIds || [];
+      if (licensedServices.length > 0) {
+        const isLicensed = licensedServices.some(sId => sId.toUpperCase() === module.serviceId?.toUpperCase());
+        if (!isLicensed) return false;
+      }
+
+      if (services && services.length > 0) {
+        const matchingService = services.find(s => s.id.toUpperCase() === module.serviceId?.toUpperCase());
+        if (matchingService && matchingService.status === 'inactive' && matchingService.is_active === false) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [licenseInfo.licensedServiceIds, services]);
 
   // Initialize default roles if empty
   useEffect(() => {
@@ -294,12 +320,19 @@ const RolesPermissions: React.FC<RolesPermissionsProps> = ({ roles, setRoles, us
                 </div>
 
                 <div>
-                  <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4 flex items-center gap-2">
-                    <div className="w-2 h-2 bg-emerald-600 rounded-full"></div>
-                    Permissions par Module
-                  </h4>
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                      <div className="w-2 h-2 bg-emerald-600 rounded-full"></div>
+                      Permissions par Module
+                    </h4>
+                    {licenseInfo.planName && (
+                      <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                        Formule {licenseInfo.planName} • {visiblePermissionModules.length} module{visiblePermissionModules.length > 1 ? 's' : ''} inclus
+                      </span>
+                    )}
+                  </div>
                   <div className="space-y-3">
-                    {PERMISSION_MODULES.map(module => (
+                    {visiblePermissionModules.map(module => (
                       <div key={module.id} className="border border-slate-200 rounded-2xl overflow-hidden">
                         <button 
                           type="button"

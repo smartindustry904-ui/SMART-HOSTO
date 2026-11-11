@@ -465,7 +465,8 @@ export const PREDEFINED_SERVICES: Partial<Service>[] = [
   { id: 'SRV-LABO', name: 'Laboratoire', type: 'technique', status: 'active', description: 'Analyses de biologie médicale' },
   { id: 'SRV-PHARMACIE', name: 'Pharmacie', type: 'technique', status: 'active', description: 'Gestion et dispensation des médicaments' },
   { id: 'SRV-INFIRMIER', name: 'Soins infirmiers', type: 'soutien', status: 'active', description: 'Soins infirmiers généraux et spécialisés', specificSettings: { fee: 2500 } },
-  { id: 'SRV-CAISSE', name: 'Comptabilité / caisse', type: 'administratif', status: 'active', description: 'Facturation et encaissement' },
+  { id: 'SRV-CAISSE', name: 'Caisse & Facturation', type: 'administratif', status: 'active', description: 'Facturation, encaissements et reçus patients' },
+  { id: 'SRV-COMPTABILITE', name: 'Comptabilité', type: 'administratif', status: 'active', description: 'Gestion financière, trésorerie, fournisseurs et dépenses' },
 
   // SERVICES SANS MODULE FONCTIONNEL AUTONOME (DÉSACTIVÉS PAR DÉFAUT)
   { id: 'SRV-PEDIATRIE', name: 'Pédiatrie', type: 'clinique', status: 'inactive', description: 'Soins pédiatriques (intégré aux consultations et urgences)', specificSettings: { consultationFee: 10000 } },

@@ -106,20 +106,40 @@ export const DEFAULT_ROLES: CustomRole[] = [
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     isSystem: true
+  },
+  {
+    id: 'role_comptable',
+    name: 'Comptable',
+    description: 'Gestion de la trésorerie, des dépenses et de la comptabilité',
+    permissions: {
+      'module_comptabilite': ['read', 'write', 'validate'],
+      'global': ['access_reports', 'manage_billing']
+    },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    isSystem: true
   }
 ];
 
-export const PERMISSION_MODULES = [
-  { id: 'module_accueil', label: 'Accueil' },
-  { id: 'module_consultation', label: 'Consultation' },
-  { id: 'module_hospitalisation', label: 'Hospitalisation' },
-  { id: 'module_pharmacie', label: 'Pharmacie' },
-  { id: 'module_caisse', label: 'Caisse' },
-  { id: 'module_urgence', label: 'Urgence' },
-  { id: 'module_laboratoire', label: 'Laboratoire' },
-  { id: 'module_imagerie', label: 'Imagerie' },
-  { id: 'module_maternite', label: 'Maternité' },
-  { id: 'module_bloc', label: 'Bloc opératoire' }
+export interface PermissionModule {
+  id: string;
+  label: string;
+  serviceId?: string;
+}
+
+export const PERMISSION_MODULES: PermissionModule[] = [
+  { id: 'module_accueil', label: 'Accueil', serviceId: 'SRV-ACCUEIL' },
+  { id: 'module_consultation', label: 'Consultation', serviceId: 'SRV-CONSULTATION' },
+  { id: 'module_soins_infirmiers', label: 'Soins Infirmiers', serviceId: 'SRV-INFIRMIER' },
+  { id: 'module_hospitalisation', label: 'Hospitalisation', serviceId: 'SRV-HOSPITALISATION' },
+  { id: 'module_pharmacie', label: 'Pharmacie', serviceId: 'SRV-PHARMACIE' },
+  { id: 'module_caisse', label: 'Caisse', serviceId: 'SRV-CAISSE' },
+  { id: 'module_comptabilite', label: 'Comptabilité', serviceId: 'SRV-COMPTABILITE' },
+  { id: 'module_urgence', label: 'Urgence', serviceId: 'SRV-URGENCES' },
+  { id: 'module_laboratoire', label: 'Laboratoire', serviceId: 'SRV-LABO' },
+  { id: 'module_imagerie', label: 'Imagerie', serviceId: 'SRV-IMAGERIE' },
+  { id: 'module_maternite', label: 'Maternité', serviceId: 'SRV-MATERNITE' },
+  { id: 'module_bloc', label: 'Bloc opératoire', serviceId: 'SRV-BLOC' }
 ];
 
 export const MODULE_ACTIONS = [
