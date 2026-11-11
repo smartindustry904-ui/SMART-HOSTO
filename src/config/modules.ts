@@ -29,7 +29,7 @@ export const CANONICAL_MODULES: CanonicalModule[] = [
     componentName: 'Reception',
     status: 'IMPLEMENTED',
     serviceId: 'SRV-ACCUEIL',
-    defaultAccessRoles: [Role.ADMIN, Role.SUPER_ADMIN, Role.RECEPTION, Role.DOCTOR, Role.NURSE, Role.CASHIER, Role.ACCOUNTANT],
+    defaultAccessRoles: [Role.ADMIN, Role.SUPER_ADMIN, Role.RECEPTION, Role.DOCTOR, Role.NURSE],
     color: 'blue'
   },
   {
@@ -226,4 +226,130 @@ export const isModuleActiveAndAvailable = (
 
   if (!service) return false;
   return service.status === 'active' && service.is_active !== false;
+};
+
+/**
+ * Determines whether a user is authorized to access a given module based on their role and permissions.
+ * Strict segregation:
+ * - ADMIN and SUPER_ADMIN have access to all modules.
+ * - Caissier ONLY accesses Caisse (cannot see Soins, Consultation, Lab, Pharmacie, etc.)
+ * - Pharmacien ONLY accesses Pharmacie.
+ * - Laborantin ONLY accesses Labo.
+ * - Infirmier accesses Soins Infirmiers, Hospitalisation, Urgences, Accueil (triage).
+ * - Médecin accesses Consultation, Soins Infirmiers, Hospitalisation, Urgences, Maternité, Accueil.
+ * - Sage-femme accesses Maternité, Hospitalisation.
+ * - Accueil / Secrétaire accesses Accueil.
+ * - Comptable accesses Comptabilité, Caisse.
+ */
+export const isUserAuthorizedForModule = (user: any, moduleRoleOrId: Role | string): boolean => {
+  if (!user) return false;
+
+  const rawUserRole = (user.role || '').toUpperCase().trim();
+  const userRoles: string[] = Array.isArray(user.roles) ? user.roles : [];
+
+  const isAdmin = 
+    rawUserRole === Role.ADMIN ||
+    rawUserRole === Role.SUPER_ADMIN ||
+    rawUserRole === 'SUPER_ADMIN' ||
+    userRoles.includes('role_admin') ||
+    userRoles.includes('role_super_admin') ||
+    (user.username || '').toLowerCase() === 'superadmin' ||
+    (user.username || '').toLowerCase() === 'sa1';
+
+  if (isAdmin) {
+    if (moduleRoleOrId === Role.SUPER_ADMIN || moduleRoleOrId === 'super_admin') {
+      return rawUserRole === Role.SUPER_ADMIN || rawUserRole === 'SUPER_ADMIN' || userRoles.includes('role_super_admin');
+    }
+    return true;
+  }
+
+  // Super Admin and Settings modules are forbidden for non-admin
+  if (moduleRoleOrId === Role.SUPER_ADMIN || moduleRoleOrId === 'super_admin' || moduleRoleOrId === 'SETTING' || moduleRoleOrId === Role.ADMIN) {
+    return false;
+  }
+
+  // Resolve effective primary role:
+  // If user only has role_caissier in roles but role was set to default DOCTOR
+  let effectiveRole = rawUserRole;
+  if (userRoles.includes('role_caissier') && !userRoles.includes('role_medecin') && !userRoles.includes('role_admin') && rawUserRole === Role.DOCTOR) {
+    effectiveRole = Role.CASHIER;
+  } else if (userRoles.includes('role_infirmier') && !userRoles.includes('role_medecin') && !userRoles.includes('role_admin') && rawUserRole === Role.DOCTOR) {
+    effectiveRole = Role.NURSE;
+  } else if ((userRoles.includes('role_secretaire') || userRoles.includes('role_accueil')) && !userRoles.includes('role_medecin') && !userRoles.includes('role_admin') && rawUserRole === Role.DOCTOR) {
+    effectiveRole = Role.RECEPTION;
+  } else if (userRoles.includes('role_pharmacien') && !userRoles.includes('role_medecin') && !userRoles.includes('role_admin') && rawUserRole === Role.DOCTOR) {
+    effectiveRole = Role.PHARMACY;
+  } else if (userRoles.includes('role_laborantin') && !userRoles.includes('role_medecin') && !userRoles.includes('role_admin') && rawUserRole === Role.DOCTOR) {
+    effectiveRole = Role.LAB;
+  }
+
+  // Identify target module canonical role
+  const targetMod = getModuleByRoleOrId(moduleRoleOrId);
+  const targetRole = targetMod ? targetMod.role : moduleRoleOrId;
+
+  // 1. Check effective system role permissions
+  switch (effectiveRole) {
+    case Role.CASHIER:
+      // A Caissier can ONLY access Caisse!
+      return targetRole === Role.CASHIER;
+
+    case Role.PHARMACY:
+      // A Pharmacien can ONLY access Pharmacie!
+      return targetRole === Role.PHARMACY;
+
+    case Role.LAB:
+      // A Laborantin can ONLY access Laboratoire!
+      return targetRole === Role.LAB;
+
+    case Role.RECEPTION:
+      // An Accueil agent can ONLY access Accueil!
+      return targetRole === Role.RECEPTION;
+
+    case Role.MATERNITY:
+      // A Sage-femme accesses Maternité and Hospitalisation
+      return targetRole === Role.MATERNITY || targetRole === Role.INPATIENT;
+
+    case Role.ACCOUNTANT:
+      // A Comptable accesses Comptabilité and Caisse
+      return targetRole === Role.ACCOUNTANT || targetRole === Role.CASHIER;
+
+    case Role.NURSE:
+      // An Infirmier accesses Soins Infirmiers, Hospitalisation, Urgences, and Accueil (for triage)
+      return (
+        targetRole === Role.NURSE ||
+        targetRole === Role.INPATIENT ||
+        targetRole === Role.URGENCE ||
+        targetRole === Role.RECEPTION
+      );
+
+    case Role.DOCTOR:
+      // A Médecin accesses Consultation, Soins, Hospitalisation, Urgences, Maternité, and Accueil
+      return (
+        targetRole === Role.DOCTOR ||
+        targetRole === Role.NURSE ||
+        targetRole === Role.INPATIENT ||
+        targetRole === Role.URGENCE ||
+        targetRole === Role.MATERNITY ||
+        targetRole === Role.RECEPTION
+      );
+
+    case Role.INPATIENT:
+      return targetRole === Role.INPATIENT;
+
+    case Role.URGENCE:
+      return targetRole === Role.URGENCE || targetRole === Role.INPATIENT || targetRole === Role.NURSE;
+  }
+
+  // 2. Custom RBAC roles check (if user has secondary roles configured in user.roles)
+  return userRoles.some(roleId => {
+    if (roleId === 'role_admin' || roleId === 'role_super_admin') return true;
+    if (roleId === 'role_caissier' && targetRole === Role.CASHIER) return true;
+    if (roleId === 'role_pharmacien' && targetRole === Role.PHARMACY) return true;
+    if (roleId === 'role_laborantin' && targetRole === Role.LAB) return true;
+    if ((roleId === 'role_secretaire' || roleId === 'role_accueil') && targetRole === Role.RECEPTION) return true;
+    if (roleId === 'role_medecin' && (targetRole === Role.DOCTOR || targetRole === Role.RECEPTION || targetRole === Role.INPATIENT || targetRole === Role.URGENCE || targetRole === Role.NURSE)) return true;
+    if (roleId === 'role_infirmier' && (targetRole === Role.NURSE || targetRole === Role.RECEPTION || targetRole === Role.INPATIENT || targetRole === Role.URGENCE)) return true;
+    if (roleId === 'role_chef_service' && (targetRole === Role.DOCTOR || targetRole === Role.INPATIENT || targetRole === Role.URGENCE)) return true;
+    return false;
+  });
 };

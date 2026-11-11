@@ -57,7 +57,7 @@ import {
 import { Role, User, EmergencySubMenu, NurseSubMenu, ReceptionSubMenu, CashierSubMenu, LabSubMenu, InpatientSubMenu, PharmacySubMenu, AccountingSubMenu, MaternitySubMenu, ConsultationSubMenu } from '../types';
 import { useSystemAlerts } from '../hooks/useSystemAlerts';
 import { useHospitalServices } from '../hooks/useSettings';
-import { isModuleActiveAndAvailable } from '../src/config/modules';
+import { isModuleActiveAndAvailable, isUserAuthorizedForModule } from '../src/config/modules';
 
 interface SidebarProps {
   user: User;
@@ -136,7 +136,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   // Définition des accès par rôle (RBAC)
   const menuConfig = [
-    { id: Role.RECEPTION, icon: Users, label: 'Accueil Patients', access: [Role.ADMIN, Role.SUPER_ADMIN, Role.RECEPTION, Role.DOCTOR, Role.NURSE, Role.CASHIER, Role.ACCOUNTANT] },
+    { id: Role.RECEPTION, icon: Users, label: 'Accueil Patients', access: [Role.ADMIN, Role.SUPER_ADMIN, Role.RECEPTION, Role.DOCTOR, Role.NURSE] },
     { id: Role.NURSE, icon: Heart, label: 'Soins Infirmiers', access: [Role.ADMIN, Role.SUPER_ADMIN, Role.NURSE, Role.DOCTOR] },
     { id: Role.INPATIENT, icon: BedDouble, label: 'Hospitalisation', access: [Role.ADMIN, Role.SUPER_ADMIN, Role.DOCTOR, Role.NURSE, Role.INPATIENT] },
     { id: Role.URGENCE, icon: ShieldAlert, label: 'Urgences', access: [Role.ADMIN, Role.SUPER_ADMIN, Role.DOCTOR, Role.NURSE] },
@@ -243,27 +243,8 @@ const Sidebar: React.FC<SidebarProps> = ({
       return false;
     }
 
-    // 2. RBAC Access check
-    const isAdmin = user.role === Role.ADMIN || 
-                    user.role === Role.SUPER_ADMIN || 
-                    user.roles?.includes('role_admin') || 
-                    user.roles?.includes('role_super_admin');
-    if (isAdmin) return true;
-
-    const hasLegacyAccess = item.access.includes(user.role);
-    const hasRoleAccess = user.roles?.some(roleId => {
-      if (roleId === 'role_admin' || roleId === 'role_super_admin') return true;
-      if (roleId === 'role_medecin' && (item.access.includes(Role.DOCTOR) || item.id === Role.RECEPTION || item.id === Role.INPATIENT)) return true;
-      if (roleId === 'role_infirmier' && (item.access.includes(Role.NURSE) || item.id === Role.RECEPTION || item.id === Role.INPATIENT)) return true;
-      if (roleId === 'role_chef_service' && (item.access.includes(Role.DOCTOR) || item.id === Role.INPATIENT)) return true;
-      if (roleId === 'role_caissier' && (item.access.includes(Role.CASHIER) || item.id === Role.RECEPTION)) return true;
-      if ((roleId === 'role_secretaire' || roleId === 'role_accueil') && item.access.includes(Role.RECEPTION)) return true;
-      if (roleId === 'role_pharmacien' && item.access.includes(Role.PHARMACY)) return true;
-      if (roleId === 'role_laborantin' && item.access.includes(Role.LAB)) return true;
-      if (roleId === 'role_radiologue' && item.id === 'IMAGERIE') return true;
-      return false;
-    });
-    return hasLegacyAccess || hasRoleAccess;
+    // 2. Strict RBAC Access check
+    return isUserAuthorizedForModule(user, item.id);
   });
 
   const { alerts } = useSystemAlerts(user);

@@ -24,7 +24,7 @@ import { Role, User } from '../types';
 import { useSystemAlerts } from '../hooks/useSystemAlerts';
 import { SystemAlertsDropdown } from '../components/SystemAlertsDropdown';
 import { useHospitalServices } from '../hooks/useSettings';
-import { CANONICAL_MODULES, isModuleActiveAndAvailable } from '../src/config/modules';
+import { CANONICAL_MODULES, isModuleActiveAndAvailable, isUserAuthorizedForModule } from '../src/config/modules';
 
 interface ModuleSelectorProps {
   user: User;
@@ -97,29 +97,8 @@ const ModuleSelector: React.FC<ModuleSelectorProps> = ({ user, onSelectModule, o
                         (m.description || '').toLowerCase().includes(q);
     if (!matchesSearch) return false;
 
-    // 4. RBAC Permission filter
-    if (isAdmin) {
-      // Super Admin module is only for Super Admin
-      if (m.role === Role.SUPER_ADMIN && user.role !== Role.SUPER_ADMIN && !user.roles?.includes('role_super_admin')) {
-        return false;
-      }
-      return true;
-    }
-
-    const hasLegacyAccess = m.defaultAccessRoles.includes(user.role);
-    const hasRoleAccess = user.roles?.some(roleId => {
-      if (roleId === 'role_admin' || roleId === 'role_super_admin') return true;
-      if (roleId === 'role_medecin' && (m.role === Role.DOCTOR || m.role === Role.RECEPTION || m.role === Role.INPATIENT)) return true;
-      if (roleId === 'role_infirmier' && (m.role === Role.NURSE || m.role === Role.RECEPTION || m.role === Role.INPATIENT)) return true;
-      if (roleId === 'role_chef_service' && (m.role === Role.DOCTOR || m.role === Role.INPATIENT)) return true;
-      if (roleId === 'role_caissier' && (m.role === Role.CASHIER || m.role === Role.RECEPTION)) return true;
-      if ((roleId === 'role_secretaire' || roleId === 'role_accueil') && m.role === Role.RECEPTION) return true;
-      if (roleId === 'role_pharmacien' && m.role === Role.PHARMACY) return true;
-      if (roleId === 'role_laborantin' && m.role === Role.LAB) return true;
-      return false;
-    });
-
-    return hasLegacyAccess || hasRoleAccess;
+    // 4. Strict RBAC Permission filter (each user only sees their authorized modules)
+    return isUserAuthorizedForModule(user, m.role);
   });
 
   return (

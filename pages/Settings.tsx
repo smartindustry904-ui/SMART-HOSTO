@@ -11,6 +11,8 @@ import {
   CheckCircle2, 
   AlertCircle,
   ChevronRight,
+  ChevronDown,
+  Check,
   UserPlus,
   Stethoscope,
   Pill,
@@ -41,6 +43,7 @@ import {
   FileText
 } from 'lucide-react';
 import { Role, User, EstablishmentConfig, MedicalAct, Medication, CustomRole, UserStatus, Supplier, SupplierInvoice, Licence } from '../types';
+import { DEFAULT_ROLES } from '../constants/rbac';
 import { THEMES, ThemeColor, applyTheme } from '../constants/themes';
 import RolesPermissions from './settings/RolesPermissions';
 import ServicesDepartments from './settings/ServicesDepartments';
@@ -71,6 +74,20 @@ interface SettingsProps {
   toggleTheme?: () => void;
 }
 
+const PRIMARY_ROLES = [
+  { value: Role.RECEPTION, label: 'Accueil / Réception', tag: 'role_receptionniste', desc: 'Orientation, admission patients et création dossiers' },
+  { value: Role.CASHIER, label: 'Caissier / Caisse & Facturation', tag: 'role_caissier', desc: 'Encaissement des actes, facturation et clôture de caisse' },
+  { value: Role.DOCTOR, label: 'Médecin / Consultation', tag: 'role_medecin', desc: 'Consultations médicales, diagnostics et prescriptions' },
+  { value: Role.NURSE, label: 'Infirmier / Soins Infirmiers', tag: 'role_infirmier', desc: 'Constantes vitales, soins ambulatoires et administration' },
+  { value: Role.PHARMACY, label: 'Pharmacien / Pharmacie', tag: 'role_pharmacien', desc: 'Gestion des stocks, dispensation et délivrance médicaments' },
+  { value: Role.LAB, label: 'Laborantin / Laboratoire', tag: 'role_laborantin', desc: 'Prélèvements, bilans sanguins et analyses biologiques' },
+  { value: Role.MATERNITY, label: 'Sage-Femme / Maternité', tag: 'role_sage_femme', desc: 'CPN, accouchements, suite de couches et santé de la mère' },
+  { value: Role.INPATIENT, label: 'Hospitalisation', tag: 'role_hospitalisation', desc: 'Gestion des lits, surveillance et séjours hospitaliers' },
+  { value: Role.URGENCE, label: 'Urgences', tag: 'role_urgence', desc: 'Triage immédiat, salle de déchoquage et soins d\'urgence' },
+  { value: Role.ACCOUNTANT, label: 'Gestionnaire / Comptable', tag: 'role_gestionnaire', desc: 'Comptabilité, états financiers et gestion administrative' },
+  { value: Role.ADMIN, label: 'Administrateur Établissement', tag: 'role_admin', desc: 'Gestion complète du personnel et configuration du centre' },
+];
+
 const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBackToDashboard, theme = 'light', toggleTheme }) => {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [showAddMedication, setShowAddMedication] = useState(false);
@@ -83,13 +100,36 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
 
   // --- State for Users ---
   const [users, setUsers] = useState<User[]>([]);
-  const [newUser, setNewUser] = useState<Partial<User>>({ role: Role.DOCTOR, roles: [], status: 'ACTIVE' });
+  const [newUser, setNewUser] = useState<Partial<User>>({ role: Role.RECEPTION, roles: [], status: 'ACTIVE' });
   const [isEditingUser, setIsEditingUser] = useState(false);
   const [showUserForm, setShowUserForm] = useState(false);
+  const [isRolesDropdownOpen, setIsRolesDropdownOpen] = useState(false);
   const [viewingUser, setViewingUser] = useState<User | null>(null);
   const [userSearchQuery, setUserSearchQuery] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<string>('ALL');
   const [userStatusFilter, setUserStatusFilter] = useState<string>('ALL');
+
+  const availableRoles = useMemo(() => {
+    return roles.length > 0 ? roles : DEFAULT_ROLES;
+  }, [roles]);
+
+  const handlePrimaryRoleChange = (selectedRole: Role) => {
+    const opt = PRIMARY_ROLES.find(o => o.value === selectedRole);
+    const currentRoles = newUser.roles || [];
+    let updatedRoles = [...currentRoles];
+    if (opt?.tag) {
+      const matchingRole = availableRoles.find(r => r.id === opt.tag || r.id === opt.tag.replace('role_', ''));
+      const targetId = matchingRole ? matchingRole.id : opt.tag;
+      if (!updatedRoles.includes(targetId)) {
+        updatedRoles.push(targetId);
+      }
+    }
+    setNewUser({
+      ...newUser,
+      role: selectedRole,
+      roles: updatedRoles
+    });
+  };
 
   // --- State for SaaS Multi-Tenant Licence & Quota Tracking ---
   const [licencesCatalog, setLicencesCatalog] = useState<Licence[]>([]);
@@ -748,7 +788,8 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
         showMessage('success', `Utilisateur "${cleanUsername}" créé avec succès ! Mot de passe généré : ${autoPass}`);
       }
       
-      setNewUser({ role: Role.DOCTOR, roles: [], status: 'ACTIVE' });
+      setNewUser({ role: Role.RECEPTION, roles: [], status: 'ACTIVE' });
+      setIsRolesDropdownOpen(false);
       setIsEditingUser(false);
       setShowUserForm(false);
     } catch (error) {
@@ -758,7 +799,13 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
   };
 
   const handleEditUser = (userToEdit: User) => {
-    setNewUser({ ...userToEdit, password: '' });
+    setNewUser({ 
+      ...userToEdit, 
+      role: userToEdit.role || Role.RECEPTION,
+      roles: userToEdit.roles || [],
+      password: '' 
+    });
+    setIsRolesDropdownOpen(false);
     setIsEditingUser(true);
   };
 
@@ -1161,11 +1208,12 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                       onClick={() => {
                         if (isQuotaReached) return;
                         setNewUser({
-                          role: Role.DOCTOR,
-                          roles: [],
+                          role: Role.RECEPTION,
+                          roles: ['role_receptionniste'],
                           status: 'ACTIVE',
                           password: generateAutoPassword()
                         });
+                        setIsRolesDropdownOpen(false);
                         setShowUserForm(true);
                       }}
                       title={isQuotaReached ? "Vous avez atteint la limite d'utilisateurs pour votre licence actuelle." : "Créer un nouvel utilisateur pour ce centre"}
@@ -1204,7 +1252,8 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                       onClick={() => { 
                         setIsEditingUser(false); 
                         setShowUserForm(false);
-                        setNewUser({ role: Role.DOCTOR, roles: [], status: 'ACTIVE' }); 
+                        setIsRolesDropdownOpen(false);
+                        setNewUser({ role: Role.RECEPTION, roles: [], status: 'ACTIVE' }); 
                       }}
                       className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-200 text-slate-500 transition-colors"
                     >
@@ -1291,60 +1340,152 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                         />
                       </div>
 
+                      {/* Rôle Métier Principal */}
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Statut</label>
+                        <label className="text-[10px] font-bold text-slate-500 uppercase flex items-center justify-between">
+                          <span>Rôle Métier Principal (Module) *</span>
+                          <span className="text-blue-600 font-semibold lowercase">accès strict par rôle</span>
+                        </label>
+                        <select
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 ring-blue-600/20 outline-none font-bold text-slate-800 bg-white shadow-sm"
+                          value={newUser.role || Role.RECEPTION}
+                          onChange={e => handlePrimaryRoleChange(e.target.value as Role)}
+                          required
+                        >
+                          {PRIMARY_ROLES.map(pr => (
+                            <option key={pr.value} value={pr.value} className="py-1">
+                              {pr.label}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-[11px] text-slate-400 font-medium px-1">
+                          {PRIMARY_ROLES.find(pr => pr.value === (newUser.role || Role.RECEPTION))?.desc}
+                        </p>
+                      </div>
+
+                      {/* Statut du compte */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase">Statut du compte</label>
                         <select 
-                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 ring-blue-600/20 outline-none"
+                          className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 ring-blue-600/20 outline-none font-medium bg-white shadow-sm"
                           value={newUser.status || 'ACTIVE'}
                           onChange={e => setNewUser({...newUser, status: e.target.value as UserStatus})}
                         >
-                          <option value="ACTIVE">Actif</option>
-                          <option value="INACTIVE">Inactif</option>
-                          <option value="BLOCKED">Bloqué</option>
+                          <option value="ACTIVE">Actif (Accès autorisé)</option>
+                          <option value="INACTIVE">Inactif (Désactivé)</option>
+                          <option value="BLOCKED">Bloqué (Accès refusé)</option>
                         </select>
                       </div>
 
-                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-500 uppercase">Rôle(s) assigné(s)</label>
-                        <div className="relative group">
-                          <div className="w-full min-h-[46px] px-4 py-2 rounded-xl border border-slate-200 bg-white flex flex-wrap gap-2 items-center cursor-pointer">
-                            {(newUser.roles?.length || 0) === 0 ? (
-                              <span className="text-slate-400 text-sm">Sélectionner des rôles...</span>
-                            ) : (
-                              newUser.roles?.map(roleId => {
-                                const role = roles.find(r => r.id === roleId);
-                                return role ? (
-                                  <span key={roleId} className="px-2 py-1 bg-blue-50 text-blue-700 text-[10px] font-bold rounded-lg flex items-center gap-1">
-                                    {role.name}
-                                    <button type="button" onClick={(e) => { e.stopPropagation(); setNewUser({...newUser, roles: newUser.roles?.filter(id => id !== roleId)}); }} className="hover:text-rose-500"><AlertCircle size={10} className="rotate-45" /></button>
-                                  </span>
-                                ) : null;
-                              })
-                            )}
-                          </div>
-                          
-                          {/* Dropdown for multi-select */}
-                          <div className="absolute top-full left-0 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-10 hidden group-hover:block max-h-48 overflow-y-auto">
-                            {roles.map(role => (
-                              <label key={role.id} className="flex items-center gap-2 p-3 hover:bg-slate-50 cursor-pointer border-b border-slate-50 last:border-0">
-                                <input 
-                                  type="checkbox" 
-                                  checked={newUser.roles?.includes(role.id) || false}
-                                  onChange={(e) => {
-                                    const currentRoles = newUser.roles || [];
-                                    if (e.target.checked) {
-                                      setNewUser({...newUser, roles: [...currentRoles, role.id]});
-                                    } else {
-                                      setNewUser({...newUser, roles: currentRoles.filter(id => id !== role.id)});
-                                    }
-                                  }}
-                                  className="rounded text-blue-600 focus:ring-blue-500"
-                                />
-                                <span className="text-sm font-medium text-slate-700">{role.name}</span>
-                              </label>
-                            ))}
-                          </div>
+                      {/* Rôles & Habilitations additionnels (Multi-sélection spacieuse) */}
+                      <div className="col-span-1 md:col-span-2 space-y-2 mt-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase">
+                            Permissions & Rôles Additionnels ({newUser.roles?.length || 0} sélectionné{(newUser.roles?.length || 0) > 1 ? 's' : ''})
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setIsRolesDropdownOpen(!isRolesDropdownOpen)}
+                            className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors"
+                          >
+                            {isRolesDropdownOpen ? 'Masquer la liste' : 'Gérer les habilitations'}
+                            <ChevronDown size={14} className={`transform transition-transform ${isRolesDropdownOpen ? 'rotate-180' : ''}`} />
+                          </button>
                         </div>
+
+                        {/* Selected roles chips trigger */}
+                        <div 
+                          onClick={() => setIsRolesDropdownOpen(!isRolesDropdownOpen)}
+                          className="w-full min-h-[48px] px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:border-blue-400 transition-all flex flex-wrap gap-2 items-center cursor-pointer shadow-sm"
+                        >
+                          {(newUser.roles?.length || 0) === 0 ? (
+                            <div className="flex items-center justify-between w-full text-slate-400 text-xs">
+                              <span>Aucun rôle additionnel. Cliquez pour ouvrir la liste complète.</span>
+                              <ChevronDown size={16} />
+                            </div>
+                          ) : (
+                            <>
+                              {newUser.roles?.map(roleId => {
+                                const matchedRole = availableRoles.find(r => r.id === roleId);
+                                return (
+                                  <span key={roleId} className="px-2.5 py-1 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg flex items-center gap-1.5 border border-blue-100">
+                                    {matchedRole ? matchedRole.name : roleId}
+                                    <button 
+                                      type="button" 
+                                      onClick={(e) => { 
+                                        e.stopPropagation(); 
+                                        setNewUser({ ...newUser, roles: newUser.roles?.filter(id => id !== roleId) }); 
+                                      }} 
+                                      className="hover:text-rose-600 hover:bg-rose-50 rounded p-0.5"
+                                      title="Retirer ce rôle"
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </span>
+                                );
+                              })}
+                              <div className="ml-auto text-slate-400">
+                                <ChevronDown size={16} className={`transform transition-transform ${isRolesDropdownOpen ? 'rotate-180' : ''}`} />
+                              </div>
+                            </>
+                          )}
+                        </div>
+
+                        {/* Expandable panel - No cramped scrolling! */}
+                        {isRolesDropdownOpen && (
+                          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3 animate-in fade-in slide-in-from-top-2 duration-150 shadow-sm">
+                            <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
+                              <span className="text-xs font-bold text-slate-700">
+                                Cochez les profils et accès autorisés pour cet utilisateur :
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setIsRolesDropdownOpen(false)}
+                                className="text-xs font-bold text-slate-500 hover:text-slate-800 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-xs"
+                              >
+                                Fermer la liste
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-64 overflow-y-auto pr-1">
+                              {availableRoles.map(role => {
+                                const isChecked = newUser.roles?.includes(role.id) || false;
+                                return (
+                                  <label 
+                                    key={role.id} 
+                                    className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
+                                      isChecked 
+                                        ? 'bg-blue-50/70 border-blue-300 ring-1 ring-blue-400/30 shadow-xs' 
+                                        : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                                    }`}
+                                  >
+                                    <input 
+                                      type="checkbox" 
+                                      checked={isChecked}
+                                      onChange={(e) => {
+                                        const currentRoles = newUser.roles || [];
+                                        if (e.target.checked) {
+                                          setNewUser({...newUser, roles: [...currentRoles, role.id]});
+                                        } else {
+                                          setNewUser({...newUser, roles: currentRoles.filter(id => id !== role.id)});
+                                        }
+                                      }}
+                                      className="mt-0.5 rounded text-blue-600 focus:ring-blue-500 w-4 h-4"
+                                    />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="text-xs font-black text-slate-900 leading-tight">{role.name}</div>
+                                      {role.description && (
+                                        <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2 leading-relaxed">
+                                          {role.description}
+                                        </p>
+                                      )}
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
 
                       <div className="col-span-1 md:col-span-2 flex items-center gap-2 mt-2">
@@ -1368,7 +1509,8 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                       onClick={() => { 
                         setIsEditingUser(false); 
                         setShowUserForm(false);
-                        setNewUser({ role: Role.DOCTOR, roles: [], status: 'ACTIVE' }); 
+                        setIsRolesDropdownOpen(false);
+                        setNewUser({ role: Role.RECEPTION, roles: [], status: 'ACTIVE' }); 
                       }}
                       className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-200 transition-colors"
                     >
@@ -1461,20 +1603,20 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                             </td>
                             <td className="px-6 py-4 text-sm text-slate-600">{u.email || '-'}</td>
                             <td className="px-6 py-4">
-                              <div className="flex flex-wrap gap-1 max-w-[200px]">
-                                {u.roles && u.roles.length > 0 ? (
+                              <div className="flex flex-wrap gap-1 max-w-[220px]">
+                                <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md text-[9px] font-black uppercase tracking-wider">
+                                  {u.role || 'ACCUEIL'}
+                                </span>
+                                {u.roles && u.roles.length > 0 && (
                                   u.roles.map(roleId => {
-                                    const role = roles.find(r => r.id === roleId);
-                                    return role ? (
-                                      <span key={roleId} className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md text-[9px] font-black uppercase">
+                                    const role = availableRoles.find(r => r.id === roleId);
+                                    if (!role) return null;
+                                    return (
+                                      <span key={roleId} className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-[9px] font-bold">
                                         {role.name}
                                       </span>
-                                    ) : null;
+                                    );
                                   })
-                                ) : (
-                                  <span className="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[9px] font-black uppercase">
-                                    {u.role}
-                                  </span>
                                 )}
                               </div>
                             </td>

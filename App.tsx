@@ -26,7 +26,7 @@ import ForcePasswordChangeModal from './components/auth/ForcePasswordChangeModal
 import { UserProfileModal } from './components/profile/UserProfileModal';
 import { Menu, LogOut, Bell, LayoutDashboard, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 import { useSettings, useHospitalServices } from './hooks/useSettings';
-import { isModuleActiveAndAvailable } from './src/config/modules';
+import { isModuleActiveAndAvailable, isUserAuthorizedForModule } from './src/config/modules';
 import { auth, db } from './src/firebase';
 import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { collection, query, onSnapshot, orderBy, doc, getDoc } from 'firebase/firestore';
@@ -120,9 +120,9 @@ const App: React.FC = () => {
   };
 
   // Sécurisation stricte de la navigation : si le module courant est désactivé dans les paramètres,
-  // rediriger immédiatement vers l'accueil pour empêcher tout contournement ou accès direct
+  // ou si l'utilisateur n'a pas les droits pour ce module, rediriger immédiatement vers le sélecteur
   useEffect(() => {
-    if (currentModule && currentModule !== 'DASHBOARD' && currentModule !== Role.SUPER_ADMIN && !hospitalServicesLoading) {
+    if (currentModule && currentModule !== 'DASHBOARD' && currentModule !== Role.SUPER_ADMIN && user && !hospitalServicesLoading) {
       if (!isModuleActiveAndAvailable(currentModule, hospitalServicesList)) {
         setCurrentModule('DASHBOARD');
         window.dispatchEvent(new CustomEvent('app-notification', {
@@ -131,9 +131,17 @@ const App: React.FC = () => {
             type: 'error'
           }
         }));
+      } else if (!isUserAuthorizedForModule(user, currentModule)) {
+        setCurrentModule('DASHBOARD');
+        window.dispatchEvent(new CustomEvent('app-notification', {
+          detail: {
+            message: `Accès refusé : votre profil ne dispose pas des autorisations pour accéder à ce module.`,
+            type: 'error'
+          }
+        }));
       }
     }
-  }, [currentModule, hospitalServicesList, hospitalServicesLoading]);
+  }, [currentModule, hospitalServicesList, hospitalServicesLoading, user]);
 
   useEffect(() => {
     const handleNotification = (e: any) => {
@@ -669,6 +677,11 @@ const App: React.FC = () => {
 
     // Protection d'affichage : si le module est désactivé dans les paramètres, bloquer l'affichage
     if (!isModuleActiveAndAvailable(currentModule, hospitalServicesList)) {
+      return <ModuleSelector user={user} onSelectModule={setCurrentModule} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
+    }
+
+    // Protection RBAC stricte : vérifier si l'utilisateur est autorisé pour ce module
+    if (!isUserAuthorizedForModule(user, currentModule)) {
       return <ModuleSelector user={user} onSelectModule={setCurrentModule} onLogout={handleLogout} theme={theme} toggleTheme={toggleTheme} />;
     }
 
