@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { EstablishmentConfig, ParametresCaisse, Role, Service, MedicalAct } from '../types';
 import { db, sanitizeData } from '../src/firebase';
 import { collection, onSnapshot, query, limit, getDocs, addDoc, updateDoc, doc, setDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 export const PREDEFINED_MEDICAL_ACTS: Partial<MedicalAct>[] = [
   // CONSULTATIONS
@@ -302,13 +303,21 @@ export const getDefaultMedicalActs = (): MedicalAct[] => {
 };
 
 export const useMedicalActs = () => {
+  const activeTenantId = getActiveTenantId();
+  const storageKey = activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL'
+    ? `hospital_medical_acts_${activeTenantId}`
+    : 'hospital_medical_acts';
+
   const [acts, setActs] = useState<MedicalAct[]>(() => {
-    const saved = localStorage.getItem('hospital_medical_acts');
+    const saved = localStorage.getItem(storageKey) || localStorage.getItem('hospital_medical_acts');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       } catch (e) {}
+    }
+    if (activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL') {
+      return [];
     }
     return getDefaultMedicalActs();
   });
@@ -321,22 +330,24 @@ export const useMedicalActs = () => {
     const unsub = onSnapshot(collection(db, 'medical_acts'), async (snapshot) => {
       if (!isSubscribed) return;
 
-      if (!snapshot.empty) {
-        const list = snapshot.docs.map(d => ({
+      const tenantActs = snapshot.docs
+        .map(d => ({
           id: d.id,
           ...d.data(),
           name: d.data().name || d.data().nom || 'Acte sans nom',
           price: Number(d.data().price ?? d.data().prixBase ?? 0),
           category: d.data().category || d.data().categorie || 'consultation'
-        }) as MedicalAct);
+        }) as MedicalAct)
+        .filter(a => belongsToTenant(a, activeTenantId));
 
-        setActs(list);
-        localStorage.setItem('hospital_medical_acts', JSON.stringify(list));
+      if (tenantActs.length > 0 || (activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL')) {
+        setActs(tenantActs);
+        localStorage.setItem(storageKey, JSON.stringify(tenantActs));
       } else {
-        // Initialize Firestore with default medical acts if empty
+        // Initialize Firestore with default medical acts if empty and default_hospital
         const initial = getDefaultMedicalActs();
         setActs(initial);
-        localStorage.setItem('hospital_medical_acts', JSON.stringify(initial));
+        localStorage.setItem(storageKey, JSON.stringify(initial));
 
         try {
           const batch = writeBatch(db);
@@ -352,7 +363,7 @@ export const useMedicalActs = () => {
       setLoading(false);
     }, (err) => {
       console.warn("Firestore medical_acts listener error:", err);
-      const saved = localStorage.getItem('hospital_medical_acts');
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         try { setActs(JSON.parse(saved)); } catch (e) {}
       }
@@ -360,7 +371,7 @@ export const useMedicalActs = () => {
     });
 
     const handleStorageChange = () => {
-      const saved = localStorage.getItem('hospital_medical_acts');
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         try { setActs(JSON.parse(saved)); } catch (e) {}
       }
@@ -375,7 +386,7 @@ export const useMedicalActs = () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('medical-acts-updated', handleStorageChange);
     };
-  }, []);
+  }, [activeTenantId, storageKey]);
 
   const addAct = useCallback(async (newAct: Partial<MedicalAct>) => {
     const actId = newAct.id || `ACT-${Date.now()}`;
@@ -489,8 +500,13 @@ export const getDefaultServices = (): Service[] => {
 };
 
 export const useHospitalServices = () => {
+  const activeTenantId = getActiveTenantId();
+  const storageKey = activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL'
+    ? `hospital_services_${activeTenantId}`
+    : 'hospital_services';
+
   const [services, setServices] = useState<Service[]>(() => {
-    const saved = localStorage.getItem('hospital_services');
+    const saved = localStorage.getItem(storageKey) || localStorage.getItem('hospital_services');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -515,6 +531,59 @@ export const useHospitalServices = () => {
 
   useEffect(() => {
     let isSubscribed = true;
+
+    // If active tenant is a specific SaaS clinic, synchronize directly from its saas_clinics config
+    if (activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL') {
+      const unsubClinic = onSnapshot(doc(db, 'saas_clinics', activeTenantId), (cSnap) => {
+        if (!isSubscribed) return;
+        if (cSnap.exists()) {
+          const cData = cSnap.data();
+          const servicesConfig = cData.servicesConfig || {};
+          const activatedModules = cData.activatedModules || {};
+          const defaultList = getDefaultServices();
+
+          const formatted = defaultList.map(s => {
+            const hasModule = hasImplementedModule(s.id);
+            let active = hasModule && (s.status === 'active');
+            if (servicesConfig[s.id] !== undefined) {
+              active = hasModule && (servicesConfig[s.id].status === 'active' || servicesConfig[s.id].is_active === true);
+            } else if (activatedModules[s.id] !== undefined) {
+              active = hasModule && Boolean(activatedModules[s.id]);
+            }
+            return {
+              ...s,
+              status: (active ? 'active' : 'inactive') as 'active' | 'inactive',
+              is_active: active
+            };
+          }).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+
+          setServices(formatted);
+          localStorage.setItem(storageKey, JSON.stringify(formatted));
+          setLoading(false);
+        }
+      }, (err) => {
+        console.warn("Firestore saas_clinics listener error:", err);
+      });
+
+      const handleStorageChange = () => {
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          try {
+            setServices(JSON.parse(saved));
+          } catch (e) {}
+        }
+      };
+
+      window.addEventListener('storage', handleStorageChange);
+      window.addEventListener('services-updated', handleStorageChange);
+
+      return () => {
+        isSubscribed = false;
+        unsubClinic();
+        window.removeEventListener('storage', handleStorageChange);
+        window.removeEventListener('services-updated', handleStorageChange);
+      };
+    }
 
     const unsub = onSnapshot(collection(db, 'hospital_services'), async (snapshot) => {
       if (!isSubscribed) return;
@@ -550,7 +619,7 @@ export const useHospitalServices = () => {
         }).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
 
         setServices(formatted);
-        localStorage.setItem('hospital_services', JSON.stringify(formatted));
+        localStorage.setItem(storageKey, JSON.stringify(formatted));
 
         // Idempotently persist auto-deactivations back to Firestore
         if (correctionsToPersist.length > 0) {
@@ -573,7 +642,7 @@ export const useHospitalServices = () => {
         // Initialize Firestore with default services if empty
         const initial = getDefaultServices();
         setServices(initial);
-        localStorage.setItem('hospital_services', JSON.stringify(initial));
+        localStorage.setItem(storageKey, JSON.stringify(initial));
 
         try {
           const batch = writeBatch(db);
@@ -589,14 +658,14 @@ export const useHospitalServices = () => {
       setLoading(false);
     }, (err) => {
       console.warn("Firestore hospital_services listener error:", err);
-      const saved = localStorage.getItem('hospital_services');
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         try { setServices(JSON.parse(saved)); } catch (e) {}
       }
     });
 
     const handleStorageChange = () => {
-      const saved = localStorage.getItem('hospital_services');
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         try {
           setServices(JSON.parse(saved));
@@ -613,7 +682,7 @@ export const useHospitalServices = () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('services-updated', handleStorageChange);
     };
-  }, []);
+  }, [activeTenantId, storageKey]);
 
   const updateService = useCallback(async (updatedService: Service) => {
     const previous = services;
@@ -633,12 +702,27 @@ export const useHospitalServices = () => {
     // Optimistic update
     setServices(prev => {
       const next = prev.map(s => s.id === normalized.id ? normalized : s);
-      localStorage.setItem('hospital_services', JSON.stringify(next));
+      localStorage.setItem(storageKey, JSON.stringify(next));
       return next;
     });
     window.dispatchEvent(new CustomEvent('services-updated'));
 
     try {
+      if (activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL') {
+        const cRef = doc(db, 'saas_clinics', activeTenantId);
+        await setDoc(cRef, {
+          servicesConfig: {
+            [normalized.id]: {
+              id: normalized.id,
+              name: normalized.name,
+              status: normalized.status,
+              is_active: normalized.is_active
+            }
+          }
+        }, { merge: true });
+        return normalized;
+      }
+
       const ref = doc(db, 'hospital_services', normalized.id);
       await setDoc(ref, sanitizeData({
         ...normalized,
@@ -650,11 +734,11 @@ export const useHospitalServices = () => {
       console.error("Failed to update service in Firestore:", err);
       // Rollback on failure
       setServices(previous);
-      localStorage.setItem('hospital_services', JSON.stringify(previous));
+      localStorage.setItem(storageKey, JSON.stringify(previous));
       window.dispatchEvent(new CustomEvent('services-updated'));
       throw err;
     }
-  }, [services]);
+  }, [services, activeTenantId, storageKey]);
 
   const toggleService = useCallback(async (serviceId: string) => {
     const s = services.find(item => item.id === serviceId);
@@ -776,8 +860,16 @@ export const useHospitalServices = () => {
 };
 
 export const useSettings = () => {
+  const activeTenantId = getActiveTenantId();
+  const configKey = activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL'
+    ? `hospital_config_${activeTenantId}`
+    : 'hospital_config';
+  const cashierKey = activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL'
+    ? `hospital_cashier_config_${activeTenantId}`
+    : 'hospital_cashier_config';
+
   const [establishment, setEstablishment] = useState<EstablishmentConfig>(() => {
-    const saved = localStorage.getItem('hospital_config');
+    const saved = localStorage.getItem(configKey) || localStorage.getItem('hospital_config');
     const defaults: EstablishmentConfig = {
       name: 'SmartHosto SIH',
       address: 'Avenue de l\'Indépendance, Yaoundé, Cameroun',
@@ -816,7 +908,7 @@ export const useSettings = () => {
   });
 
   const [cashierSettings, setCashierSettings] = useState<ParametresCaisse>(() => {
-    const saved = localStorage.getItem('hospital_cashier_config');
+    const saved = localStorage.getItem(cashierKey) || localStorage.getItem('hospital_cashier_config');
     const defaults: ParametresCaisse = {
       detteAutorisee: true,
       seuilDetteMax: 50000,
@@ -861,6 +953,11 @@ export const useSettings = () => {
   });
 
   const updateEstablishment = useCallback(async (updates: Partial<EstablishmentConfig>) => {
+    const currentTenant = getActiveTenantId(null, establishment);
+    const key = currentTenant && currentTenant !== 'default_hospital' && currentTenant !== 'ALL'
+      ? `hospital_config_${currentTenant}`
+      : 'hospital_config';
+
     setEstablishment(prev => {
       const updated: EstablishmentConfig = { 
         ...prev, 
@@ -868,19 +965,20 @@ export const useSettings = () => {
         requireBiologistValidation: updates.requireBiologistValidation ?? updates.require_biologist_validation ?? prev.requireBiologistValidation ?? true,
         require_biologist_validation: updates.require_biologist_validation ?? updates.requireBiologistValidation ?? prev.require_biologist_validation ?? true
       };
-      localStorage.setItem('hospital_config', JSON.stringify(updated));
+      localStorage.setItem(key, JSON.stringify(updated));
       return updated;
     });
 
     window.dispatchEvent(new CustomEvent('settings-updated'));
 
     try {
-      const q = query(collection(db, 'hospital_config'), limit(1));
-      const snap = await getDocs(q);
-      if (snap.empty) {
-        await addDoc(collection(db, 'hospital_config'), sanitizeData({ ...establishment, ...updates }));
+      const snap = await getDocs(collection(db, 'hospital_config'));
+      const existingDoc = snap.docs.find(d => belongsToTenant(d.data(), currentTenant));
+      if (!existingDoc) {
+        const toSave = stampTenantData({ ...establishment, ...updates }, { clinicId: currentTenant, hospital_id: currentTenant } as any);
+        await addDoc(collection(db, 'hospital_config'), sanitizeData(toSave));
       } else {
-        await updateDoc(doc(db, 'hospital_config', snap.docs[0].id), sanitizeData({
+        await updateDoc(doc(db, 'hospital_config', existingDoc.id), sanitizeData({
           ...updates,
           updatedAt: new Date().toISOString()
         }));
@@ -891,10 +989,12 @@ export const useSettings = () => {
   }, [establishment]);
 
   useEffect(() => {
-    // Firestore listener for hospital_config
+    // Firestore listener for hospital_config with tenant isolation
     const unsubConfig = onSnapshot(collection(db, 'hospital_config'), (snap) => {
-      if (!snap.empty) {
-        const data = snap.docs[0].data() as EstablishmentConfig;
+      const currentTenant = getActiveTenantId();
+      const matched = snap.docs.find(d => belongsToTenant(d.data(), currentTenant));
+      if (matched) {
+        const data = matched.data() as EstablishmentConfig;
         setEstablishment(prev => {
           const merged: EstablishmentConfig = {
             ...prev,
@@ -902,7 +1002,10 @@ export const useSettings = () => {
             requireBiologistValidation: data.requireBiologistValidation ?? data.require_biologist_validation ?? prev.requireBiologistValidation ?? true,
             require_biologist_validation: data.require_biologist_validation ?? data.requireBiologistValidation ?? prev.require_biologist_validation ?? true
           };
-          localStorage.setItem('hospital_config', JSON.stringify(merged));
+          const key = currentTenant && currentTenant !== 'default_hospital' && currentTenant !== 'ALL'
+            ? `hospital_config_${currentTenant}`
+            : 'hospital_config';
+          localStorage.setItem(key, JSON.stringify(merged));
           return merged;
         });
       }
@@ -910,13 +1013,18 @@ export const useSettings = () => {
       console.warn("Firestore hospital_config read error:", err);
     });
 
-    // Firestore listener for parametres_caisse
+    // Firestore listener for parametres_caisse with tenant isolation
     const unsubCashier = onSnapshot(collection(db, 'parametres_caisse'), (snap) => {
-      if (!snap.empty) {
-        const data = snap.docs[0].data() as ParametresCaisse;
+      const currentTenant = getActiveTenantId();
+      const matched = snap.docs.find(d => belongsToTenant(d.data(), currentTenant));
+      if (matched) {
+        const data = matched.data() as ParametresCaisse;
         setCashierSettings(prev => {
           const merged = { ...prev, ...data };
-          localStorage.setItem('hospital_cashier_config', JSON.stringify(merged));
+          const key = currentTenant && currentTenant !== 'default_hospital' && currentTenant !== 'ALL'
+            ? `hospital_cashier_config_${currentTenant}`
+            : 'hospital_cashier_config';
+          localStorage.setItem(key, JSON.stringify(merged));
           return merged;
         });
       }
@@ -925,7 +1033,11 @@ export const useSettings = () => {
     });
 
     const handleStorageChange = () => {
-      const savedConfig = localStorage.getItem('hospital_config');
+      const currentTenant = getActiveTenantId();
+      const key = currentTenant && currentTenant !== 'default_hospital' && currentTenant !== 'ALL'
+        ? `hospital_config_${currentTenant}`
+        : 'hospital_config';
+      const savedConfig = localStorage.getItem(key) || localStorage.getItem('hospital_config');
       if (savedConfig) {
         try {
           const parsed = JSON.parse(savedConfig);
@@ -938,7 +1050,10 @@ export const useSettings = () => {
         } catch (e) {}
       }
       
-      const savedCashier = localStorage.getItem('hospital_cashier_config');
+      const cKey = currentTenant && currentTenant !== 'default_hospital' && currentTenant !== 'ALL'
+        ? `hospital_cashier_config_${currentTenant}`
+        : 'hospital_cashier_config';
+      const savedCashier = localStorage.getItem(cKey) || localStorage.getItem('hospital_cashier_config');
       if (savedCashier) {
         try {
           setCashierSettings(JSON.parse(savedCashier));
@@ -955,7 +1070,7 @@ export const useSettings = () => {
       window.removeEventListener('storage', handleStorageChange);
       window.removeEventListener('settings-updated', handleStorageChange);
     };
-  }, []);
+  }, [configKey, cashierKey]);
 
   return { establishment, cashierSettings, updateEstablishment };
 };

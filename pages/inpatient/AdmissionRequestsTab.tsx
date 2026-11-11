@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Bell, UserPlus, Clock, Calendar, CheckCircle2, 
   AlertCircle, Building2, User, Search 
@@ -6,16 +6,22 @@ import {
 import { db } from '../../src/firebase';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import { Bed, Room } from '../../types';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface AdmissionRequestsTabProps {
   onAssignBed: (request: any) => void;
   availableBedsCount: number;
+  user?: any;
+  establishment?: any;
 }
 
 export const AdmissionRequestsTab: React.FC<AdmissionRequestsTabProps> = ({
   onAssignBed,
-  availableBedsCount
+  availableBedsCount,
+  user,
+  establishment
 }) => {
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const [requests, setRequests] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -28,7 +34,9 @@ export const AdmissionRequestsTab: React.FC<AdmissionRequestsTabProps> = ({
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const list = snapshot.docs
+        .filter(d => belongsToTenant(d.data(), activeTenantId))
+        .map(d => ({ id: d.id, ...d.data() } as any));
       list.sort((a: any, b: any) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
       setRequests(list);
       setIsLoading(false);
@@ -38,7 +46,7 @@ export const AdmissionRequestsTab: React.FC<AdmissionRequestsTabProps> = ({
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [activeTenantId]);
 
   const filteredRequests = requests.filter(r => {
     const term = searchTerm.toLowerCase().trim();

@@ -9,33 +9,58 @@ import { User, EstablishmentConfig } from '../../types';
  *   - strictly returns their hospital/clinic ID (e.g. 'tenant_saintluc_123').
  */
 export function getActiveTenantId(user?: User | null, establishment?: EstablishmentConfig | null): string {
-  if (!user) {
-    const estTenant = establishment?.tenantId || (establishment as any)?.hospital_id || (establishment as any)?.clinicId;
-    return estTenant ? String(estTenant).trim() : 'default_hospital';
+  // 1. If user object is provided
+  if (user) {
+    // SuperAdmin global overview unless an explicit context is locked
+    const isSuperAdmin = 
+      user.role === 'SUPER_ADMIN' || 
+      String(user.role).toUpperCase() === 'SUPER_ADMIN' ||
+      user.roles?.includes('role_super_admin') ||
+      user.username === 'superadmin' ||
+      user.username === 'sa1';
+
+    if (isSuperAdmin) {
+      const override = (user as any).activeTenantId || (user as any).selectedTenantId;
+      return override ? String(override).trim() : 'ALL';
+    }
+
+    const tenantId = 
+      (user as any).clinicId ||
+      (user as any).hospital_id ||
+      (user as any).structureId;
+
+    if (tenantId) return String(tenantId).trim();
   }
 
-  // SuperAdmin global overview unless an explicit context is locked
-  const isSuperAdmin = 
-    user.role === 'SUPER_ADMIN' || 
-    String(user.role).toUpperCase() === 'SUPER_ADMIN' ||
-    user.roles?.includes('role_super_admin') ||
-    user.username === 'superadmin' ||
-    user.username === 'sa1';
+  // 2. Check establishment config
+  const estTenant = 
+    establishment?.tenantId || 
+    (establishment as any)?.hospital_id || 
+    (establishment as any)?.clinicId ||
+    (establishment as any)?.id;
 
-  if (isSuperAdmin) {
-    const override = (user as any).activeTenantId || (user as any).selectedTenantId;
-    return override ? String(override).trim() : 'ALL';
+  if (estTenant && estTenant !== 'default_hospital') {
+    return String(estTenant).trim();
   }
 
-  const tenantId = 
-    (user as any).clinicId ||
-    (user as any).hospital_id ||
-    (user as any).structureId ||
-    establishment?.tenantId ||
-    (establishment as any)?.hospital_id ||
-    (establishment as any)?.clinicId;
+  // 3. Check persisted browser session in case user prop was omitted in sub-component
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const savedSession = localStorage.getItem('hospital_session');
+      if (savedSession) {
+        const u = JSON.parse(savedSession);
+        const isSuper = u.role === 'SUPER_ADMIN' || u.username === 'superadmin' || u.username === 'sa1';
+        if (isSuper) {
+          const override = u.activeTenantId || u.selectedTenantId;
+          return override ? String(override).trim() : 'ALL';
+        }
+        const uTenant = u.clinicId || u.hospital_id || u.structureId;
+        if (uTenant) return String(uTenant).trim();
+      }
+    } catch {}
+  }
 
-  return tenantId ? String(tenantId).trim() : 'default_hospital';
+  return estTenant ? String(estTenant).trim() : 'default_hospital';
 }
 
 /**

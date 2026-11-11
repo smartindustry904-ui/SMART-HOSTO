@@ -3,6 +3,7 @@ import { History as HistoryIcon, Search, Eye, RefreshCw, FileText, Calendar, X, 
 import { db } from '../../src/firebase';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { useSettings } from '../../hooks/useSettings';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 import { Avatar } from '../../components/common/Avatar';
 import { AvatarPlaceholder } from '../../components/common/AvatarPlaceholder';
 
@@ -39,6 +40,7 @@ export interface TimelineItem {
 
 const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
   const { establishment } = useSettings();
+  const activeTenantId = getActiveTenantId(null, establishment);
   const [timelineItems, setTimelineItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -46,107 +48,7 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
   const [viewDetailRecord, setViewDetailRecord] = useState<TimelineItem | null>(null);
   const [viewMode, setViewMode] = useState<'TIMELINE' | 'TABLE'>('TIMELINE');
 
-  // Static baseline dataset fallback for rich presentation
-  const staticItems: TimelineItem[] = [
-    {
-      id: 'CONS-9982',
-      patientId: '1',
-      patientName: 'Amadou DIOP',
-      age: 39,
-      gender: 'M',
-      date: '12/05/2026',
-      time: '09:30',
-      timestamp: new Date('2026-05-12T09:30:00').getTime(),
-      itemType: 'CONSULTATION',
-      category: 'GENERAL',
-      title: 'Consultation Générale',
-      doctor: 'Dr. Sarr',
-      diagnosis: 'Paludisme simple',
-      treatment: 'Artéméther-Luméfantrine',
-      exams: 'TDR Palu (+)',
-      observation: 'Patient consulte pour fièvre et courbatures depuis 3 jours. Température 39°C. TDR Palu positif. Débute Coartem.'
-    },
-    {
-      id: 'MED-7712',
-      patientId: '1',
-      patientName: 'Amadou DIOP',
-      age: 39,
-      gender: 'M',
-      date: '12/05/2026',
-      time: '10:00',
-      timestamp: new Date('2026-05-12T10:00:00').getTime(),
-      itemType: 'MEDICATION',
-      category: 'PRESCRIPTION',
-      title: 'Prescription Médicamenteuse',
-      doctor: 'Dr. Sarr',
-      treatment: 'Artéméther-Luméfantrine 80/480mg, Paracétamol 1g',
-      itemsList: [
-        { name: 'Coartem 80/480mg', posology: '1 comprimé matin et soir pendant 3 jours' },
-        { name: 'Paracétamol 1g', posology: '1 comprimé si fièvre (max 3/jour)' }
-      ],
-      status: 'Livré'
-    },
-    {
-      id: 'EXAM-4421',
-      patientId: '1',
-      patientName: 'Amadou DIOP',
-      age: 39,
-      gender: 'M',
-      date: '12/05/2026',
-      time: '09:15',
-      timestamp: new Date('2026-05-12T09:15:00').getTime(),
-      itemType: 'EXAM',
-      category: 'LAB',
-      title: 'Examen Biologique',
-      doctor: 'Dr. Sarr',
-      exams: 'Goutte Épaisse / TDR Paludisme, NFS',
-      observation: 'TDR Positif P. falciparum. NFS: Hémoglobine 12.5 g/dL.',
-      status: 'Terminé'
-    },
-    {
-      id: 'SOIN-3301',
-      patientId: '1',
-      patientName: 'Amadou DIOP',
-      age: 39,
-      gender: 'M',
-      date: '12/05/2026',
-      time: '10:15',
-      timestamp: new Date('2026-05-12T10:15:00').getTime(),
-      itemType: 'SOIN',
-      category: 'SOINS',
-      title: 'Perfusion & Injection Antipyrétique',
-      doctor: 'Dr. Sarr',
-      treatment: 'Paracétamol 1g IVD + Sérum Physiologique 500ml',
-      observation: 'Perfusion posée sans incident au bras gauche. Patient calme, fièvre en défervescence.',
-      instructions: 'Administrer 1g Paracétamol en perfusion lente de 30 min',
-      executedBy: 'Inf. Mariama Diallo',
-      executionDate: '12/05/2026',
-      executionTime: '10:35',
-      executionNotes: 'Perfusion bien tolérée. Température descendue à 37.8°C.',
-      priority: 'URGENT',
-      status: 'FAIT'
-    },
-    {
-      id: 'CONS-9975',
-      patientId: '2',
-      patientName: 'Fatou NDIAYE',
-      age: 28,
-      gender: 'F',
-      date: '10/05/2026',
-      time: '14:20',
-      timestamp: new Date('2026-05-10T14:20:00').getTime(),
-      itemType: 'CONSULTATION',
-      category: 'GENERAL',
-      title: 'Consultation Générale',
-      doctor: 'Dr. Keita',
-      diagnosis: 'Infection Urinaire Haute',
-      treatment: 'Ciprofloxacine 500mg',
-      exams: 'ECBU, Bandelette Urinaire',
-      observation: 'Brûlures mictionnelles et pollakiurie. Température 37.5°C. Abdomen souple. Prescription d\'antibiotiques.'
-    }
-  ];
-
-  // Subscribe in real-time to consultations, prescriptions, lab requests, and nursing acts
+  // Subscribe in real-time to consultations, prescriptions, lab requests, and nursing acts with tenant isolation
   useEffect(() => {
     let consultationsList: TimelineItem[] = [];
     let prescriptionsList: TimelineItem[] = [];
@@ -154,7 +56,7 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
     let nursingList: TimelineItem[] = [];
 
     const updateAllItems = () => {
-      const merged = [...consultationsList, ...prescriptionsList, ...labList, ...nursingList, ...staticItems];
+      const merged = [...consultationsList, ...prescriptionsList, ...labList, ...nursingList];
       // Deduplicate by ID
       const map = new Map<string, TimelineItem>();
       merged.forEach(item => {
@@ -169,29 +71,31 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
 
     // 1. Consultations Listener
     const unsubConsultations = onSnapshot(collection(db, 'consultations'), (snapshot) => {
-      consultationsList = snapshot.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.date || (d.createdAt ? d.createdAt.split('T')[0] : 'Récemment');
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
-        return {
-          id: docSnap.id,
-          patientId: d.patientId || d.patientIdRaw || '',
-          patientName: d.patient || d.patientName || 'Patient Inconnu',
-          age: d.age || 30,
-          gender: d.gender || 'M',
-          date: dateStr,
-          time: d.time || '10:00',
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          itemType: 'CONSULTATION',
-          category: d.type === 'CPN / Maternité' ? 'CPN' : d.type === 'Consultation Gynécologique' ? 'GYNECO' : 'GENERAL',
-          title: d.type || 'Consultation Médicale',
-          doctor: d.doctor || d.doctorName || 'Dr. Référent',
-          diagnosis: d.diagnosis || 'Diagnostic non spécifié',
-          treatment: d.treatment || d.prescription || '',
-          exams: d.exams || '',
-          observation: d.observation || d.notes || ''
-        };
-      });
+      consultationsList = snapshot.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.date || (d.createdAt ? d.createdAt.split('T')[0] : 'Récemment');
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          return {
+            id: docSnap.id,
+            patientId: d.patientId || d.patientIdRaw || '',
+            patientName: d.patient || d.patientName || 'Patient Inconnu',
+            age: d.age || 30,
+            gender: d.gender || 'M',
+            date: dateStr,
+            time: d.time || '10:00',
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            itemType: 'CONSULTATION',
+            category: d.type === 'CPN / Maternité' ? 'CPN' : d.type === 'Consultation Gynécologique' ? 'GYNECO' : 'GENERAL',
+            title: d.type || 'Consultation Médicale',
+            doctor: d.doctor || d.doctorName || 'Dr. Référent',
+            diagnosis: d.diagnosis || 'Diagnostic non spécifié',
+            treatment: d.treatment || d.prescription || '',
+            exams: d.exams || '',
+            observation: d.observation || d.notes || ''
+          };
+        });
       updateAllItems();
     }, (err) => {
       console.error("Error fetching consultations:", err);
@@ -200,31 +104,33 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
 
     // 2. Pending Prescriptions Listener
     const unsubPrescriptions = onSnapshot(collection(db, 'pending_prescriptions'), (snapshot) => {
-      prescriptionsList = snapshot.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.createdAt ? d.createdAt.split('T')[0] : 'Récemment';
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
-        const items = d.items || [];
-        const treatmentSummary = items.map((i: any) => `${i.name} (${i.posology || ''})`).join(', ');
+      prescriptionsList = snapshot.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.createdAt ? d.createdAt.split('T')[0] : 'Récemment';
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          const items = d.items || [];
+          const treatmentSummary = items.map((i: any) => `${i.name} (${i.posology || ''})`).join(', ');
 
-        return {
-          id: docSnap.id,
-          patientId: d.patientId || '',
-          patientName: d.patientName || d.patient || 'Patient Inconnu',
-          age: d.patientAge || 30,
-          gender: d.patientGender || 'M',
-          date: dateStr,
-          time: d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '10:00',
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          itemType: 'MEDICATION',
-          category: 'PRESCRIPTION',
-          title: 'Prescription Médicamenteuse',
-          doctor: d.doctorName || d.doctor || 'Dr. Référent',
-          treatment: treatmentSummary,
-          itemsList: items,
-          status: d.status === 'served' ? 'Livré' : 'En attente'
-        };
-      });
+          return {
+            id: docSnap.id,
+            patientId: d.patientId || '',
+            patientName: d.patientName || d.patient || 'Patient Inconnu',
+            age: d.patientAge || 30,
+            gender: d.patientGender || 'M',
+            date: dateStr,
+            time: d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '10:00',
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            itemType: 'MEDICATION',
+            category: 'PRESCRIPTION',
+            title: 'Prescription Médicamenteuse',
+            doctor: d.doctorName || d.doctor || 'Dr. Référent',
+            treatment: treatmentSummary,
+            itemsList: items,
+            status: d.status === 'served' ? 'Livré' : 'En attente'
+          };
+        });
       updateAllItems();
     }, (err) => {
       console.error("Error fetching prescriptions:", err);
@@ -233,31 +139,33 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
 
     // 3. Lab Requests Listener
     const unsubLab = onSnapshot(collection(db, 'lab_requests'), (snapshot) => {
-      labList = snapshot.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.createdAt ? d.createdAt.split('T')[0] : 'Récemment';
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
-        const examsArr = d.exams || [];
-        const examSummary = Array.isArray(examsArr) ? examsArr.map((e: any) => typeof e === 'string' ? e : e.name).join(', ') : 'Examen de laboratoire';
+      labList = snapshot.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.createdAt ? d.createdAt.split('T')[0] : 'Récemment';
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          const examsArr = d.exams || [];
+          const examSummary = Array.isArray(examsArr) ? examsArr.map((e: any) => typeof e === 'string' ? e : e.name).join(', ') : 'Examen de laboratoire';
 
-        return {
-          id: docSnap.id,
-          patientId: d.patientId || '',
-          patientName: d.patientName || d.patient || 'Patient Inconnu',
-          age: d.patientAge || 30,
-          gender: d.patientGender || 'M',
-          date: dateStr,
-          time: d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '10:00',
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          itemType: 'EXAM',
-          category: 'LAB',
-          title: 'Demande / Examen de Laboratoire',
-          doctor: d.doctorName || d.doctor || 'Dr. Référent',
-          exams: examSummary,
-          observation: d.clinicalInfo || d.notes || '',
-          status: d.status || 'En cours'
-        };
-      });
+          return {
+            id: docSnap.id,
+            patientId: d.patientId || '',
+            patientName: d.patientName || d.patient || 'Patient Inconnu',
+            age: d.patientAge || 30,
+            gender: d.patientGender || 'M',
+            date: dateStr,
+            time: d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '10:00',
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            itemType: 'EXAM',
+            category: 'LAB',
+            title: 'Demande / Examen de Laboratoire',
+            doctor: d.doctorName || d.doctor || 'Dr. Référent',
+            exams: examSummary,
+            observation: d.clinicalInfo || d.notes || '',
+            status: d.status || 'En cours'
+          };
+        });
       updateAllItems();
     }, (err) => {
       console.error("Error fetching lab requests:", err);
@@ -266,36 +174,38 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
 
     // 4. Nursing Acts Listener (Soins Infirmiers)
     const unsubNursing = onSnapshot(collection(db, 'nursing_acts'), (snapshot) => {
-      nursingList = snapshot.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.date || (d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt.split('T')[0] : 'Récemment') : 'Récemment');
-        const ts = d.createdAt ? (typeof d.createdAt === 'string' ? new Date(d.createdAt).getTime() : d.createdAt) : Date.now();
-        const isFait = d.status === 'FAIT';
+      nursingList = snapshot.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.date || (d.createdAt ? (typeof d.createdAt === 'string' ? d.createdAt.split('T')[0] : 'Récemment') : 'Récemment');
+          const ts = d.createdAt ? (typeof d.createdAt === 'string' ? new Date(d.createdAt).getTime() : d.createdAt) : Date.now();
+          const isFait = d.status === 'FAIT';
 
-        return {
-          id: docSnap.id,
-          patientId: d.patientId ? String(d.patientId) : '',
-          patientName: d.patientName || 'Patient Inconnu',
-          age: d.patientAge || 30,
-          gender: d.patientGender || 'M',
-          date: dateStr,
-          time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '10:00'),
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          itemType: 'SOIN',
-          category: 'SOINS',
-          title: d.actType || 'Soin Infirmier Prescrit',
-          doctor: d.prescribedBy || 'Médecin Prescripteur',
-          treatment: d.instructions || d.actType || '',
-          observation: d.executionNotes || d.instructions || '',
-          instructions: d.instructions || '',
-          executedBy: d.executedBy || '',
-          executionDate: d.executionDate || '',
-          executionTime: d.executionTime || '',
-          executionNotes: d.executionNotes || '',
-          priority: d.priority || 'NORMAL',
-          status: isFait ? 'FAIT' : 'EN_ATTENTE'
-        };
-      });
+          return {
+            id: docSnap.id,
+            patientId: d.patientId ? String(d.patientId) : '',
+            patientName: d.patientName || 'Patient Inconnu',
+            age: d.patientAge || 30,
+            gender: d.patientGender || 'M',
+            date: dateStr,
+            time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '10:00'),
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            itemType: 'SOIN',
+            category: 'SOINS',
+            title: d.actType || 'Soin Infirmier Prescrit',
+            doctor: d.prescribedBy || 'Médecin Prescripteur',
+            treatment: d.instructions || d.actType || '',
+            observation: d.executionNotes || d.instructions || '',
+            instructions: d.instructions || '',
+            executedBy: d.executedBy || '',
+            executionDate: d.executionDate || '',
+            executionTime: d.executionTime || '',
+            executionNotes: d.executionNotes || '',
+            priority: d.priority || 'NORMAL',
+            status: isFait ? 'FAIT' : 'EN_ATTENTE'
+          };
+        });
       updateAllItems();
     }, (err) => {
       console.error("Error fetching nursing acts:", err);
@@ -308,7 +218,7 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
       unsubLab();
       unsubNursing();
     };
-  }, []);
+  }, [activeTenantId]);
 
   // Filtering
   const filteredItems = timelineItems.filter(item => {

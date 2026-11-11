@@ -8,6 +8,8 @@ import {
 import { Patient, User as UserType } from '../../types';
 import { db } from '../../src/firebase';
 import { collection, onSnapshot, query, orderBy, getDocs } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
+import { useSettings } from '../../hooks/useSettings';
 
 export interface PatientHistoryEvent {
   id: string;
@@ -38,6 +40,7 @@ export interface PatientHistoryEvent {
 
 interface HistoriquePatientProps {
   user?: UserType;
+  establishment?: any;
   selectedPatient?: Patient | null;
   onSelectPatientForAdmission?: (patient: Patient) => void;
   theme?: 'light' | 'dark';
@@ -45,10 +48,15 @@ interface HistoriquePatientProps {
 
 const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
   user,
+  establishment: propEstablishment,
   selectedPatient: propSelectedPatient,
   onSelectPatientForAdmission,
   theme = 'light'
 }) => {
+  const { establishment: hookEstablishment } = useSettings();
+  const establishment = propEstablishment || hookEstablishment;
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+
   const [patients, setPatients] = useState<Patient[]>([]);
   const [selectedPatientId, setSelectedPatientId] = useState<string>(propSelectedPatient?.id || propSelectedPatient?.patientId || 'ALL');
   const [patientSearchTerm, setPatientSearchTerm] = useState('');
@@ -64,18 +72,20 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
   const [selectedDoctor, setSelectedDoctor] = useState<string>('ALL');
   const [searchKeyword, setSearchKeyword] = useState<string>('');
 
-  // 1. Fetch patients list for selector
+  // 1. Fetch patients list for selector (Strict Tenant Scoped)
   useEffect(() => {
     const unsubPatients = onSnapshot(collection(db, 'patients'), (snapshot) => {
-      const pList: Patient[] = snapshot.docs.map(d => ({
-        id: d.id,
-        ...d.data()
-      } as Patient));
+      const pList: Patient[] = snapshot.docs
+        .map(d => ({
+          id: d.id,
+          ...d.data()
+        } as Patient))
+        .filter(p => belongsToTenant(p, activeTenantId));
       setPatients(pList);
     }, (err) => console.error("Error fetching patients in Historique:", err));
 
     return () => unsubPatients();
-  }, []);
+  }, [activeTenantId]);
 
   // Update selectedPatientId when prop changes
   useEffect(() => {
@@ -86,7 +96,7 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
     }
   }, [propSelectedPatient]);
 
-  // 2. Fetch history records across all modules
+  // 2. Fetch history records across all modules (Strict Tenant Scoped)
   useEffect(() => {
     setIsLoading(true);
     let consultations: PatientHistoryEvent[] = [];
@@ -123,209 +133,225 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
 
     // A. Consultations
     const unsubConsultations = onSnapshot(collection(db, 'consultations'), (snap) => {
-      consultations = snap.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.date || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
-        return {
-          id: `cons-${docSnap.id}`,
-          patientId: d.patientId || d.patientIdRaw || '',
-          patientName: d.patient || d.patientName || 'Patient',
-          dmeId: d.dmeId || d.patientId || '',
-          type: 'CONSULTATION',
-          date: dateStr,
-          time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          service: d.type === 'CPN / Maternité' ? 'Maternité / CPN' : d.specialty || d.service || 'Médecine Générale',
-          doctorName: d.doctor || d.doctorName || 'Dr. Référent',
-          motif: d.motif || d.reason || 'Consultation médicale',
-          mainDiagnosis: d.diagnosis || d.diagnosticPrincipal || d.motif || 'Non précisé (Lecture Seule)'
-        };
-      });
+      consultations = snap.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.date || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          return {
+            id: `cons-${docSnap.id}`,
+            patientId: d.patientId || d.patientIdRaw || '',
+            patientName: d.patient || d.patientName || 'Patient',
+            dmeId: d.dmeId || d.patientId || '',
+            type: 'CONSULTATION',
+            date: dateStr,
+            time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            service: d.type === 'CPN / Maternité' ? 'Maternité / CPN' : d.specialty || d.service || 'Médecine Générale',
+            doctorName: d.doctor || d.doctorName || 'Dr. Référent',
+            motif: d.motif || d.reason || 'Consultation médicale',
+            mainDiagnosis: d.diagnosis || d.diagnosticPrincipal || d.motif || 'Non précisé (Lecture Seule)'
+          };
+        });
       compileAll();
     }, () => compileAll());
 
     // A2. Patient History (Secondary Consultation Register)
     const unsubPatientHistory = onSnapshot(collection(db, 'patient_history'), (snap) => {
-      patientHistoryRecords = snap.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.date || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : (d.timestamp ? new Date(d.timestamp).getTime() : Date.now());
-        return {
-          id: `phist-${docSnap.id}`,
-          patientId: d.patientId || '',
-          patientName: d.patient || d.patientName || 'Patient',
-          dmeId: d.dmeId || d.patientId || '',
-          type: 'CONSULTATION',
-          date: dateStr,
-          time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          service: d.service || 'Consultation Médicale',
-          doctorName: d.doctor || d.doctorName || 'Dr. Référent',
-          motif: d.motif || 'Consultation',
-          mainDiagnosis: d.diagnosis || d.diagnosticPrincipal || 'Observation médicale enregistrée'
-        };
-      });
+      patientHistoryRecords = snap.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.date || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : (d.timestamp ? new Date(d.timestamp).getTime() : Date.now());
+          return {
+            id: `phist-${docSnap.id}`,
+            patientId: d.patientId || '',
+            patientName: d.patient || d.patientName || 'Patient',
+            dmeId: d.dmeId || d.patientId || '',
+            type: 'CONSULTATION',
+            date: dateStr,
+            time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            service: d.service || 'Consultation Médicale',
+            doctorName: d.doctor || d.doctorName || 'Dr. Référent',
+            motif: d.motif || 'Consultation',
+            mainDiagnosis: d.diagnosis || d.diagnosticPrincipal || 'Observation médicale enregistrée'
+          };
+        });
       compileAll();
     }, () => compileAll());
 
     // B. Hospitalizations / Discharges Waiting
     const unsubDischarges = onSnapshot(collection(db, 'discharges_waiting'), (snap) => {
-      hospitalizations = snap.docs.map(docSnap => {
-        const d = docSnap.data();
-        const entryDate = d.admissionDate || d.entryDate || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
-        const exitDate = d.dischargeDate || d.exitDate || (d.updatedAt ? d.updatedAt.split('T')[0] : 'En cours');
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
-        return {
-          id: `hosp-${docSnap.id}`,
-          patientId: d.patientId || docSnap.id,
-          patientName: d.patientName || `${d.lastName || ''} ${d.firstName || ''}`.trim() || 'Patient',
-          dmeId: d.dmeId || d.patientId || '',
-          type: 'HOSPITALISATION',
-          date: entryDate,
-          time: d.admissionTime || undefined,
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          service: d.service || d.department || 'Hospitalisation Médicale',
-          doctorName: d.prescriberName || d.doctor || 'Dr. Hospitalier',
-          ward: d.service || d.department || 'Pavillon Principal',
-          roomBed: d.bedId || d.bed || d.room ? `Lit ${d.bedId || d.bed || ''} - ${d.room || ''}` : 'Chambre Standard',
-          dischargeDate: exitDate,
-          dischargeReason: d.dischargeReason || d.motifSortie || d.motif || 'Séjour hospitalier régularisé',
-          motif: d.admissionReason || d.motif || 'Hospitalisation'
-        };
-      });
+      hospitalizations = snap.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const entryDate = d.admissionDate || d.entryDate || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+          const exitDate = d.dischargeDate || d.exitDate || (d.updatedAt ? d.updatedAt.split('T')[0] : 'En cours');
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          return {
+            id: `hosp-${docSnap.id}`,
+            patientId: d.patientId || docSnap.id,
+            patientName: d.patientName || `${d.lastName || ''} ${d.firstName || ''}`.trim() || 'Patient',
+            dmeId: d.dmeId || d.patientId || '',
+            type: 'HOSPITALISATION',
+            date: entryDate,
+            time: d.admissionTime || undefined,
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            service: d.service || d.department || 'Hospitalisation Médicale',
+            doctorName: d.prescriberName || d.doctor || 'Dr. Hospitalier',
+            ward: d.service || d.department || 'Pavillon Principal',
+            roomBed: d.bedId || d.bed || d.room ? `Lit ${d.bedId || d.bed || ''} - ${d.room || ''}` : 'Chambre Standard',
+            dischargeDate: exitDate,
+            dischargeReason: d.dischargeReason || d.motifSortie || d.motif || 'Séjour hospitalier régularisé',
+            motif: d.admissionReason || d.motif || 'Hospitalisation'
+          };
+        });
       compileAll();
     }, () => compileAll());
 
     // B2. Validated Administrative Discharges (discharges)
     const unsubDischargesCompleted = onSnapshot(collection(db, 'discharges'), (snap) => {
-      dischargesList = snap.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.dischargeDate || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
-        return {
-          id: `disch-${docSnap.id}`,
-          patientId: d.patientId || docSnap.id,
-          patientName: d.patientName || 'Patient',
-          dmeId: d.dmeId || d.patientId || '',
-          type: 'SORTIE',
-          date: dateStr,
-          time: d.dischargeTime || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          service: d.department || 'Sorties Administratives',
-          doctorName: d.user || 'Agent Accueil',
-          motif: `Sortie administrative validée (${d.department || 'Services Cliniques'})`,
-          status: 'Sortie Effectuée'
-        };
-      });
+      dischargesList = snap.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.dischargeDate || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          return {
+            id: `disch-${docSnap.id}`,
+            patientId: d.patientId || docSnap.id,
+            patientName: d.patientName || 'Patient',
+            dmeId: d.dmeId || d.patientId || '',
+            type: 'SORTIE',
+            date: dateStr,
+            time: d.dischargeTime || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            service: d.department || 'Sorties Administratives',
+            doctorName: d.user || 'Agent Accueil',
+            motif: `Sortie administrative validée (${d.department || 'Services Cliniques'})`,
+            status: 'Sortie Effectuée'
+          };
+        });
       compileAll();
     }, () => compileAll());
 
     // C. Lab Requests (Exam names only, strictly NO sensitive biological results)
     const unsubLab = onSnapshot(collection(db, 'lab_requests'), (snap) => {
-      labRequests = snap.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.date ? (d.date.includes('T') ? d.date.split('T')[0] : d.date) : (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
-        const rawExams = d.exams || [];
-        const examNamesList = Array.isArray(rawExams)
-          ? rawExams.map((e: any) => typeof e === 'string' ? e : e.name).filter(Boolean)
-          : [d.examName || 'Bilan biologique'];
+      labRequests = snap.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.date ? (d.date.includes('T') ? d.date.split('T')[0] : d.date) : (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          const rawExams = d.exams || [];
+          const examNamesList = Array.isArray(rawExams)
+            ? rawExams.map((e: any) => typeof e === 'string' ? e : e.name).filter(Boolean)
+            : [d.examName || 'Bilan biologique'];
 
-        const isImaging = examNamesList.some(name => /radio|echo|scanner|irm|échographie|rx/i.test(name));
+          const isImaging = examNamesList.some(name => /radio|echo|scanner|irm|échographie|rx/i.test(name));
 
-        return {
-          id: `lab-${docSnap.id}`,
-          patientId: d.patientId || '',
-          patientName: d.patientName || 'Patient',
-          dmeId: d.dmeId || d.patientId || '',
-          type: isImaging ? 'IMAGERIE' : 'LABORATOIRE',
-          date: dateStr,
-          time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          service: isImaging ? 'Imagerie Médicale & Radiologie' : 'Laboratoire de Biologie Médicale',
-          doctorName: d.prescriberName || d.doctor || 'Praticien prescripteur',
-          examNames: examNamesList,
-          examCategory: isImaging ? 'Imagerie' : 'Biologie',
-          status: d.status || 'Effectué',
-          motif: `Prescription : ${examNamesList.slice(0, 3).join(', ')}${examNamesList.length > 3 ? '...' : ''}`
-        };
-      });
+          return {
+            id: `lab-${docSnap.id}`,
+            patientId: d.patientId || '',
+            patientName: d.patientName || 'Patient',
+            dmeId: d.dmeId || d.patientId || '',
+            type: isImaging ? 'IMAGERIE' : 'LABORATOIRE',
+            date: dateStr,
+            time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            service: isImaging ? 'Imagerie Médicale & Radiologie' : 'Laboratoire de Biologie Médicale',
+            doctorName: d.prescriberName || d.doctor || 'Praticien prescripteur',
+            examNames: examNamesList,
+            examCategory: isImaging ? 'Imagerie' : 'Biologie',
+            status: d.status || 'Effectué',
+            motif: `Prescription : ${examNamesList.slice(0, 3).join(', ')}${examNamesList.length > 3 ? '...' : ''}`
+          };
+        });
       compileAll();
     }, () => compileAll());
 
     // D. Emergency Patients
     const unsubEmergency = onSnapshot(collection(db, 'emergency_patients'), (snap) => {
-      emergencyEvents = snap.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.arrivalTimestamp ? d.arrivalTimestamp.split('T')[0] : (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
-        const ts = d.arrivalTimestamp ? new Date(d.arrivalTimestamp).getTime() : (d.createdAt ? new Date(d.createdAt).getTime() : Date.now());
-        return {
-          id: `urg-${docSnap.id}`,
-          patientId: d.patientId || d.id || '',
-          patientName: `${d.lastName || ''} ${d.firstName || ''}`.trim() || d.patientName || 'Patient',
-          dmeId: d.dmeId || d.id || '',
-          type: 'URGENCE',
-          date: dateStr,
-          time: d.arrivalTimestamp ? new Date(d.arrivalTimestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined,
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          service: 'Service des Urgences',
-          doctorName: d.responsibleStaff || d.discharge?.professional || d.management?.doctorName || d.triage?.nurseName || 'Équipe Urgences',
-          motif: d.arrivalMotif || d.triage?.motif || d.motif || 'Passage aux Urgences',
-          priority: d.status || d.triage?.level || d.priority || 'URGENCE',
-          mainDiagnosis: d.discharge?.conclusion || d.followUps?.[d.followUps.length - 1]?.conclusion || d.management?.diagnosis || 'Prise en charge d\'urgence'
-        };
-      });
+      emergencyEvents = snap.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.arrivalTimestamp ? d.arrivalTimestamp.split('T')[0] : (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+          const ts = d.arrivalTimestamp ? new Date(d.arrivalTimestamp).getTime() : (d.createdAt ? new Date(d.createdAt).getTime() : Date.now());
+          return {
+            id: `urg-${docSnap.id}`,
+            patientId: d.patientId || d.id || '',
+            patientName: `${d.lastName || ''} ${d.firstName || ''}`.trim() || d.patientName || 'Patient',
+            dmeId: d.dmeId || d.id || '',
+            type: 'URGENCE',
+            date: dateStr,
+            time: d.arrivalTimestamp ? new Date(d.arrivalTimestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined,
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            service: 'Service des Urgences',
+            doctorName: d.responsibleStaff || d.discharge?.professional || d.management?.doctorName || d.triage?.nurseName || 'Équipe Urgences',
+            motif: d.arrivalMotif || d.triage?.motif || d.motif || 'Passage aux Urgences',
+            priority: d.status || d.triage?.level || d.priority || 'URGENCE',
+            mainDiagnosis: d.discharge?.conclusion || d.followUps?.[d.followUps.length - 1]?.conclusion || d.management?.diagnosis || 'Prise en charge d\'urgence'
+          };
+        });
       compileAll();
     }, () => compileAll());
 
     // E. Service Queues / Past Orientations & Completed Consultations
     const unsubQueues = onSnapshot(collection(db, 'service_queues'), (snap) => {
-      serviceQueues = snap.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.createdAt ? d.createdAt.split('T')[0] : 'N/A';
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
-        const isConsulted = d.status === 'consulted' || d.status === 'ready_for_discharge' || d.isClotured === true;
-        return {
-          id: `queue-${docSnap.id}`,
-          patientId: d.patientId || '',
-          patientName: `${d.lastName || ''} ${d.firstName || ''}`.trim() || 'Patient',
-          dmeId: d.dmeId || d.patientId || '',
-          type: isConsulted ? 'CONSULTATION' : 'ORIENTATION',
-          date: dateStr,
-          time: d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined,
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          service: d.service || d.queueName || 'Accueil & Triage',
-          doctorName: d.practitionerName || d.agentName || 'Agent d\'Accueil',
-          motif: isConsulted ? `Consultation clôturée (${d.service || d.queueName || 'Médecine'})` : `Admission & Orientation : ${d.motif || d.service || 'Général'}`,
-          priority: d.priority || 'normal',
-          mainDiagnosis: isConsulted ? 'Session médicale terminée' : undefined
-        };
-      });
+      serviceQueues = snap.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.createdAt ? d.createdAt.split('T')[0] : 'N/A';
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          const isConsulted = d.status === 'consulted' || d.status === 'ready_for_discharge' || d.isClotured === true;
+          return {
+            id: `queue-${docSnap.id}`,
+            patientId: d.patientId || '',
+            patientName: `${d.lastName || ''} ${d.firstName || ''}`.trim() || 'Patient',
+            dmeId: d.dmeId || d.patientId || '',
+            type: isConsulted ? 'CONSULTATION' : 'ORIENTATION',
+            date: dateStr,
+            time: d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined,
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            service: d.service || d.queueName || 'Accueil & Triage',
+            doctorName: d.practitionerName || d.agentName || 'Agent d\'Accueil',
+            motif: isConsulted ? `Consultation clôturée (${d.service || d.queueName || 'Médecine'})` : `Admission & Orientation : ${d.motif || d.service || 'Général'}`,
+            priority: d.priority || 'normal',
+            mainDiagnosis: isConsulted ? 'Session médicale terminée' : undefined
+          };
+        });
       compileAll();
     }, () => compileAll());
 
     // F. Maternity Admissions
     const unsubMaternity = onSnapshot(collection(db, 'maternity_admissions'), (snap) => {
-      maternityAdmissions = snap.docs.map(docSnap => {
-        const d = docSnap.data();
-        const dateStr = d.admissionDate || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
-        const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
-        return {
-          id: `mat-${docSnap.id}`,
-          patientId: d.patientId || '',
-          patientName: d.patientName || 'Patiente',
-          dmeId: d.dmeId || d.patientId || '',
-          type: 'MATERNITE',
-          date: dateStr,
-          time: d.admissionTime || undefined,
-          timestamp: isNaN(ts) ? Date.now() : ts,
-          service: 'Maternité & Salle d\'Accouchement',
-          doctorName: d.midwife || d.doctor || 'Sage-femme de garde',
-          motif: d.reason || d.motif || 'Suivi obstétrical / Accouchement',
-          mainDiagnosis: d.gestationalAge ? `Grossesse (${d.gestationalAge} SA)` : 'Suivi Maternité'
-        };
-      });
+      maternityAdmissions = snap.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.admissionDate || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          return {
+            id: `mat-${docSnap.id}`,
+            patientId: d.patientId || '',
+            patientName: d.patientName || 'Patiente',
+            dmeId: d.dmeId || d.patientId || '',
+            type: 'MATERNITE',
+            date: dateStr,
+            time: d.admissionTime || undefined,
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            service: 'Maternité & Salle d\'Accouchement',
+            doctorName: d.midwife || d.doctor || 'Sage-femme de garde',
+            motif: d.reason || d.motif || 'Suivi obstétrical / Accouchement',
+            mainDiagnosis: d.gestationalAge ? `Grossesse (${d.gestationalAge} SA)` : 'Suivi Maternité'
+          };
+        });
       compileAll();
     }, () => compileAll());
 
@@ -339,7 +365,7 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
       unsubQueues();
       unsubMaternity();
     };
-  }, []);
+  }, [activeTenantId]);
 
   // Filtered patient list for selector dropdown
   const filteredPatientsForDropdown = useMemo(() => {

@@ -310,7 +310,7 @@ export default function ConsultationActive({
         const tenantDocs = snapshot.docs.filter(ds => belongsToTenant(ds.data(), activeTenantId));
 
         if (tenantDocs.length === 0) {
-          setDbMedications(fallbackMedications);
+          setDbMedications(activeTenantId && activeTenantId !== 'default_hospital' ? [] : fallbackMedications);
         } else {
           const list = tenantDocs.map(ds => {
             const d = ds.data();
@@ -354,7 +354,7 @@ export default function ConsultationActive({
         const tenantDocs = snapshot.docs.filter(ds => belongsToTenant(ds.data(), activeTenantId));
 
         if (tenantDocs.length === 0) {
-          setDbExams(fallbackExams);
+          setDbExams(activeTenantId && activeTenantId !== 'default_hospital' ? [] : fallbackExams);
         } else {
           const list = tenantDocs.map(ds => {
             const d = ds.data();

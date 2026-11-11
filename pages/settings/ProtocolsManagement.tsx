@@ -84,18 +84,36 @@ export const ProtocolsManagement: React.FC<ProtocolsManagementProps> = ({ user, 
   const activeTenantId = React.useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const storageKey = activeTenantId && activeTenantId !== 'default_hospital' ? `hospital_protocols_${activeTenantId}` : 'hospital_protocols';
 
-  // Load protocols from localStorage or seeds
+  // Load protocols from scoped storage (A new hospital starts strictly clean with 0 dummy protocols)
   const [protocols, setProtocols] = useState<Protocol[]>(() => {
-    const saved = localStorage.getItem(storageKey) || localStorage.getItem('hospital_protocols');
+    const saved = localStorage.getItem(storageKey);
     if (saved) {
       try {
         return JSON.parse(saved);
       } catch (e) {
-        return DEFAULT_PROTOCOLS;
+        return [];
       }
     }
-    return DEFAULT_PROTOCOLS;
+    // Only demonstration/unconfigured environment gets default protocols
+    if (activeTenantId === 'default_hospital') {
+      return DEFAULT_PROTOCOLS;
+    }
+    return [];
   });
+
+  // Re-sync whenever tenant context switches
+  useEffect(() => {
+    const saved = localStorage.getItem(storageKey);
+    if (saved) {
+      try {
+        setProtocols(JSON.parse(saved));
+      } catch {
+        setProtocols([]);
+      }
+    } else {
+      setProtocols(activeTenantId === 'default_hospital' ? DEFAULT_PROTOCOLS : []);
+    }
+  }, [storageKey, activeTenantId]);
 
   // Save protocols to localStorage on change
   useEffect(() => {

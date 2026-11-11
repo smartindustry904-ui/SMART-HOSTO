@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   ClipboardList, Search, Calendar, Clock, User, 
   BedDouble, CheckCircle2, Eye, X, Printer, Activity, Heart, FileText 
@@ -6,8 +6,15 @@ import {
 import { db } from '../../src/firebase';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import { InpatientRecord } from '../../types';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
-export const StayHistoryTab: React.FC = () => {
+interface StayHistoryTabProps {
+  user?: any;
+  establishment?: any;
+}
+
+export const StayHistoryTab: React.FC<StayHistoryTabProps> = ({ user, establishment }) => {
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const [records, setRecords] = useState<InpatientRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -21,7 +28,9 @@ export const StayHistoryTab: React.FC = () => {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as InpatientRecord));
+      const list = snapshot.docs
+        .filter(d => belongsToTenant(d.data(), activeTenantId))
+        .map(d => ({ id: d.id, ...d.data() } as InpatientRecord));
       list.sort((a, b) => new Date(b.admissionDate || 0).getTime() - new Date(a.admissionDate || 0).getTime());
       setRecords(list);
       setIsLoading(false);
@@ -31,7 +40,7 @@ export const StayHistoryTab: React.FC = () => {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [activeTenantId]);
 
   const filteredRecords = records.filter(r => {
     const term = searchTerm.toLowerCase().trim();

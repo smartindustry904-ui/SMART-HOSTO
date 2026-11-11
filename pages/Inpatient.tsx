@@ -379,12 +379,17 @@ const Inpatient: React.FC<InpatientProps> = ({
           <AdmissionRequestsTab
             onAssignBed={handleAssignBedFromRequest}
             availableBedsCount={availableBeds.length}
+            user={user}
+            establishment={establishment}
           />
         )}
 
         {/* VIEW 4: HISTORIQUE DES SÉJOURS */}
         {currentTab === 'history' && (
-          <StayHistoryTab />
+          <StayHistoryTab 
+            user={user}
+            establishment={establishment}
+          />
         )}
 
       </main>

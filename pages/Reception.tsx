@@ -704,7 +704,7 @@ const Reception: React.FC<ReceptionProps> = ({
       unsubscribeAuth();
       unsubs.forEach(unsub => unsub());
     };
-  }, []);
+  }, [activeTenantId]);
 
   // Reusable Helper to Generate sequential serial Enterprise patient ID
   const getNextSequentialIdsAndAssign = async () => {
@@ -2924,6 +2924,7 @@ const Reception: React.FC<ReceptionProps> = ({
       {(activeTab === 'historique' || activeTab === 'demandes') && (
         <HistoriquePatient 
           user={user}
+          establishment={establishment}
           selectedPatient={selectedPatientForHistory}
           onSelectPatientForAdmission={(p) => {
             handleSelectPatient(p);

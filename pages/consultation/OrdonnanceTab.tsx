@@ -5,7 +5,7 @@ import DigitalPrescription from '../tools/DigitalPrescription';
 import { Patient, User, Medication, Ordonnance, Prescription } from '../../types';
 import { db } from '../../src/firebase';
 import { collection, doc, setDoc, onSnapshot, query, orderBy, deleteDoc } from 'firebase/firestore';
-import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
 
 interface OrdonnanceTabProps {
   patient: Patient;
@@ -96,13 +96,14 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
           });
           setMedications(list);
         } else {
-          setMedications(staticMedications);
+          setMedications(activeTenantId && activeTenantId !== 'default_hospital' ? [] : staticMedications);
         }
       });
       return () => unsubscribe();
     } catch (e) {
       console.warn("Medication collection error, using fallbacks: ", e);
-      setMedications(staticMedications);
+      const activeTenantId = getActiveTenantId(user, patient);
+      setMedications(activeTenantId && activeTenantId !== 'default_hospital' ? [] : staticMedications);
     }
   }, [user, patient]);
 
@@ -117,7 +118,7 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
       const doctorName = user?.name || user?.username || 'Dr. Sarr';
       const doctorId = user?.id || '';
 
-      const payload = {
+      const payload = stampTenantData({
         id: newOrdId,
         firebaseId: docRef.id,
         patientId: patient.id,
@@ -142,7 +143,7 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         })),
         createdAt: today.toISOString(),
         status: 'pending'
-      };
+      }, user);
 
       await setDoc(docRef, payload);
 

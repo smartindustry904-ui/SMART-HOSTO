@@ -9,6 +9,7 @@ import {
   writeBatch, orderBy, limit 
 } from 'firebase/firestore';
 import { Bed, Room, Patient, User as UserType } from '../../types';
+import { stampTenantData } from '../../src/utils/tenant';
 
 interface BedAdmissionModalProps {
   isOpen: boolean;
@@ -208,7 +209,7 @@ export const BedAdmissionModal: React.FC<BedAdmissionModalProps> = ({
       // 5. Create Inpatient Record
       const inpatientRecordId = `INP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const inpRef = doc(db, 'inpatient_records', inpatientRecordId);
-      batch.set(inpRef, sanitizeData({
+      batch.set(inpRef, sanitizeData(stampTenantData({
         id: inpatientRecordId,
         patientId: selectedPatient.id,
         patientName: patientFullName,
@@ -234,7 +235,7 @@ export const BedAdmissionModal: React.FC<BedAdmissionModalProps> = ({
         vitals: [],
         cares: [],
         observations: []
-      }));
+      }, currentUser)));
 
       // 6. If from an admission request, update it
       if (preselectedPatient?.requestId) {

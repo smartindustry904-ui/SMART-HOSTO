@@ -22,9 +22,10 @@ import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { MedicalStatusBadge } from '../components/common/MedicalStatusBadge';
 import { MicroHeader } from '../components/common/MicroHeader';
 import { User as UserType, PaymentRequest } from '../types';
-import { useHospitalServices } from '../hooks/useSettings';
+import { useHospitalServices, useSettings } from '../hooks/useSettings';
 import { db, sanitizeData } from '../src/firebase';
 import { collection, doc, setDoc, getDocs, query, where, updateDoc, onSnapshot, getDoc, writeBatch } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
 interface ConsultationProps {
   user?: UserType;
@@ -52,6 +53,8 @@ const Consultation: React.FC<ConsultationProps> = ({
   theme = 'light'
 }) => {
   const [activePatient, setActivePatient] = useState<any | null>(null);
+  const { establishment } = useSettings();
+  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
   const { services: hospitalServices } = useHospitalServices();
   const [selectedSpecialty, setSelectedSpecialty] = useState<string>('ALL');
   const isSendingPrescriptionRef = useRef(false);
@@ -97,7 +100,7 @@ const Consultation: React.FC<ConsultationProps> = ({
               await updateDoc(doc(db, 'service_queues', d.id), { status: 'in_consultation' });
             }
           } else {
-            await setDoc(doc(collection(db, 'service_queues')), {
+            await setDoc(doc(collection(db, 'service_queues')), sanitizeData(stampTenantData({
               patientId: patientId,
               dmeId: patientId,
               firstName: rdv.firstName || '',
@@ -111,7 +114,7 @@ const Consultation: React.FC<ConsultationProps> = ({
               paymentStatus: 'SOLDE',
               priority: 'normal',
               createdAt: new Date().toISOString()
-            });
+            }, user)));
           }
         }
       } catch (e) {
@@ -211,90 +214,94 @@ const Consultation: React.FC<ConsultationProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Listen to rooms and beds for direct admission
+  // Listen to rooms and beds for direct admission (Strict multi-tenant isolation)
   useEffect(() => {
     const unsubRooms = onSnapshot(collection(db, 'rooms'), (snap) => {
-      setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(r => belongsToTenant(r, activeTenantId)));
     });
     const unsubBeds = onSnapshot(collection(db, 'beds'), (snap) => {
-      setBeds(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setBeds(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(b => belongsToTenant(b, activeTenantId)));
     });
     return () => {
       unsubRooms();
       unsubBeds();
     };
-  }, []);
+  }, [activeTenantId]);
 
-  // Listen to all appointments for dashboard
+  // Listen to all appointments for dashboard (Strict multi-tenant isolation)
   useEffect(() => {
     const q = query(collection(db, 'appointments'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(a => belongsToTenant(a, activeTenantId));
       setAppointments(list);
     });
     return () => unsubscribe();
-  }, []);
+  }, [activeTenantId]);
 
-  // Listen to hospitalized patients from Inpatient module
+  // Listen to hospitalized patients from Inpatient module (Strict multi-tenant isolation)
   useEffect(() => {
     const q = query(collection(db, 'inpatient_records'), where('status', '==', 'admitted'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          ...data,
-          id: data.patientId || doc.id,
-          lastName: data.patientName?.split(' ')[0] || 'Patient',
-          firstName: data.patientName?.split(' ').slice(1).join(' ') || '',
-          sourceModule: 'Inpatient',
-          hospitalizedOrigin: 'Hospitalisation',
-          priority: data.priority === 'Haute' ? 'critique' : (data.priority === 'Moyenne' ? 'urgent' : 'normal'),
-          time: data.admissionDate ? new Date(data.admissionDate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--:--',
-          motif: data.motif || 'Suivi Hospitalisation',
-          status: 'waiting' // Treat as waiting for doctor visit
-        };
-      });
+      const list = snapshot.docs
+        .filter(doc => belongsToTenant(doc.data(), activeTenantId))
+        .map(doc => {
+          const data = doc.data();
+          return {
+            ...data,
+            id: data.patientId || doc.id,
+            lastName: data.patientName?.split(' ')[0] || 'Patient',
+            firstName: data.patientName?.split(' ').slice(1).join(' ') || '',
+            sourceModule: 'Inpatient',
+            hospitalizedOrigin: 'Hospitalisation',
+            priority: data.priority === 'Haute' ? 'critique' : (data.priority === 'Moyenne' ? 'urgent' : 'normal'),
+            time: data.admissionDate ? new Date(data.admissionDate).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--:--',
+            motif: data.motif || 'Suivi Hospitalisation',
+            status: 'waiting' // Treat as waiting for doctor visit
+          };
+        });
       setHospitalizedPatients(prev => {
         const otherHosp = prev.filter(p => p.sourceModule !== 'Inpatient');
         return [...otherHosp, ...list];
       });
     });
     return () => unsubscribe();
-  }, []);
+  }, [activeTenantId]);
 
-  // Listen to hospitalized patients from Maternity module
+  // Listen to hospitalized patients from Maternity module (Strict multi-tenant isolation)
   useEffect(() => {
     const q = query(collection(db, 'maternity_admissions'), where('status', '==', 'ADMITTED'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list = snapshot.docs.map(doc => {
-        const data = doc.data();
-        return {
-          ...data,
-          id: data.patientId || doc.id,
-          lastName: data.patientName?.split(' ')[0] || 'Patiente',
-          firstName: data.patientName?.split(' ').slice(1).join(' ') || '',
-          sourceModule: 'Maternity',
-          hospitalizedOrigin: 'Maternité',
-          priority: 'normal',
-          time: data.admittedAt ? new Date(data.admittedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--:--',
-          motif: data.stage || 'Suivi Maternité',
-          status: 'waiting'
-        };
-      });
+      const list = snapshot.docs
+        .filter(doc => belongsToTenant(doc.data(), activeTenantId))
+        .map(doc => {
+          const data = doc.data();
+          return {
+            ...data,
+            id: data.patientId || doc.id,
+            lastName: data.patientName?.split(' ')[0] || 'Patiente',
+            firstName: data.patientName?.split(' ').slice(1).join(' ') || '',
+            sourceModule: 'Maternity',
+            hospitalizedOrigin: 'Maternité',
+            priority: 'normal',
+            time: data.admittedAt ? new Date(data.admittedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--:--',
+            motif: data.stage || 'Suivi Maternité',
+            status: 'waiting'
+          };
+        });
       setHospitalizedPatients(prev => {
         const otherHosp = prev.filter(p => p.sourceModule !== 'Maternity');
         return [...otherHosp, ...list];
       });
     });
     return () => unsubscribe();
-  }, []);
+  }, [activeTenantId]);
 
   // Listen to active patient's appointments
   useEffect(() => {
     if (activePatient?.id) {
       const q = query(collection(db, 'appointments'), where('patientId', '==', activePatient.id));
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(a => belongsToTenant(a, activeTenantId));
         // Sort by date/time
         list.sort((a: any, b: any) => {
           const dateCompare = (a.date || '').localeCompare(b.date || '');
@@ -307,7 +314,7 @@ const Consultation: React.FC<ConsultationProps> = ({
     } else {
       setActivePatientAppointments([]);
     }
-  }, [activePatient?.id]);
+  }, [activePatient?.id, activeTenantId]);
 
   // Listen to active patient's hospitalization status
   useEffect(() => {
@@ -318,13 +325,14 @@ const Consultation: React.FC<ConsultationProps> = ({
         where('status', '==', 'admitted')
       );
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        setIsCurrentlyHospitalized(!snapshot.empty);
+        const matches = snapshot.docs.filter(d => belongsToTenant(d.data(), activeTenantId));
+        setIsCurrentlyHospitalized(matches.length > 0);
       });
       return () => unsubscribe();
     } else {
       setIsCurrentlyHospitalized(false);
     }
-  }, [activePatient?.id]);
+  }, [activePatient?.id, activeTenantId]);
 
   const handleDischargeDirectly = async (patient: any) => {
     if (!patient) return;
@@ -361,7 +369,7 @@ const Consultation: React.FC<ConsultationProps> = ({
 
       // 2. Put into discharges_waiting so Reception can finalize their physical exit paper
       const dischargeId = `DIS-${targetPid}`;
-      await setDoc(doc(db, 'discharges_waiting', dischargeId), sanitizeData({
+      await setDoc(doc(db, 'discharges_waiting', dischargeId), sanitizeData(stampTenantData({
         id: dischargeId,
         docId: dischargeId,
         patientId: targetPid,
@@ -378,7 +386,7 @@ const Consultation: React.FC<ConsultationProps> = ({
         source: 'CONSULTATION',
         dischargedAt: today.toISOString(),
         createdAt: today.toISOString()
-      }), { merge: true });
+      }, user)), { merge: true });
 
       // 3. Trace in audit logs
       await setDoc(doc(collection(db, 'audit_logs')), {
@@ -589,7 +597,7 @@ const Consultation: React.FC<ConsultationProps> = ({
         // 2. Push/Update discharges_waiting for Reception so patient appears in Sorties Administratives
         if (activePatient.status !== 'hospitalized') {
           const dischargeId = `DIS-${targetPid}`;
-          await setDoc(doc(db, 'discharges_waiting', dischargeId), sanitizeData({
+          await setDoc(doc(db, 'discharges_waiting', dischargeId), sanitizeData(stampTenantData({
             id: dischargeId,
             docId: dischargeId,
             patientId: targetPid,
@@ -606,7 +614,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             source: 'CONSULTATION',
             department: activePatient.service || activePatient.queueName || 'Consultation',
             createdAt: today.toISOString()
-          }), { merge: true });
+          }, user)), { merge: true });
         }
 
         // 3. Ensure a consultation record exists in 'consultations' and 'patient_history'
@@ -615,7 +623,7 @@ const Consultation: React.FC<ConsultationProps> = ({
         const consSnap = await getDoc(consRef);
         if (!consSnap.exists()) {
           const nowIso = today.toISOString();
-          const consPayload = {
+          const consPayload = stampTenantData({
             id: consultationId,
             patientId: targetPid,
             patientName: `${activePatient.lastName || ''} ${activePatient.firstName || ''}`.trim(),
@@ -639,11 +647,11 @@ const Consultation: React.FC<ConsultationProps> = ({
             isClotured: true,
             cloturedAt: nowIso,
             createdAt: nowIso
-          };
+          }, user);
           await setDoc(consRef, sanitizeData(consPayload));
 
           const historyId = `HIST-${targetPid}-${consultationId}`;
-          await setDoc(doc(db, 'patient_history', historyId), sanitizeData({
+          await setDoc(doc(db, 'patient_history', historyId), sanitizeData(stampTenantData({
             id: historyId,
             patientId: targetPid,
             consultationId: consultationId,
@@ -659,7 +667,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             status: 'cloture',
             isClotured: true,
             createdAt: nowIso
-          }));
+          }, user)));
         }
 
         window.dispatchEvent(new CustomEvent('app-notification', {
@@ -743,9 +751,9 @@ const Consultation: React.FC<ConsultationProps> = ({
         module: 'Consultation'
       });
 
-      // 2. Create target queue document
+      // 2. Create target queue document with strict multi-tenant isolation
       const queueDocRef = doc(collection(db, 'service_queues'));
-      await setDoc(queueDocRef, {
+      await setDoc(queueDocRef, sanitizeData(stampTenantData({
         id: queueDocRef.id,
         patientId: patient.id,
         firstName: patient.firstName || '',
@@ -763,7 +771,7 @@ const Consultation: React.FC<ConsultationProps> = ({
         priority: (targetService === 'Emergency' || targetService === 'Urgences') ? 'critique' : 'normal',
         vitals: patient.vitals || {},
         createdAt: today.toISOString()
-      });
+      }, user)));
 
       // 3. Update patient's service and motif in global queue so they land in the corresponding service's salle d'attente
       if (setWaitingQueue) {
@@ -834,7 +842,7 @@ const Consultation: React.FC<ConsultationProps> = ({
     try {
       const hospReqId = `HOSP-${Math.floor(Math.random() * 1000000)}`;
 
-      await setDoc(doc(db, 'hospitalisation_requests', hospReqId), {
+      await setDoc(doc(db, 'hospitalisation_requests', hospReqId), sanitizeData(stampTenantData({
         id: hospReqId,
         patientId: activePatient.id,
         patientName: `${activePatient.lastName} ${activePatient.firstName}`,
@@ -856,7 +864,7 @@ const Consultation: React.FC<ConsultationProps> = ({
         practitionerName: user?.name || user?.username || 'Docteur',
         practitionerRole: user?.role || 'MEDECIN',
         createdAt: today.toISOString()
-      });
+      }, user)));
 
       await setDoc(doc(collection(db, 'audit_logs')), {
         user: user?.name || user?.email || 'Docteur',
@@ -943,14 +951,14 @@ const Consultation: React.FC<ConsultationProps> = ({
         status: 'draft',
         createdAt: today.toISOString()
       };
-      await setDoc(consDocRef, consultationPayload);
+      await setDoc(consDocRef, sanitizeData(stampTenantData(consultationPayload, user)));
 
       // Keep consultationId stored inside activePatient so subsequent edits/closures reference the same doc
       setActivePatient((prev: any) => prev ? { ...prev, consultationId } : null);
 
       // 2. Write/update in 'patient_history' collection
       const historyId = `HIST-${activePatient.id}-${consultationId}`;
-      await setDoc(doc(db, 'patient_history', historyId), sanitizeData({
+      await setDoc(doc(db, 'patient_history', historyId), sanitizeData(stampTenantData({
         id: historyId,
         patientId: activePatient.id,
         consultationId: consultationId,
@@ -969,7 +977,7 @@ const Consultation: React.FC<ConsultationProps> = ({
         observation: data.observation || '',
         status: 'draft',
         updatedAt: today.toISOString()
-      }));
+      }, user)));
 
       // 3. Create entry in 'audit_logs'
       await setDoc(doc(collection(db, 'audit_logs')), sanitizeData({
@@ -1438,8 +1446,8 @@ const Consultation: React.FC<ConsultationProps> = ({
       const consultationId = activePatient.consultationId || `CONS-${Math.floor(Math.random() * 1000000)}`;
       const prescriptionId = `ORD-${Math.floor(Math.random() * 1000000)}`;
 
-      // 1. Create entry in pending_prescriptions
-      await setDoc(doc(db, 'pending_prescriptions', prescriptionId), sanitizeData({
+      // 1. Create entry in pending_prescriptions with strict multi-tenant isolation
+      await setDoc(doc(db, 'pending_prescriptions', prescriptionId), sanitizeData(stampTenantData({
         id: prescriptionId,
         patientId: activePatient.id,
         patient: `${activePatient.lastName} ${activePatient.firstName}`,
@@ -1461,7 +1469,7 @@ const Consultation: React.FC<ConsultationProps> = ({
         })),
         createdAt: today.toISOString(),
         status: 'pending'
-      }));
+      }, user)));
 
       // 2. Direct to Pharmacy POS (Medication billing & dispensing happens exclusively at Pharmacy POS)
       const totalEstimated = prescriptions.reduce((sum: number, p: any) => sum + (p.price || 1500), 0);
@@ -1524,10 +1532,10 @@ const Consultation: React.FC<ConsultationProps> = ({
       const consultationId = activePatient.consultationId || `CONS-${Math.floor(Math.random() * 1000000)}`;
       const labRequestId = `LAB-${Math.floor(Math.random() * 1000000)}`;
 
-      // 1. Create entry in lab_requests
+      // 1. Create entry in lab_requests with strict multi-tenant isolation
       const practitionerName = user?.name || user?.username || 'Dr. Sarr';
       const practitionerId = user?.id || '';
-      await setDoc(doc(db, 'lab_requests', labRequestId), sanitizeData({
+      await setDoc(doc(db, 'lab_requests', labRequestId), sanitizeData(stampTenantData({
         id: labRequestId,
         patientId: activePatient.id,
         patientName: `${activePatient.lastName} ${activePatient.firstName}`,
@@ -1551,7 +1559,7 @@ const Consultation: React.FC<ConsultationProps> = ({
           practitionerName: practitionerName
         })),
         createdAt: today.toISOString()
-      }));
+      }, user)));
 
       // 2. Also register billing for laboratory request so patient can pay
       const invoiceItems = exams.map((e: any, idx: number) => {
@@ -1591,7 +1599,7 @@ const Consultation: React.FC<ConsultationProps> = ({
         requestedById: practitionerId
       };
 
-      await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(paymentPayload));
+      await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(stampTenantData(paymentPayload, user)));
 
       if (setPaymentRequests) {
         // setPaymentRequests is handled by onSnapshot in App.tsx

@@ -492,9 +492,13 @@ const App: React.FC = () => {
     getDoc(clinicRef).then(snap => {
       if (snap.exists()) {
         const cData = snap.data();
-        if (cData.name && cData.name !== establishment.name) {
+        if ((cData.name && cData.name !== establishment.name) || establishment.id !== activeTenantId) {
           updateEstablishment({
-            name: cData.name,
+            id: activeTenantId,
+            tenantId: activeTenantId,
+            clinicId: activeTenantId,
+            hospital_id: activeTenantId,
+            name: cData.name || establishment.name,
             address: cData.address || establishment.address,
             phone: cData.phone || establishment.phone,
             city: cData.city || establishment.city,
@@ -506,9 +510,13 @@ const App: React.FC = () => {
         getDoc(doc(db, 'hospitals', activeTenantId)).then(hSnap => {
           if (hSnap.exists()) {
             const hData = hSnap.data();
-            if (hData.name && hData.name !== establishment.name) {
+            if ((hData.name && hData.name !== establishment.name) || establishment.id !== activeTenantId) {
               updateEstablishment({
-                name: hData.name,
+                id: activeTenantId,
+                tenantId: activeTenantId,
+                clinicId: activeTenantId,
+                hospital_id: activeTenantId,
+                name: hData.name || establishment.name,
                 address: hData.address || establishment.address,
                 phone: hData.phone || establishment.phone,
                 city: hData.city || establishment.city,
@@ -520,7 +528,7 @@ const App: React.FC = () => {
         }).catch(() => {});
       }
     }).catch(() => {});
-  }, [activeTenantId]);
+  }, [activeTenantId, establishment.id, establishment.name]);
 
   // Vérification de la session au démarrage
   useEffect(() => {
@@ -634,6 +642,12 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('hospital_session');
+    localStorage.removeItem('hospital_config');
+    localStorage.removeItem('hospital_services');
+    localStorage.removeItem('hospital_cashier_config');
+    localStorage.removeItem('hospital_tools');
+    localStorage.removeItem('hospital_protocols');
+    localStorage.removeItem('hospital_medical_acts');
     auth.signOut();
     setInspectingTenant(null);
     setUser(null);

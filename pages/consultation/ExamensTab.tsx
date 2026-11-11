@@ -5,6 +5,7 @@ import LabExamRequestForm from '../../components/LabExamRequestForm';
 import { Patient, User, LabExamRequest, ResultatLaboratoire } from '../../types';
 import { db } from '../../src/firebase';
 import { collection, query, onSnapshot, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
+import { stampTenantData } from '../../src/utils/tenant';
 
 interface ExamensTabProps {
   patient: Patient;
@@ -137,8 +138,8 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
         }))
       };
 
-      // Write to Firestore 'lab_requests'
-      await setDoc(docRef, newRequest);
+      // Write to Firestore 'lab_requests' with strict multi-tenant isolation
+      await setDoc(docRef, stampTenantData(newRequest, user));
 
       // Save to local storage for local fallbacks
       const savedRequests = localStorage.getItem('hospital_lab_requests');
