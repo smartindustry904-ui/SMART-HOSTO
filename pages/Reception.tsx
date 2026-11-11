@@ -10,13 +10,13 @@ import {
   User as UserIcon, ArrowRightLeft,
   Scale, Thermometer, Info, Award, Settings,
   TrendingUp, Home, Loader2, ArrowLeft, History,
-  Bed, Syringe, Sparkles, Lock
+  Bed, Syringe, Sparkles, Lock, Mail, Phone, Shield, Key, Edit3
 } from 'lucide-react';
 import { Patient, VisitMotif, Role, User as UserType, PatientStatus, LabExamRequest, PaymentRequest, Service, MedicalAct } from '../types';
 import LabExamRequestForm from '../components/LabExamRequestForm';
 import { useSettings, useHospitalServices, useMedicalActs, getDefaultServices, getDefaultMedicalActs } from '../hooks/useSettings';
 import { useCustomRoles } from '../hooks/useCustomRoles';
-import { getUserModulePermissions } from '../src/config/modules';
+import { getUserModulePermissions, isUserAuthorizedForModule } from '../src/config/modules';
 import { Avatar } from '../components/common/Avatar';
 import { PrintReceiptModal, PrintableReceiptData } from '../components/common/PrintReceiptModal';
 
@@ -1184,10 +1184,95 @@ const Reception: React.FC<ReceptionProps> = ({
     };
   }, [totalToPay, amountReceived]);
 
-  const agentProfile = user || {
-    name: "Moussa Diop", profession: "Agent d'accueil Principal", role: Role.RECEPTION,
-    schedule: "Lun-Ven (08h00 - 17h00)", salary: "250,000 {currency}", quotePartRate: "1%"
-  };
+  const agentProfile = useMemo(() => {
+    if (user) {
+      return {
+        ...user,
+        name: user.name || 'Agent Hospitalier',
+        profession: user.profession || "Personnel de Réception",
+        role: user.role || Role.RECEPTION,
+        schedule: user.schedule || "Lun-Ven (08h00 - 17h00)",
+        salary: user.salary ? `${user.salary} ${currency}` : "Confidentiel",
+        quotePartRate: user.quotePartRate || "Standard"
+      };
+    }
+    return {
+      name: "Moussa Diop", 
+      profession: "Agent d'accueil Principal", 
+      role: Role.RECEPTION,
+      schedule: "Lun-Ven (08h00 - 17h00)", 
+      salary: `250,000 ${currency}`, 
+      quotePartRate: "1%"
+    };
+  }, [user, currency]);
+
+  const userRoleLabels = useMemo(() => {
+    if (!user) return ['Réceptionniste'];
+    const labels: string[] = [];
+    if (user.role) {
+      labels.push(user.role);
+    }
+    if (Array.isArray(user.roles)) {
+      user.roles.forEach(rid => {
+        const found = customRoles.find(r => r.id === rid);
+        if (found && !labels.includes(found.name)) {
+          labels.push(found.name);
+        }
+      });
+    }
+    return labels.length > 0 ? labels : [user.role || 'Personnel'];
+  }, [user, customRoles]);
+
+  const userModulesList = useMemo(() => [
+    {
+      name: "Accueil & Admissions",
+      role: Role.RECEPTION,
+      enabled: isUserAuthorizedForModule(user, Role.RECEPTION, customRoles),
+      detail: permissions.canWrite ? "Lecture & Écriture" : permissions.canRead ? "Lecture Seule" : "Non autorisé"
+    },
+    {
+      name: "Caisse & Règlements",
+      role: Role.CASHIER,
+      enabled: isUserAuthorizedForModule(user, Role.CASHIER, customRoles),
+      detail: isUserAuthorizedForModule(user, Role.CASHIER, customRoles) ? "Accès caisse actif" : "Désactivé"
+    },
+    {
+      name: "Consultation & Dossier Médical",
+      role: Role.DOCTOR,
+      enabled: isUserAuthorizedForModule(user, Role.DOCTOR, customRoles),
+      detail: isUserAuthorizedForModule(user, Role.DOCTOR, customRoles) ? "Accès médical actif" : "Désactivé"
+    },
+    {
+      name: "Soins Infirmiers & Triage",
+      role: Role.NURSE,
+      enabled: isUserAuthorizedForModule(user, Role.NURSE, customRoles),
+      detail: isUserAuthorizedForModule(user, Role.NURSE, customRoles) ? "Accès soins actif" : "Désactivé"
+    },
+    {
+      name: "Laboratoire & Examens",
+      role: Role.LAB,
+      enabled: isUserAuthorizedForModule(user, Role.LAB, customRoles),
+      detail: isUserAuthorizedForModule(user, Role.LAB, customRoles) ? "Accès analyses actif" : "Désactivé"
+    },
+    {
+      name: "Pharmacie & Dispensation",
+      role: Role.PHARMACY,
+      enabled: isUserAuthorizedForModule(user, Role.PHARMACY, customRoles),
+      detail: isUserAuthorizedForModule(user, Role.PHARMACY, customRoles) ? "Accès dispensation actif" : "Désactivé"
+    },
+    {
+      name: "Hospitalisation & Lits",
+      role: Role.INPATIENT,
+      enabled: isUserAuthorizedForModule(user, Role.INPATIENT, customRoles),
+      detail: isUserAuthorizedForModule(user, Role.INPATIENT, customRoles) ? "Accès séjours actif" : "Désactivé"
+    },
+    {
+      name: "Comptabilité & Journaux",
+      role: 'accounting',
+      enabled: isUserAuthorizedForModule(user, 'accounting', customRoles),
+      detail: isUserAuthorizedForModule(user, 'accounting', customRoles) ? "Accès finances actif" : "Désactivé"
+    }
+  ], [user, customRoles, permissions]);
 
   const filteredPatients = useMemo(() => {
     const q = (searchQuery || '').toLowerCase().trim();
@@ -1825,7 +1910,7 @@ const Reception: React.FC<ReceptionProps> = ({
         ]}
         onHomeClick={onBackToDashboard}
         onBackClick={activeTab !== 'dashboard' ? () => setActiveTab('dashboard') : undefined}
-        user={{ name: agentProfile.name }}
+        user={user || agentProfile}
         theme={theme}
         actions={
           <div className="flex items-center gap-1.5 overflow-x-auto">
@@ -3008,102 +3093,202 @@ const Reception: React.FC<ReceptionProps> = ({
       )}
 
       {activeTab === 'profil' && (
-        <div className="animate-in fade-in slide-in-from-bottom-6 duration-700">
-           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-             <div className="lg:col-span-4 space-y-8">
-                <div className="bg-white p-12 rounded-[50px] border border-slate-200 shadow-sm text-center relative overflow-hidden group">
-                   <div className="absolute top-0 left-0 w-full h-24 bg-blue-600 group-hover:h-32 transition-all duration-500"></div>
-                   <div className="relative z-10 mt-4">
-                      <div className="mx-auto mb-6 flex justify-center">
+        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-6xl mx-auto p-2 sm:p-4">
+           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+             {/* Left Column: User Card & Digital Badge */}
+             <div className="lg:col-span-5 space-y-6">
+                <div className={`p-6 sm:p-8 rounded-3xl border shadow-xs text-center relative overflow-hidden group ${
+                  theme === 'dark' ? 'bg-[#111827] border-slate-800' : 'bg-white border-slate-200'
+                }`}>
+                   <div className="absolute top-0 left-0 w-full h-20 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700"></div>
+                   <div className="relative z-10 mt-3">
+                      <div className="mx-auto mb-4 flex justify-center">
                         <Avatar 
-                          user={agentProfile} 
-                          size={128} 
-                          className="border-8 border-white bg-slate-100 shadow-2xl" 
-                          alt={agentProfile.name}
+                          user={user || agentProfile} 
+                          size={104} 
+                          className="border-4 border-white bg-slate-100 shadow-xl" 
+                          alt={user?.name || agentProfile.name}
                         />
                       </div>
-                      <h2 className="text-3xl font-black italic text-slate-900 tracking-tight">{agentProfile.name}</h2>
-                      <p className="text-blue-600 font-black text-xs uppercase tracking-widest mt-2">{agentProfile.role}</p>
+                      <h2 className={`text-xl sm:text-2xl font-black tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                        {user?.name || agentProfile.name}
+                      </h2>
                       
-                      <div className="mt-10 flex gap-4 justify-center">
-                         <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100">
-                            <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Actes du jour</p>
-                            <p className="text-xl font-black text-slate-900">{todaysRequests.length}</p>
+                      {/* Real User Roles Badges */}
+                      <div className="flex flex-wrap items-center justify-center gap-1.5 mt-2.5">
+                        {userRoleLabels.map((rl, idx) => (
+                          <span key={idx} className="text-[11px] font-black uppercase px-2.5 py-0.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                            {rl}
+                          </span>
+                        ))}
+                      </div>
+
+                      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 mt-2">
+                        {establishment?.name || 'Établissement Hospitalier'}
+                      </p>
+                      
+                      <div className="mt-6 grid grid-cols-2 gap-3">
+                         <div className={`p-3 rounded-2xl border ${theme === 'dark' ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-100'}`}>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Actes du jour</p>
+                            <p className={`text-lg font-black mt-0.5 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{todaysRequests.length}</p>
                          </div>
-                         <div className="bg-emerald-50 p-4 rounded-3xl border border-emerald-100">
-                            <p className="text-[9px] font-black text-emerald-400 uppercase mb-1">Quote-part</p>
-                            <p className="text-xl font-black text-emerald-600">{agentProfile.quotePartRate}</p>
+                         <div className={`p-3 rounded-2xl border ${theme === 'dark' ? 'bg-emerald-950/20 border-emerald-800/40' : 'bg-emerald-50 border-emerald-100'}`}>
+                            <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">Statut Session</p>
+                            <div className="flex items-center justify-center gap-1.5 mt-1">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                              <span className="text-xs font-black text-emerald-600 dark:text-emerald-400">En Ligne</span>
+                            </div>
                          </div>
                       </div>
+
+                      <button 
+                        type="button"
+                        onClick={() => window.dispatchEvent(new CustomEvent('open-user-profile'))}
+                        className="mt-6 w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                      >
+                        <Edit3 size={15} />
+                        <span>Modifier Mon Profil & Sécurité</span>
+                      </button>
                    </div>
                 </div>
 
-                <div className="bg-slate-900 p-10 rounded-[45px] text-white shadow-2xl">
-                   <h3 className="text-xl font-black mb-8 flex items-center gap-3 italic"><Award className="text-blue-400" /> Mon Badge Digital</h3>
-                   <div className="space-y-6">
-                      <div className="flex justify-between items-center text-xs">
-                         <span className="text-slate-400 font-bold uppercase">Profession</span>
-                         <span className="font-black text-blue-400">{agentProfile.profession}</span>
+                {/* Digital Badge Card */}
+                <div className="bg-slate-900 p-6 sm:p-7 rounded-3xl text-white shadow-xl border border-slate-800">
+                   <div className="flex items-center justify-between mb-5">
+                     <h3 className="text-base font-black flex items-center gap-2 text-white">
+                       <Award className="text-blue-400" size={18} /> Mon Badge Numérique
+                     </h3>
+                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                       Vérifié
+                     </span>
+                   </div>
+                   
+                   <div className="space-y-3.5 text-xs divide-y divide-slate-800">
+                      <div className="flex justify-between items-center pt-2">
+                         <span className="text-slate-400 font-medium">Identifiant</span>
+                         <span className="font-bold font-mono text-white">{user?.username || user?.id?.slice(0, 8) || 'N/A'}</span>
                       </div>
-                      <div className="flex justify-between items-center text-xs">
-                         <span className="text-slate-400 font-bold uppercase">ID Badge</span>
-                         <span className="font-black font-mono tracking-tighter">#SH-2024-{agentProfile.name.split(' ')[0].toUpperCase()}</span>
+                      <div className="flex justify-between items-center pt-2">
+                         <span className="text-slate-400 font-medium">Matricule ID</span>
+                         <span className="font-black font-mono text-blue-400 tracking-wider">
+                           #SH-{user?.id ? user.id.slice(-6).toUpperCase() : (user?.username || 'AGENT').toUpperCase()}
+                         </span>
                       </div>
-                      <div className="flex justify-between items-center text-xs">
-                         <span className="text-slate-400 font-bold uppercase">Salaire Base</span>
-                         <span className="font-black text-emerald-400">{agentProfile.salary}</span>
+                      <div className="flex justify-between items-center pt-2">
+                         <span className="text-slate-400 font-medium">Profession</span>
+                         <span className="font-bold text-slate-200">{user?.profession || agentProfile.profession}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-2">
+                         <span className="text-slate-400 font-medium">Email</span>
+                         <span className="font-semibold text-slate-300 truncate max-w-[180px]">{user?.email || 'Non renseigné'}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-2">
+                         <span className="text-slate-400 font-medium">Téléphone</span>
+                         <span className="font-semibold text-slate-300">{user?.phone || 'Non renseigné'}</span>
                       </div>
                    </div>
-                   <button className="w-full mt-10 py-5 bg-white/10 hover:bg-white/20 rounded-3xl font-black text-xs uppercase tracking-widest transition-all">Consulter Mes Bulletins</button>
+
+                   <button 
+                     type="button"
+                     onClick={() => window.dispatchEvent(new CustomEvent('open-user-profile'))}
+                     className="w-full mt-6 py-2.5 bg-white/10 hover:bg-white/20 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer"
+                   >
+                     <Key size={14} />
+                     <span>Changer Mot de passe</span>
+                   </button>
                 </div>
              </div>
 
-             <div className="lg:col-span-8 space-y-8">
-                <div className="bg-white p-12 rounded-[50px] border border-slate-200 shadow-sm h-full">
-                   <div className="flex items-center justify-between mb-12">
-                      <h3 className="text-2xl font-black italic flex items-center gap-3"><Clock size={24} className="text-blue-600" /> Planning & Activité</h3>
-                      <button className="flex items-center gap-2 text-xs font-black text-slate-400 hover:text-slate-900 transition-colors uppercase italic"><Settings size={16} /> Gérer Mes Disponibilités</button>
+             {/* Right Column: Planning, Activity & Live RBAC Modules */}
+             <div className="lg:col-span-7 space-y-6">
+                <div className={`p-6 sm:p-8 rounded-3xl border shadow-xs ${
+                  theme === 'dark' ? 'bg-[#111827] border-slate-800' : 'bg-white border-slate-200'
+                }`}>
+                   <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 dark:border-slate-800">
+                      <div>
+                        <h3 className={`text-lg font-black flex items-center gap-2 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                          <Clock size={20} className="text-blue-600" /> Planning & Activité du Poste
+                        </h3>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Informations de poste synchronisées en temps réel</p>
+                      </div>
+                      <span className="text-xs font-mono font-bold text-blue-600 bg-blue-50 dark:bg-blue-900/30 px-2.5 py-1 rounded-lg">
+                        {new Date().toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' })}
+                      </span>
                    </div>
                    
-                   <div className="grid grid-cols-2 gap-8 mb-12">
-                      <div className="p-8 bg-blue-50 rounded-[40px] border border-blue-100 relative overflow-hidden group">
-                        <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform"><Calendar size={100} /></div>
-                        <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-3 italic">Mon Horaire Officiel</p>
-                        <h4 className="text-2xl font-black text-blue-900">{agentProfile.schedule}</h4>
-                        <div className="text-xs text-blue-600 mt-4 font-bold italic flex items-center gap-2"><div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div> Session en cours depuis 08:00</div>
-                      </div>
-                      <div className="p-8 bg-slate-50 rounded-[40px] border border-slate-100 group relative overflow-hidden">
-                        <div className="absolute top-0 right-0 p-6 opacity-10 group-hover:scale-110 transition-transform"><TrendingUp size={100} /></div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 italic">Dernières Demandes Traitées</p>
-                        <div className="space-y-2 mt-4 relative z-10">
-                           {todaysRequests.slice(0, 3).map((tx, idx) => (
-                             <div key={tx.id || `tx-summary-${tx.patientId || 'pt'}-${idx}`} className="flex justify-between items-center text-[11px] font-bold">
-                               <span className="text-slate-900 italic">{tx.patientName}</span>
-                               <span className="text-blue-600 font-mono">{((tx.totalAmount || 0) || (tx.total || 0)).toLocaleString()} {currency}</span>
-                             </div>
-                           ))}
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                      <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-2xl border border-blue-100 dark:border-blue-900/40 relative overflow-hidden">
+                        <p className="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1">Horaire Prévu</p>
+                        <h4 className="text-base font-black text-blue-950 dark:text-blue-100">{agentProfile.schedule}</h4>
+                        <div className="text-xs text-blue-600 dark:text-blue-400 mt-2 font-semibold flex items-center gap-1.5">
+                          <CheckCircle size={13} /> Session hospitalière active
                         </div>
+                      </div>
+                      <div className={`p-4 rounded-2xl border ${theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200/70'}`}>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1">Activité Récente</p>
+                        <p className={`text-base font-black ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{todaysRequests.length} patient(s) accueilli(s)</p>
+                        <p className="text-xs text-slate-500 mt-1">Dernière mise à jour automatique en continu</p>
                       </div>
                    </div>
 
-                   <section>
-                      <h4 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-6 flex items-center gap-2">Droit d'accès & Sécurité</h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                         {[
-                           { label: "Accès Admissions", enabled: true },
-                           { label: "Accès Caisse Centrale", enabled: true },
-                           { label: "Accès Boutique SIH", enabled: true },
-                           { label: "Accès Dossier Médical (Lecture)", enabled: false },
-                           { label: "Accès Stock Pharmacie", enabled: false },
-                           { label: "Accès Rapports Financiers", enabled: true }
-                         ].map((perm, i) => (
-                           <div key={perm.label || `perm-${i}`} className="flex items-center justify-between p-5 bg-slate-50 rounded-2xl border border-slate-100">
-                             <span className="text-xs font-bold text-slate-700">{perm.label}</span>
-                             <div className={`w-3 h-3 rounded-full ${perm.enabled ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-rose-300'}`}></div>
+                   {/* Live RBAC Authorized Modules */}
+                   <div className="pt-2">
+                      <div className="flex items-center justify-between mb-4">
+                        <h4 className={`text-xs font-black uppercase tracking-wider flex items-center gap-2 ${theme === 'dark' ? 'text-slate-300' : 'text-slate-700'}`}>
+                          <Shield size={15} className="text-blue-600" /> Habilitations & Modules Disponibles
+                        </h4>
+                        <span className="text-[11px] text-slate-400">Rôle : {user?.role || agentProfile.role}</span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                         {userModulesList.map((mod, i) => (
+                           <div 
+                             key={mod.name || i} 
+                             className={`flex items-center justify-between p-3.5 rounded-2xl border transition-all ${
+                               mod.enabled
+                                 ? theme === 'dark'
+                                   ? 'bg-slate-900/60 border-slate-800 text-slate-200'
+                                   : 'bg-slate-50 border-slate-200/70 text-slate-800'
+                                 : theme === 'dark'
+                                 ? 'bg-slate-900/20 border-slate-800/50 text-slate-500 opacity-60'
+                                 : 'bg-slate-50/50 border-slate-200/50 text-slate-400 opacity-60'
+                             }`}
+                           >
+                             <div className="min-w-0 pr-2">
+                               <p className="text-xs font-bold truncate">{mod.name}</p>
+                               <p className="text-[10px] font-medium opacity-75 truncate">{mod.detail}</p>
+                             </div>
+                             <div className="shrink-0 flex items-center gap-1.5">
+                               <span className={`w-2 h-2 rounded-full ${
+                                 mod.enabled 
+                                   ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' 
+                                   : 'bg-slate-300 dark:bg-slate-700'
+                               }`} />
+                               <span className={`text-[10px] font-extrabold uppercase ${
+                                 mod.enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400'
+                               }`}>
+                                 {mod.enabled ? 'Actif' : 'Inactif'}
+                               </span>
+                             </div>
                            </div>
                          ))}
                       </div>
-                   </section>
+                   </div>
+
+                   {/* Quick Link Notice */}
+                   <div className="mt-6 p-4 rounded-2xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/60 dark:border-blue-900/40 flex items-center justify-between gap-3 text-xs">
+                     <div className="flex items-center gap-2 text-blue-800 dark:text-blue-300">
+                       <Info size={16} className="shrink-0 text-blue-600" />
+                       <span>Toutes les modifications de profil sont synchronisées en continu avec l'en-tête et votre session active.</span>
+                     </div>
+                     <button
+                       type="button"
+                       onClick={() => window.dispatchEvent(new CustomEvent('open-user-profile'))}
+                       className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline shrink-0 cursor-pointer"
+                     >
+                       Gérer →
+                     </button>
+                   </div>
                 </div>
              </div>
            </div>
