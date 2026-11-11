@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { User, PaymentRequest, ConsultationAddendum } from '../../types';
 import { db, sanitizeData } from '../../src/firebase';
-import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
 import { collection, doc, setDoc, getDocs, query, where, updateDoc, addDoc, onSnapshot, orderBy } from 'firebase/firestore';
 import VoiceDictationButton from '../../components/VoiceDictationButton';
 import { 
@@ -194,8 +194,8 @@ export default function ConsultationActive({
     principal: '', differentiels: []
   });
 
-  const [examensDemandes, setExamensDemandes] = useState<{name: string, urgent: boolean, price?: number, status?: 'demandé' | 'payé' | 'prélevé' | 'validé'}[]>([]);
-  const [prescriptions, setPrescriptions] = useState<{name: string, posologie: string, price?: number}[]>([]);
+  const [examensDemandes, setExamensDemandes] = useState<{name: string, urgent: boolean, price?: number, status?: 'demandé' | 'payé' | 'prélevé' | 'validé', isTransmitted?: boolean}[]>([]);
+  const [prescriptions, setPrescriptions] = useState<{name: string, posologie: string, price?: number, isTransmitted?: boolean}[]>([]);
   const [orientation, setOrientation] = useState('');
   
   const [observation, setObservation] = useState('');
@@ -965,18 +965,192 @@ Orientation: ${orientation}
     onClose();
   };
 
+  const handleTransmitSinglePrescription = async (p: any, idx: number) => {
+    try {
+      const today = new Date();
+      const dateStr = today.toLocaleDateString('fr-FR');
+      const timeStr = today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const prescriptionId = `ORD-${Math.floor(Math.random() * 1000000)}`;
+      const practitionerName = user?.name || user?.username || 'Dr. Sarr';
+      const practitionerId = user?.id || '';
+
+      // 1. Save to pending_prescriptions with tenant stamping
+      await setDoc(doc(db, 'pending_prescriptions', prescriptionId), sanitizeData(stampTenantData({
+        id: prescriptionId,
+        patientId: patient?.id || 'unknown',
+        patient: `${patient?.lastName || ''} ${patient?.firstName || ''}`.trim() || patient?.nom || 'Patient',
+        doctor: practitionerName,
+        doctorName: practitionerName,
+        doctorId: practitionerId,
+        prescriberId: practitionerId,
+        prescriberName: practitionerName,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
+        practitionerRole: user?.role || 'MEDECIN',
+        date: dateStr,
+        items: [{
+          name: p.name,
+          posology: p.posologie || 'Selon prescription',
+          price: p.price || 1500,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName
+        }],
+        createdAt: today.toISOString(),
+        status: 'pending'
+      }, user)));
+
+      // 2. Route Payment Request to Caisse
+      const itemPrice = p.price || 1500;
+      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
+      await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(stampTenantData({
+        id: invoiceId,
+        patientId: patient?.id || 'unknown',
+        patientName: `${patient?.lastName || ''} ${patient?.firstName || ''}`.trim() || patient?.nom || 'Patient',
+        requestingService: 'Consultation',
+        sourceModule: 'Consultation',
+        type: 'PHARMACIE',
+        items: [{
+          id: `item-med-${prescriptionId}-0`,
+          name: `Ordonnance : ${p.name}`,
+          quantity: 1,
+          unitPrice: itemPrice,
+          totalPrice: itemPrice,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          practitionerRole: user?.role || 'MEDECIN'
+        }],
+        totalAmount: itemPrice,
+        amountPaid: 0,
+        status: 'PENDING',
+        createdAt: today.toISOString(),
+        createdBy: practitionerName,
+        createdById: practitionerId,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
+        practitionerRole: user?.role || 'MEDECIN',
+        requestedBy: practitionerName,
+        requestedById: practitionerId
+      }, user)));
+
+      // Update local item status
+      setPrescriptions(prev => {
+        const next = prev.map((it, i) => i === idx ? { ...it, isTransmitted: true } : it);
+        if (next.every(it => it.isTransmitted)) {
+          setIsPrescriptionTransmitted(true);
+        }
+        return next;
+      });
+
+      window.dispatchEvent(new CustomEvent('app-notification', { 
+        detail: `✓ Médicament "${p.name}" transmis à la Pharmacie et à la Caisse.` 
+      }));
+    } catch (err) {
+      console.error("Single prescription transmit error:", err);
+      alert("Erreur lors de la transmission du médicament");
+    }
+  };
+
+  const handleTransmitSingleExam = async (e: any, idx: number) => {
+    try {
+      const today = new Date();
+      const dateStr = today.toLocaleDateString('fr-FR');
+      const timeStr = today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const labRequestId = `LAB-${Math.floor(Math.random() * 1000000)}`;
+      const practitionerName = user?.name || user?.username || 'Dr. Sarr';
+      const practitionerId = user?.id || '';
+
+      // 1. Save to lab_requests with tenant stamping
+      await setDoc(doc(db, 'lab_requests', labRequestId), sanitizeData(stampTenantData({
+        id: labRequestId,
+        patientId: patient?.id || 'unknown',
+        patientName: `${patient?.lastName || ''} ${patient?.firstName || ''}`.trim() || patient?.nom || 'Patient',
+        consultationId: patient?.consultationId || `CONS-${Math.floor(Math.random() * 1000000)}`,
+        prescriberId: practitionerId,
+        prescriberName: practitionerName,
+        doctor: practitionerName,
+        doctorName: practitionerName,
+        doctorId: practitionerId,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
+        practitionerRole: user?.role || 'MEDECIN',
+        date: today.toISOString(),
+        time: timeStr,
+        status: 'en attente',
+        exams: [{
+          name: e.name,
+          urgent: e.urgent || false,
+          category: e.category || 'Analyse',
+          practitionerId: practitionerId,
+          practitionerName: practitionerName
+        }],
+        createdAt: today.toISOString()
+      }, user)));
+
+      // 2. Route Payment Request to Caisse
+      const itemPrice = e.price || 2500;
+      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
+      await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(stampTenantData({
+        id: invoiceId,
+        patientId: patient?.id || 'unknown',
+        patientName: `${patient?.lastName || ''} ${patient?.firstName || ''}`.trim() || patient?.nom || 'Patient',
+        requestingService: 'Consultation',
+        sourceModule: 'Consultation',
+        type: 'LABORATOIRE',
+        items: [{
+          id: `item-exam-${labRequestId}-0`,
+          name: `Examen Lab : ${e.name}`,
+          quantity: 1,
+          unitPrice: itemPrice,
+          totalPrice: itemPrice,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          practitionerRole: user?.role || 'MEDECIN'
+        }],
+        totalAmount: itemPrice,
+        amountPaid: 0,
+        status: 'PENDING',
+        createdAt: today.toISOString(),
+        createdBy: practitionerName,
+        createdById: practitionerId,
+        practitionerId: practitionerId,
+        practitionerName: practitionerName,
+        practitionerRole: user?.role || 'MEDECIN',
+        requestedBy: practitionerName,
+        requestedById: practitionerId
+      }, user)));
+
+      // Update local item status
+      setExamensDemandes(prev => {
+        const next = prev.map((it, i) => i === idx ? { ...it, isTransmitted: true, status: 'payé' as const } : it);
+        if (next.every(it => it.isTransmitted)) {
+          setIsExamsTransmitted(true);
+        }
+        return next;
+      });
+
+      window.dispatchEvent(new CustomEvent('app-notification', { 
+        detail: `✓ Examen "${e.name}" transmis au Laboratoire et à la Caisse.` 
+      }));
+    } catch (err) {
+      console.error("Single exam transmit error:", err);
+      alert("Erreur lors de la transmission de l'examen");
+    }
+  };
+
   const handleTransmitAllPendingOrders = async () => {
     let transmittedCount = 0;
     const today = new Date();
     const dateStr = today.toLocaleDateString('fr-FR');
     const timeStr = today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const practitionerName = user?.name || user?.username || 'Dr. Sarr';
+    const practitionerId = user?.id || '';
 
     // 1. Transmit Prescriptions if not sent
-    if (prescriptions.length > 0 && !isPrescriptionTransmitted) {
+    const unsentPrescriptions = prescriptions.filter(p => !p.isTransmitted);
+    if (unsentPrescriptions.length > 0) {
       try {
-        // Strict deduplication by normalized name
         const uniquePrescriptions = Array.from(
-          prescriptions.reduce((map, p: any) => {
+          unsentPrescriptions.reduce((map, p: any) => {
             const key = (p.name || '').trim().toLowerCase();
             if (key && !map.has(key)) map.set(key, p);
             return map;
@@ -984,23 +1158,69 @@ Orientation: ${orientation}
         );
 
         const prescriptionId = `ORD-${Math.floor(Math.random() * 1000000)}`;
-        await setDoc(doc(db, 'pending_prescriptions', prescriptionId), {
+        await setDoc(doc(db, 'pending_prescriptions', prescriptionId), sanitizeData(stampTenantData({
           id: prescriptionId,
           patientId: patient?.id || 'unknown',
           patient: `${patient?.lastName || ''} ${patient?.firstName || ''}`.trim() || patient?.nom || 'Patient',
-          doctor: user?.name || 'Dr. Sarr',
+          doctor: practitionerName,
+          doctorName: practitionerName,
+          doctorId: practitionerId,
+          prescriberId: practitionerId,
+          prescriberName: practitionerName,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          practitionerRole: user?.role || 'MEDECIN',
           date: dateStr,
           items: uniquePrescriptions.map((p: any) => ({
             name: p.name,
             posology: p.posologie || 'Selon prescription',
-            price: p.price || 1500
+            price: p.price || 1500,
+            practitionerId: practitionerId,
+            practitionerName: practitionerName
           })),
           createdAt: today.toISOString(),
           status: 'pending'
-        });
+        }, user)));
 
-        // Prescription bill is routed exclusively to Pharmacy POS
+        // Route payment request to Caisse
+        const invoiceItems = uniquePrescriptions.map((p: any, idx: number) => {
+          const itemPrice = p.price || 1500;
+          return {
+            id: `item-med-${prescriptionId}-${idx}`,
+            name: `Ordonnance : ${p.name}`,
+            quantity: 1,
+            unitPrice: itemPrice,
+            totalPrice: itemPrice,
+            practitionerId: practitionerId,
+            practitionerName: practitionerName,
+            practitionerRole: user?.role || 'MEDECIN'
+          };
+        });
+        const totalAmount = invoiceItems.reduce((sum, item) => sum + item.totalPrice, 0);
+        const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
+        await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(stampTenantData({
+          id: invoiceId,
+          patientId: patient?.id || 'unknown',
+          patientName: `${patient?.lastName || ''} ${patient?.firstName || ''}`.trim() || patient?.nom || 'Patient',
+          requestingService: 'Consultation',
+          sourceModule: 'Consultation',
+          type: 'PHARMACIE',
+          items: invoiceItems,
+          totalAmount: totalAmount,
+          amountPaid: 0,
+          status: 'PENDING',
+          createdAt: today.toISOString(),
+          createdBy: practitionerName,
+          createdById: practitionerId,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          practitionerRole: user?.role || 'MEDECIN',
+          requestedBy: practitionerName,
+          requestedById: practitionerId
+        }, user)));
+
         setIsPrescriptionTransmitted(true);
+        setPrescriptions(prev => prev.map(p => ({ ...p, isTransmitted: true })));
         transmittedCount++;
       } catch (err) {
         console.error("Auto prescription transmit error:", err);
@@ -1008,11 +1228,11 @@ Orientation: ${orientation}
     }
 
     // 2. Transmit Lab Exams if not sent
-    if (examensDemandes.length > 0 && !isExamsTransmitted) {
+    const unsentExams = examensDemandes.filter(e => !e.isTransmitted);
+    if (unsentExams.length > 0) {
       try {
-        // Strict deduplication by normalized name
         const uniqueExams = Array.from(
-          examensDemandes.reduce((map, e: any) => {
+          unsentExams.reduce((map, e: any) => {
             const key = (e.name || '').trim().toLowerCase();
             if (key && !map.has(key)) map.set(key, e);
             return map;
@@ -1020,21 +1240,31 @@ Orientation: ${orientation}
         );
 
         const labRequestId = `LAB-${Math.floor(Math.random() * 1000000)}`;
-        await setDoc(doc(db, 'lab_requests', labRequestId), {
+        await setDoc(doc(db, 'lab_requests', labRequestId), sanitizeData(stampTenantData({
           id: labRequestId,
           patientId: patient?.id || 'unknown',
           patientName: `${patient?.lastName || ''} ${patient?.firstName || ''}`.trim() || patient?.nom || 'Patient',
           consultationId: patient?.consultationId || `CONS-${Math.floor(Math.random() * 1000000)}`,
-          prescriberName: user?.name || 'Dr. Sarr',
-          date: dateStr,
+          prescriberId: practitionerId,
+          prescriberName: practitionerName,
+          doctor: practitionerName,
+          doctorName: practitionerName,
+          doctorId: practitionerId,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          practitionerRole: user?.role || 'MEDECIN',
+          date: today.toISOString(),
           time: timeStr,
-          status: 'pending',
+          status: 'en attente',
           exams: uniqueExams.map((e: any) => ({
             name: e.name,
-            urgent: e.urgent || false
+            urgent: e.urgent || false,
+            category: e.category || 'Analyse',
+            practitionerId: practitionerId,
+            practitionerName: practitionerName
           })),
           createdAt: today.toISOString()
-        });
+        }, user)));
 
         const invoiceItems = uniqueExams.map((e: any, idx: number) => {
           const itemPrice = e.price || 2500;
@@ -1043,13 +1273,16 @@ Orientation: ${orientation}
             name: `Examen Lab : ${e.name}`,
             quantity: 1,
             unitPrice: itemPrice,
-            totalPrice: itemPrice
+            totalPrice: itemPrice,
+            practitionerId: practitionerId,
+            practitionerName: practitionerName,
+            practitionerRole: user?.role || 'MEDECIN'
           };
         });
 
         const totalAmount = invoiceItems.reduce((sum: number, item: any) => sum + item.totalPrice, 0);
         const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
-        await setDoc(doc(db, 'payment_requests', invoiceId), {
+        await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(stampTenantData({
           id: invoiceId,
           patientId: patient?.id || 'unknown',
           patientName: `${patient?.lastName || ''} ${patient?.firstName || ''}`.trim() || patient?.nom || 'Patient',
@@ -1061,11 +1294,17 @@ Orientation: ${orientation}
           amountPaid: 0,
           status: 'PENDING',
           createdAt: today.toISOString(),
-          createdBy: user?.name || 'Docteur'
-        });
+          createdBy: practitionerName,
+          createdById: practitionerId,
+          practitionerId: practitionerId,
+          practitionerName: practitionerName,
+          practitionerRole: user?.role || 'MEDECIN',
+          requestedBy: practitionerName,
+          requestedById: practitionerId
+        }, user)));
 
         setIsExamsTransmitted(true);
-        setExamensDemandes(prev => prev.map(e => ({ ...e, status: e.status === 'demandé' ? 'payé' : e.status })));
+        setExamensDemandes(prev => prev.map(e => ({ ...e, isTransmitted: true, status: 'payé' as const })));
         transmittedCount++;
       } catch (err) {
         console.error("Auto exams transmit error:", err);
@@ -1098,8 +1337,8 @@ Orientation: ${orientation}
 
   const handleTriggerCloturer = () => {
     // Unsent orders guardrail check
-    const hasUnsentPrescr = prescriptions.length > 0 && !isPrescriptionTransmitted;
-    const hasUnsentEx = examensDemandes.length > 0 && !isExamsTransmitted;
+    const hasUnsentPrescr = prescriptions.some(p => !p.isTransmitted) || (!isPrescriptionTransmitted && prescriptions.length > 0);
+    const hasUnsentEx = examensDemandes.some(e => !e.isTransmitted) || (!isExamsTransmitted && examensDemandes.length > 0);
 
     if (hasUnsentPrescr || hasUnsentEx) {
       setUnsentPendingAction('CLOTURER');
@@ -3507,7 +3746,7 @@ Orientation: ${orientation}
                           }}
                           className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] uppercase tracking-widest rounded-2xl transition-all shadow-xl shadow-blue-600/20 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {isPrescriptionTransmitted ? '✓ Ordonnance Transmise à la Caisse & Pharmacie' : '⚡ Transmettre au Labo & Caisse'}
+                          {isPrescriptionTransmitted ? '✓ Ordonnance Transmise à la Pharmacie & Caisse' : '⚡ Transmettre à la Pharmacie & Caisse'}
                         </button>
                       )}
                     </div>
@@ -4053,40 +4292,86 @@ Orientation: ${orientation}
               </p>
             </div>
 
-            {/* Unsent Items Breakdown */}
-            <div className="space-y-3 max-h-56 overflow-y-auto pr-1 custom-scrollbar mb-5">
-              {prescriptions.length > 0 && !isPrescriptionTransmitted && (
-                <div className="p-3.5 bg-blue-50/60 border border-blue-200/70 rounded-2xl space-y-2">
+            {/* Unsent Items Breakdown with Individual Transmit Buttons */}
+            <div className="space-y-4 max-h-72 overflow-y-auto pr-1 custom-scrollbar mb-5">
+              {prescriptions.length > 0 && (
+                <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-2.5">
                   <div className="flex items-center justify-between text-xs font-black uppercase text-blue-900">
-                    <span className="flex items-center gap-1.5"><Pill size={14} className="text-blue-600" /> Médicaments en attente ({prescriptions.length})</span>
-                    <span className="text-[10px] bg-blue-200/60 text-blue-800 px-2 py-0.5 rounded-md font-bold">Non transmis</span>
+                    <span className="flex items-center gap-1.5"><Pill size={14} className="text-blue-600" /> Médicaments Prescrits ({prescriptions.length})</span>
+                    <span className="text-[10px] bg-blue-200/70 text-blue-900 px-2 py-0.5 rounded-md font-bold">
+                      {prescriptions.filter(p => !p.isTransmitted).length} non transmis
+                    </span>
                   </div>
-                  <ul className="space-y-1.5 pt-1">
-                    {prescriptions.map((p, idx) => (
-                      <li key={idx} className="text-xs text-slate-700 bg-white p-2 rounded-xl border border-blue-100 flex items-center justify-between">
-                        <span className="font-bold text-slate-900">{p.name}</span>
-                        <span className="text-[11px] text-slate-500 font-medium italic truncate max-w-[200px]">{p.posologie || 'Posologie standard'}</span>
-                      </li>
-                    ))}
+                  <ul className="space-y-2 pt-1">
+                    {prescriptions.map((p, idx) => {
+                      const transmitted = p.isTransmitted || isPrescriptionTransmitted;
+                      return (
+                        <li key={idx} className="text-xs bg-white p-3 rounded-xl border border-blue-150 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+                          <div className="min-w-0 flex-1">
+                            <span className="font-extrabold text-slate-900 block truncate">{p.name}</span>
+                            <span className="text-[11px] text-slate-500 font-medium italic block mt-0.5">{p.posologie || 'Posologie standard'}</span>
+                          </div>
+                          <div className="shrink-0 flex items-center justify-end gap-2">
+                            {transmitted ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+                                <Check size={12} /> Envoyé
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleTransmitSinglePrescription(p, idx)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-black bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition-all cursor-pointer"
+                                title="Transmettre ce médicament à la Pharmacie et à la Caisse"
+                              >
+                                <Send size={11} /> Envoyer à la Pharmacie
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
 
-              {examensDemandes.length > 0 && !isExamsTransmitted && (
-                <div className="p-3.5 bg-purple-50/60 border border-purple-200/70 rounded-2xl space-y-2">
+              {examensDemandes.length > 0 && (
+                <div className="p-4 bg-purple-50/70 border border-purple-200 rounded-2xl space-y-2.5">
                   <div className="flex items-center justify-between text-xs font-black uppercase text-purple-900">
-                    <span className="flex items-center gap-1.5"><Beaker size={14} className="text-purple-600" /> Examens Biologiques/Imagerie en attente ({examensDemandes.length})</span>
-                    <span className="text-[10px] bg-purple-200/60 text-purple-800 px-2 py-0.5 rounded-md font-bold">Non transmis</span>
+                    <span className="flex items-center gap-1.5"><Beaker size={14} className="text-purple-600" /> Examens Biologiques/Imagerie ({examensDemandes.length})</span>
+                    <span className="text-[10px] bg-purple-200/70 text-purple-900 px-2 py-0.5 rounded-md font-bold">
+                      {examensDemandes.filter(e => !e.isTransmitted).length} non transmis
+                    </span>
                   </div>
-                  <ul className="space-y-1.5 pt-1">
-                    {examensDemandes.map((e, idx) => (
-                      <li key={idx} className="text-xs text-slate-700 bg-white p-2 rounded-xl border border-purple-100 flex items-center justify-between">
-                        <span className="font-bold text-slate-900">{e.name}</span>
-                        {e.urgent && (
-                          <span className="text-[10px] font-black uppercase bg-rose-100 text-rose-700 px-2 py-0.5 rounded">Urgent</span>
-                        )}
-                      </li>
-                    ))}
+                  <ul className="space-y-2 pt-1">
+                    {examensDemandes.map((e, idx) => {
+                      const transmitted = e.isTransmitted || isExamsTransmitted;
+                      return (
+                        <li key={idx} className="text-xs bg-white p-3 rounded-xl border border-purple-150 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+                          <div className="min-w-0 flex-1 flex items-center gap-2">
+                            <span className="font-extrabold text-slate-900 truncate">{e.name}</span>
+                            {e.urgent && (
+                              <span className="text-[9px] font-black uppercase bg-rose-100 text-rose-700 px-2 py-0.5 rounded">Urgent</span>
+                            )}
+                          </div>
+                          <div className="shrink-0 flex items-center justify-end gap-2">
+                            {transmitted ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+                                <Check size={12} /> Envoyé
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleTransmitSingleExam(e, idx)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-black bg-purple-600 hover:bg-purple-700 text-white rounded-xl shadow-xs transition-all cursor-pointer"
+                                title="Transmettre cet examen au Laboratoire et à la Caisse"
+                              >
+                                <Send size={11} /> Envoyer au Laboratoire
+                              </button>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 </div>
               )}
@@ -4105,22 +4390,48 @@ Orientation: ${orientation}
                 Rester sur la consultation
               </button>
 
-              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
                 <button
                   type="button"
                   onClick={handleForceProceedWithoutSending}
-                  className="px-3.5 py-2.5 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold transition-all text-center cursor-pointer"
+                  className="px-3.5 py-2 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl text-xs font-bold transition-all text-center cursor-pointer"
                 >
                   Quitter sans envoyer
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleTransmitAndProceed}
-                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 transition-all text-center cursor-pointer"
-                >
-                  <Send size={14} /> Envoyer & {unsentPendingAction === 'CLOTURER' ? 'Clôturer' : 'Quitter'}
-                </button>
+                {(() => {
+                  const anyUnsent = prescriptions.some(p => !p.isTransmitted) || examensDemandes.some(e => !e.isTransmitted);
+                  if (anyUnsent) {
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleTransmitAllPendingOrders}
+                          className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-md shadow-blue-600/20 flex items-center gap-1.5 transition-all text-center cursor-pointer"
+                        >
+                          <Send size={13} /> Tout envoyer
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleTransmitAndProceed}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 transition-all text-center cursor-pointer"
+                        >
+                          <Check size={14} /> Tout envoyer & {unsentPendingAction === 'CLOTURER' ? 'Clôturer' : 'Quitter'}
+                        </button>
+                      </>
+                    );
+                  } else {
+                    return (
+                      <button
+                        type="button"
+                        onClick={unsentPendingAction === 'CLOTURER' ? executeCloturer : executeClose}
+                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-lg shadow-emerald-600/25 flex items-center gap-1.5 transition-all text-center cursor-pointer"
+                      >
+                        <Check size={14} /> ✓ Tout est transmis — {unsentPendingAction === 'CLOTURER' ? 'Clôturer la consultation' : 'Quitter'}
+                      </button>
+                    );
+                  }
+                })()}
               </div>
             </div>
           </div>

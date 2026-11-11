@@ -11,24 +11,13 @@ import {
   AlertCircle,
   ArrowRight,
   Zap,
-  Sun,
-  ShieldCheck,
-  HelpCircle,
-  Globe,
-  Wifi,
-  CheckCircle2,
-  TrendingUp,
-  Stethoscope,
-  Building2,
-  Sparkles,
-  Heart,
-  ShieldAlert,
-  CreditCard
+  Sun
 } from 'lucide-react';
 import { Role, User as UserType } from '../types';
 import { auth, db, sanitizeData } from '../src/firebase';
 import { signInAnonymously } from 'firebase/auth';
 import { collection, getDocs, getDocsFromCache, doc, setDoc, getDoc } from 'firebase/firestore';
+import { ShieldCheck, HelpCircle } from 'lucide-react';
 
 interface LandingProps {
   onLogin: (user: UserType) => void;
@@ -46,44 +35,30 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
 
   const t = {
     FR: {
-      badge: "Système d'Information Hospitalier • Haute Disponibilité",
-      heroPre: "CHAQUE SECONDE COMPTE,",
-      heroGrad: "LA VIE N'ATTEND PAS",
-      heroDesc: "Le Système d'Information Hospitalier pensé pour le terrain : continuité clinique absolue même sans Internet, zéro fuite de recettes et traçabilité médicale intégrale.",
-      navAbout: "Cockpit Médical",
-      navServices: "Mode Hors-Ligne",
-      navModules: "Spécialités Cliniques",
-      connexion: "Accès Portail Pro",
-      loginTitle: "Accès Personnel Hospitalier",
-      loginSub: "IDENTIFICATION MÉDICALE SÉCURISÉE",
-      placeholderUser: "Identifiant ou Nom d'utilisateur (ex: admin)",
+      heroDesc: "Le cockpit intégré pour les professionnels de santé en Afrique. Une gestion hospitalière réinventée, fluide et sécurisée.",
+      navAbout: "Plateforme",
+      navServices: "Sécurité",
+      navModules: "Interopérabilité",
+      connexion: "Accès Portail",
+      loginTitle: "Accès Personnel",
+      loginSub: "IDENTIFICATION PROFESSIONNELLE SÉCURISÉE",
+      placeholderUser: "Identifiant métier",
       placeholderPass: "Mot de passe",
       errorAuth: "Identifiants incorrects.",
-      footerDesc: "SmartHosto SIH • Technologie médicale de pointe au service des établissements de santé.",
-      ctaPrimary: "Ouvrir Session Clinique",
-      ctaDemo: "Découvrir le Cockpit",
-      offlinePill: "100% Hors-Ligne (0ms)",
-      trustCountries: "Déployé & Éprouvé en Milieu Hospitalier Privé & Public",
+      footerDesc: "Excellence opérationnelle pour la santé en Afrique.",
     },
     EN: {
-      badge: "Hospital Information System • High Availability",
-      heroPre: "EVERY SECOND COUNTS,",
-      heroGrad: "LIFE DOES NOT WAIT",
-      heroDesc: "The next-generation Hospital Information System built for real-world care: uninterrupted clinical continuity even offline, zero revenue leakage, and complete electronic medical records.",
-      navAbout: "Clinical Cockpit",
-      navServices: "Offline-First Mode",
-      navModules: "Clinical Modules",
-      connexion: "Portal Sign In",
-      loginTitle: "Hospital Personnel Access",
-      loginSub: "SECURE MEDICAL AUTHENTICATION",
-      placeholderUser: "Username or Professional ID (e.g. admin)",
+      heroDesc: "The integrated cockpit for healthcare professionals in Africa. Hospital management reimagined—fluid and secure.",
+      navAbout: "Platform",
+      navServices: "Security",
+      navModules: "Interoperability",
+      connexion: "Portal Access",
+      loginTitle: "Personnel Access",
+      loginSub: "SECURE PROFESSIONAL IDENTIFICATION",
+      placeholderUser: "Professional ID",
       placeholderPass: "Password",
       errorAuth: "Invalid credentials.",
-      footerDesc: "SmartHosto HIS • Advanced medical technology empowering healthcare facilities.",
-      ctaPrimary: "Open Clinical Session",
-      ctaDemo: "Explore Cockpit",
-      offlinePill: "100% Offline-First (0ms)",
-      trustCountries: "Deployed & Proven Across Private & Public Hospitals",
+      footerDesc: "Operational excellence for African healthcare.",
     }
   };
 
@@ -378,17 +353,10 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
             name: 'Administrateur',
             role: Role.ADMIN,
             roles: ['role_admin'],
-            clinicId: 'clinic-principal',
-            hospital_id: 'clinic-principal',
-            structureName: 'Hôpital Central SmartHosto',
             status: 'ACTIVE',
             profession: 'Admin SYSTEM',
             createdAt: new Date().toISOString()
           };
-          if (!matchedUser.clinicId && !matchedUser.hospital_id) {
-            matchedUser.clinicId = 'clinic-principal';
-            matchedUser.hospital_id = 'clinic-principal';
-          }
           isPasswordValid = true;
           try {
             await setDoc(doc(db, 'hospital_users', matchedUser.id), sanitizeData(matchedUser), { merge: true });
@@ -481,12 +449,6 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
           }
         }
 
-        // Ensure non-superadmin users have their clinic context bound to the active primary clinic if not specified
-        if (matchedUser.role !== Role.SUPER_ADMIN && !matchedUser.clinicId && !matchedUser.hospital_id) {
-          matchedUser.clinicId = 'clinic-principal';
-          matchedUser.hospital_id = 'clinic-principal';
-        }
-
         const authenticatedUser = { ...matchedUser, lastLogin: new Date().toISOString() };
         if (!authenticatedUser.forcePasswordChange) {
           delete authenticatedUser.password;
@@ -509,64 +471,51 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
   };
 
   return (
-    <div className={`min-h-screen ${theme === 'dark' ? 'bg-[#050508] text-zinc-100' : 'bg-[#f8fafc] text-slate-900'} selection:bg-emerald-500/30 overflow-x-hidden font-sans relative flex flex-col transition-colors duration-300`}>
-      {/* Immersive Background System with African Warmth Accents */}
+    <div className={`h-screen max-h-screen ${theme === 'dark' ? 'bg-[#050508] text-zinc-100' : 'bg-[#f1f5f9] text-slate-900'} selection:bg-blue-500/30 overflow-hidden font-sans relative flex flex-col transition-colors duration-300`}>
+      {/* Immersive Background System */}
       <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
         {/* Background Image Layer */}
         <div className="absolute inset-0 z-0">
           <img 
             src="https://images.unsplash.com/photo-1519494026892-80bbd2d6fd0d?q=80&w=2000&auto=format&fit=crop" 
             alt="Medical Facility Background"
-            className={`w-full h-full object-cover mix-blend-overlay scale-105 transition-opacity duration-1000 ${theme === 'dark' ? 'opacity-15' : 'opacity-10'}`}
+            className={`w-full h-full object-cover mix-blend-overlay scale-105 transition-opacity duration-1000 ${theme === 'dark' ? 'opacity-20' : 'opacity-10'}`}
             referrerPolicy="no-referrer"
           />
-          <div className={`absolute inset-0 bg-gradient-to-b ${theme === 'dark' ? 'from-[#050508] via-[#050508]/75 to-[#050508]' : 'from-slate-50/95 via-white/80 to-slate-100/95'}`}></div>
+          <div className={`absolute inset-0 bg-gradient-to-b ${theme === 'dark' ? 'from-[#050508] via-[#050508]/60 to-[#050508]' : 'from-slate-100/90 via-white/60 to-slate-100/90'}`}></div>
         </div>
 
-        {/* Ambient Medical African Glow Orbs */}
-        <div className={`absolute top-[-10%] left-[-10%] w-[55%] h-[55%] ${theme === 'dark' ? 'bg-emerald-600/15' : 'bg-emerald-300/20'} rounded-full blur-[150px] animate-pulse`}></div>
-        <div className={`absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] ${theme === 'dark' ? 'bg-amber-600/12' : 'bg-amber-300/20'} rounded-full blur-[170px]`}></div>
-        <div className={`absolute top-[40%] right-[20%] w-[35%] h-[35%] ${theme === 'dark' ? 'bg-blue-600/12' : 'bg-sky-300/20'} rounded-full blur-[140px]`}></div>
+        <div className={`absolute top-[-10%] left-[-10%] w-[50%] h-[50%] ${theme === 'dark' ? 'bg-blue-600/15' : 'bg-blue-300/20'} rounded-full blur-[140px] animate-pulse`}></div>
+        <div className={`absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] ${theme === 'dark' ? 'bg-emerald-600/10' : 'bg-emerald-300/15'} rounded-full blur-[160px]`}></div>
       </div>
 
       {/* Navigation */}
       <nav className={`relative z-50 flex items-center justify-between px-6 sm:px-10 h-20 sm:h-22 border-b backdrop-blur-xl transition-all ${
         theme === 'dark' 
-          ? 'bg-gradient-to-b from-[#141824]/95 to-[#0a0d14]/95 border-white/15 shadow-[0_12px_36px_-6px_rgba(0,0,0,0.8),inset_0_1px_0_0_rgba(255,255,255,0.18)]' 
+          ? 'bg-gradient-to-b from-[#171a26]/95 to-[#0f111a]/95 border-white/15 shadow-[0_12px_36px_-6px_rgba(0,0,0,0.8),inset_0_1px_0_0_rgba(255,255,255,0.18)]' 
           : 'bg-gradient-to-b from-white/95 to-slate-50/95 border-slate-200/90 shadow-[0_8px_24px_-4px_rgba(15,23,42,0.06)]'
       }`}>
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-10">
           <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 bg-gradient-to-br from-emerald-500 via-teal-600 to-blue-700 rounded-2xl border border-emerald-400/40 flex items-center justify-center shadow-[0_8px_20px_-4px_rgba(16,185,129,0.5),inset_0_1px_0_0_rgba(255,255,255,0.35)]">
+            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl border border-blue-400/40 flex items-center justify-center shadow-[0_8px_20px_-4px_rgba(37,99,235,0.6),inset_0_1px_0_0_rgba(255,255,255,0.35)]">
               <Activity className="text-white" size={24} />
             </div>
             <div>
               <span className={`text-xl font-black tracking-tight block leading-none ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-                Smart<span className="text-emerald-500">Hosto</span>
+                Smart<span className="text-blue-500">Hosto</span>
               </span>
-              <span className="text-[10px] font-extrabold text-amber-500 uppercase tracking-widest mt-1 block">
-                SmartHosto SIH • Excellence Médicale
-              </span>
+              <span className="text-xs font-extrabold text-blue-500 uppercase tracking-widest mt-1 block">SIH Hospitalier</span>
             </div>
           </div>
           
-          <div className={`hidden lg:flex items-center gap-7 text-xs font-black uppercase tracking-wider ${theme === 'dark' ? 'text-zinc-300' : 'text-slate-600'}`}>
-            <span className="hover:text-emerald-500 transition-colors flex items-center gap-1.5 cursor-default">
-              <Stethoscope size={14} className="text-emerald-500" />
-              {content.navAbout}
-            </span>
-            <span className="hover:text-emerald-500 transition-colors flex items-center gap-1.5 cursor-default">
-              <Wifi size={14} className="text-amber-500" />
-              {content.navServices}
-            </span>
-            <span className="hover:text-emerald-500 transition-colors flex items-center gap-1.5 cursor-default">
-              <Building2 size={14} className="text-blue-500" />
-              {content.navModules}
-            </span>
+          <div className={`hidden md:flex items-center gap-7 text-sm font-bold ${theme === 'dark' ? 'text-zinc-300' : 'text-slate-600'}`}>
+            <button className="hover:text-blue-500 transition-colors cursor-pointer">{content.navAbout}</button>
+            <button className="hover:text-blue-500 transition-colors cursor-pointer">{content.navServices}</button>
+            <button className="hover:text-blue-500 transition-colors cursor-pointer">{content.navModules}</button>
           </div>
         </div>
 
-        <div className="flex items-center gap-3 sm:gap-4">
+        <div className="flex items-center gap-3.5 sm:gap-4">
           <button 
             onClick={toggleTheme}
             className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-all border cursor-pointer ${
@@ -574,7 +523,6 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
                 ? 'bg-gradient-to-b from-zinc-800 to-zinc-900 text-amber-400 border-white/15 shadow-[0_4px_12px_rgba(0,0,0,0.5),inset_0_1px_0_0_rgba(255,255,255,0.15)] hover:border-amber-400/50' 
                 : 'bg-white text-slate-700 border-slate-200/90 shadow-sm hover:bg-slate-50'
             }`}
-            title="Changer de thème"
           >
             {theme === 'dark' ? <Zap size={20} /> : <Sun size={20} />}
           </button>
@@ -584,21 +532,20 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
           }`}>
             <button 
               onClick={() => setLang('FR')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${lang === 'FR' ? 'bg-emerald-600 text-white shadow-sm' : theme === 'dark' ? 'text-zinc-400 hover:text-white' : 'text-slate-600'}`}
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${lang === 'FR' ? 'bg-blue-600 text-white shadow-sm' : theme === 'dark' ? 'text-zinc-400 hover:text-white' : 'text-slate-600'}`}
             >
               FR
             </button>
             <button 
               onClick={() => setLang('EN')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${lang === 'EN' ? 'bg-emerald-600 text-white shadow-sm' : theme === 'dark' ? 'text-zinc-400 hover:text-white' : 'text-slate-600'}`}
+              className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${lang === 'EN' ? 'bg-blue-600 text-white shadow-sm' : theme === 'dark' ? 'text-zinc-400 hover:text-white' : 'text-slate-600'}`}
             >
               EN
             </button>
           </div>
-
           <button 
             onClick={() => setShowLogin(true)}
-            className="px-5 sm:px-6 py-2.5 sm:py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white font-black text-xs sm:text-sm rounded-2xl border border-emerald-400/40 transition-all shadow-[0_8px_20px_-4px_rgba(16,185,129,0.5),inset_0_1px_0_0_rgba(255,255,255,0.3)] active:scale-95 cursor-pointer"
+            className="px-6 py-3 bg-gradient-to-b from-blue-500 to-blue-700 hover:from-blue-400 hover:to-blue-600 text-white font-extrabold text-sm rounded-2xl border border-blue-400/40 transition-all shadow-[0_8px_20px_-4px_rgba(37,99,235,0.55),inset_0_1px_0_0_rgba(255,255,255,0.3)] active:scale-95 cursor-pointer"
           >
             {content.connexion}
           </button>
@@ -606,190 +553,147 @@ const Landing: React.FC<LandingProps> = ({ onLogin, theme, toggleTheme }) => {
       </nav>
 
       {/* Hero Body */}
-      <main className="relative z-10 flex-1 flex flex-col justify-center container mx-auto px-6 sm:px-10 py-8 lg:py-12">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-center">
-          
-          {/* Left Column: Poignant African Healthcare Mission */}
+      <main className="relative z-10 flex-1 flex flex-col justify-center container mx-auto px-6 sm:px-10">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
           <motion.div 
-            initial={{ opacity: 0, x: -25 }}
+            initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.6 }}
-            className="lg:col-span-6 space-y-6"
+            className="space-y-8"
           >
-            <div className="space-y-4">
-              {/* African Context Badge */}
-              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full border text-xs font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 shadow-xs">
-                <Globe size={14} className="text-emerald-500 shrink-0" />
-                <span>{content.badge}</span>
-              </div>
-
-              {/* Poignant Headline */}
-              <h1 className={`text-3xl sm:text-5xl lg:text-[54px] font-black tracking-tight leading-[1.08] ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-                {content.heroPre} <br />
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-amber-400">
-                  {content.heroGrad}
+            <div className="space-y-5">
+              <span className={`inline-flex items-center gap-2.5 px-4 py-2 text-xs font-extrabold uppercase tracking-wider rounded-full border ${
+                theme === 'dark' 
+                  ? 'bg-blue-500/15 text-blue-300 border-blue-400/30 shadow-[0_0_20px_rgba(59,130,246,0.2)]' 
+                  : 'bg-blue-50 text-blue-700 border-blue-200 shadow-xs'
+              }`}>
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                Système d'Information Hospitalier • Offline-First
+              </span>
+              <h1 className={`text-4xl sm:text-6xl font-black tracking-tight leading-[1.05] ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                L'EXCELLENCE <br />
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-sky-400 to-emerald-400">
+                  CLINIQUE & SOINS
                 </span>
               </h1>
-
-              {/* Poignant Slogan Paragraph */}
-              <p className={`text-sm sm:text-base lg:text-lg font-medium leading-relaxed ${theme === 'dark' ? 'text-zinc-300' : 'text-slate-600'}`}>
+              <p className={`text-base sm:text-lg font-semibold max-w-lg leading-relaxed ${theme === 'dark' ? 'text-zinc-300' : 'text-slate-600'}`}>
                 {content.heroDesc}
               </p>
             </div>
 
-            {/* CTAs */}
-            <div className="flex flex-wrap items-center gap-3.5 pt-1">
+            <div className="flex items-center gap-4">
               <button 
                 onClick={() => setShowLogin(true)}
-                className="px-7 py-3.5 rounded-2xl font-black text-sm sm:text-base bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white border border-emerald-400/40 shadow-[0_12px_28px_-6px_rgba(16,185,129,0.5),inset_0_1px_0_0_rgba(255,255,255,0.35)] transition-all flex items-center gap-3 cursor-pointer active:scale-95"
+                className="px-8 py-4 rounded-2xl font-extrabold text-base bg-gradient-to-b from-blue-500 to-blue-700 hover:from-blue-400 hover:to-blue-600 text-white border border-blue-400/40 shadow-[0_12px_28px_-6px_rgba(37,99,235,0.6),inset_0_1px_0_0_rgba(255,255,255,0.35)] transition-all flex items-center gap-3 cursor-pointer"
               >
-                <span>{content.ctaPrimary}</span>
-                <ArrowRight size={18} />
+                {lang === 'FR' ? 'Ouvrir Session Professionnelle' : 'Open Professional Session'}
+                <ArrowRight size={20} />
               </button>
-
-              <div className={`px-4 py-3 rounded-2xl border text-xs font-bold flex items-center gap-2 ${
-                theme === 'dark' ? 'bg-zinc-900/60 border-zinc-800 text-zinc-300' : 'bg-white/90 border-slate-200 text-slate-700 shadow-2xs'
-              }`}>
-                <Wifi size={15} className="text-emerald-500 shrink-0 animate-pulse" />
-                <span>{content.offlinePill}</span>
-              </div>
             </div>
 
-            {/* 4 Value Pillars */}
-            <div className="grid grid-cols-2 gap-3 pt-2">
+            {/* Key Clinical Capabilities */}
+            <div className="grid grid-cols-3 gap-4 pt-2 max-w-xl">
               {[
-                { icon: Zap, title: "0 ms Hors-Ligne", desc: "Continuité clinique totale sans coupure réseau" },
-                { icon: ShieldCheck, title: "Caisse Sans Fuite", desc: "Encaissements & quittances certifiés en FCFA" },
-                { icon: Stethoscope, title: "DME Intégré", desc: "Triage, CPN, Urgences, Labo, Pharmacie & Sorties" },
-                { icon: Building2, title: "Souveraineté des Données", desc: "Dossiers patients & données de santé sécurisés" }
-              ].map((item, i) => (
-                <div key={i} className={`p-3.5 border rounded-2xl backdrop-blur-md transition-all ${
+                { label: "Latence Action", val: "0 ms", sub: "Cache Local Actif" },
+                { label: "Disponibilité", val: "99.9%", sub: "Mode Hors-Ligne" },
+                { label: "Traçabilité", val: "100%", sub: "Actes Certifiés" }
+              ].map((m, i) => (
+                <div key={i} className={`p-5 border rounded-2xl backdrop-blur-md transition-all ${
                   theme === 'dark' 
-                    ? 'bg-gradient-to-b from-[#181b28]/80 to-[#0e1018]/80 border-white/10 shadow-sm' 
-                    : 'bg-white/95 border-slate-200 shadow-xs'
+                    ? 'bg-gradient-to-b from-[#181b28] to-[#0e1018] border-white/15 shadow-[0_10px_25px_-5px_rgba(0,0,0,0.7),inset_0_1px_0_0_rgba(255,255,255,0.15)]' 
+                    : 'bg-white border-slate-200/90 shadow-md'
                 }`}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <item.icon size={15} className="text-emerald-500 shrink-0" />
-                    <p className={`text-xs font-black ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{item.title}</p>
-                  </div>
-                  <p className={`text-[11px] font-medium leading-tight ${theme === 'dark' ? 'text-zinc-400' : 'text-slate-500'}`}>{item.desc}</p>
+                  <p className={`text-2xl font-black tabular-nums ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{m.val}</p>
+                  <p className={`text-xs sm:text-sm font-extrabold mt-1 ${theme === 'dark' ? 'text-blue-400' : 'text-blue-600'}`}>{m.label}</p>
+                  <p className={`text-xs font-semibold mt-0.5 ${theme === 'dark' ? 'text-zinc-400' : 'text-slate-500'}`}>{m.sub}</p>
                 </div>
               ))}
             </div>
           </motion.div>
 
-          {/* Right Column: Realistic Hospital Cockpit Preview */}
+          {/* App Visualization with Pertinent Info */}
           <motion.div 
             initial={{ opacity: 0, scale: 0.97 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.7, delay: 0.15 }}
-            className="lg:col-span-6 relative hidden md:block"
+            className="relative hidden lg:block"
           >
-            <div className={`rounded-[32px] p-3.5 sm:p-4 border overflow-hidden relative ${
+            <div className={`rounded-[32px] p-3.5 border overflow-hidden relative ${
               theme === 'dark' 
-                ? 'bg-gradient-to-b from-[#1c2030] to-[#0c0e15] border-white/20 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.9),inset_0_1px_0_0_rgba(255,255,255,0.22)]' 
+                ? 'bg-gradient-to-b from-[#1a1d2d] to-[#0d0f17] border-white/20 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.9),inset_0_1px_0_0_rgba(255,255,255,0.22)]' 
                 : 'bg-white/95 border-slate-200/90 shadow-2xl'
             }`}>
-              <div className="bg-[#080a11] rounded-[24px] overflow-hidden border border-white/12 flex flex-col relative text-white">
-                
-                {/* Cockpit Window Header */}
-                <div className="px-5 py-4 border-b border-white/10 bg-gradient-to-r from-[#121624] via-[#0f121d] to-[#121624] flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 bg-emerald-600/20 border border-emerald-500/40 rounded-xl flex items-center justify-center text-emerald-400">
-                      <Building2 size={18} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black text-white flex items-center gap-2">
-                        <span>Clinique Médicale du Golf</span>
-                        <span className="text-[10px] font-bold px-2 py-0.2 rounded-md bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">Actif</span>
-                      </h3>
-                      <p className="text-[11px] text-zinc-400">Cockpit Clinique & Administratif • Yaoundé / Douala</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 px-3 py-1 bg-emerald-500/15 border border-emerald-400/30 rounded-xl">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-emerald-300 text-[11px] font-black">Sync 0ms (Hors-Ligne)</span>
-                  </div>
+              <div className="bg-[#07090e] rounded-[24px] aspect-video overflow-hidden border border-white/12 flex relative">
+                {/* Side Bar */}
+                <div className="w-18 bg-gradient-to-b from-[#161926] to-[#0d0f17] border-r border-white/12 p-4 flex flex-col items-center gap-5 pt-6">
+                   <div className="w-11 h-11 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl border border-blue-400/40 shadow-lg shadow-blue-500/30 flex items-center justify-center">
+                     <Activity className="text-white" size={22} />
+                   </div>
+                   {[User, Calendar, Lock, Phone].map((Icon, i) => (
+                     <div key={i} className="w-11 h-11 bg-zinc-800/90 rounded-2xl border border-white/15 flex items-center justify-center text-zinc-300 shadow-md">
+                        <Icon size={19} />
+                     </div>
+                   ))}
                 </div>
 
-                {/* KPI Metrics Strip */}
-                <div className="grid grid-cols-4 gap-2.5 p-4 border-b border-white/10 bg-[#0c0f18]">
-                  {[
-                    { label: "Admissions Jour", val: "28", tag: "Accueil", color: "text-blue-400" },
-                    { label: "Urgences Vitales", val: "04", tag: "Triage", color: "text-amber-400" },
-                    { label: "Caisse Validée", val: "1 450 000 F", tag: "Soldé", color: "text-emerald-400" },
-                    { label: "Pharmacie", val: "98.4%", tag: "Stock", color: "text-teal-400" }
-                  ].map((k, idx) => (
-                    <div key={idx} className="bg-[#121622] p-3 rounded-xl border border-white/10">
-                      <p className="text-[10px] font-bold text-zinc-400 uppercase truncate">{k.label}</p>
-                      <p className={`text-sm sm:text-base font-black ${k.color} mt-0.5 tabular-nums truncate`}>{k.val}</p>
-                      <span className="text-[10px] font-extrabold text-zinc-400">{k.tag}</span>
-                    </div>
-                  ))}
-                </div>
+                {/* Main Dashboard Area */}
+                <div className="flex-1 p-6 flex flex-col gap-5">
+                   <div className="flex justify-between items-center">
+                     <div>
+                       <h3 className="text-lg font-black text-white">Cockpit Hospitalier Temps Réel</h3>
+                       <p className="text-xs font-semibold text-zinc-400 mt-0.5">Synchronisation Firestore & Cache Local</p>
+                     </div>
+                     <div className="px-4 py-1.5 bg-emerald-500/15 border border-emerald-400/30 rounded-xl flex items-center gap-2">
+                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                       <span className="text-emerald-300 text-xs font-extrabold">Synchronisé</span>
+                     </div>
+                   </div>
 
-                {/* Live Patient Feed */}
-                <div className="p-4 space-y-2.5">
-                  <div className="flex items-center justify-between text-[11px] font-bold text-zinc-400 px-1">
-                    <span>Flux Clinique & Admissions en Temps Réel</span>
-                    <span className="text-emerald-400 flex items-center gap-1">
-                      <Sparkles size={12} /> Dossier Médical Partagé
-                    </span>
-                  </div>
+                   <div className="grid grid-cols-4 gap-3.5">
+                     {[
+                       { label: "Admissions", val: "Temps réel", trend: "Accueil", col: "blue" },
+                       { label: "Consultations", val: "Clôture", trend: "Praticien", col: "emerald" },
+                       { label: "Soins & Labo", val: "Traçabilité", trend: "Directe", col: "amber" },
+                       { label: "Facturation", val: "Caisse", trend: "Certifiée", col: "blue" }
+                     ].map((stat, i) => (
+                       <div key={i} className="bg-gradient-to-b from-[#171a26] to-[#10121b] p-4 rounded-2xl border border-white/15 shadow-lg">
+                          <p className="text-xs font-bold text-zinc-400 mb-1">{stat.label}</p>
+                          <p className="text-sm font-black text-white">{stat.val}</p>
+                          <span className="text-xs font-bold text-blue-400">{stat.trend}</span>
+                       </div>
+                     ))}
+                   </div>
 
-                  {[
-                    { name: "Pauline Ngo Bikoi", dme: "DME-2026-0038", service: "Maternité / Suivi CPN", fee: "12 000 FCFA", status: "Consultation", color: "border-emerald-500/30 text-emerald-300" },
-                    { name: "Jean-Paul Kamga", dme: "DME-2026-0041", service: "Consultation Cardiologie", fee: "18 000 FCFA", status: "En caisse", color: "border-blue-500/30 text-blue-300" },
-                    { name: "Madeleine Mbida", dme: "DME-2026-0044", service: "Urgences Vitales / Triage", fee: "25 000 FCFA", status: "Prise en charge", color: "border-amber-500/30 text-amber-300" }
-                  ].map((p, idx) => (
-                    <div key={idx} className="p-2.5 bg-[#121622] border border-white/10 rounded-xl flex items-center justify-between text-xs hover:border-emerald-500/40 transition-colors">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center font-bold text-[11px] text-zinc-300 shrink-0">
-                          {p.name.split(' ').map(n => n[0]).join('')}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-bold text-white truncate">{p.name}</p>
-                          <p className="text-[10px] text-zinc-400 font-mono">{p.dme} • {p.service}</p>
-                        </div>
+                   <div className="flex-1 bg-gradient-to-b from-[#171a26] to-[#10121b] rounded-2xl border border-white/15 p-5 flex flex-col gap-4 relative overflow-hidden shadow-lg">
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs font-bold text-zinc-300">Flux d'Activité Clinique (24h)</p>
+                        <span className="text-xs font-extrabold text-emerald-400">100% Base de Données Réelle</span>
                       </div>
-                      <div className="text-right shrink-0">
-                        <p className="font-bold text-white font-mono text-[11px]">{p.fee}</p>
-                        <span className={`text-[9px] font-black px-1.5 py-0.2 rounded border ${p.color}`}>
-                          {p.status}
-                        </span>
+                      <div className="flex-1 flex items-end gap-2.5 px-2">
+                        {[40, 70, 45, 90, 65, 80, 55, 60, 35, 85, 50, 75, 95, 65].map((h, i) => (
+                          <motion.div 
+                            key={i} 
+                            initial={{ height: 0 }}
+                            animate={{ height: `${h}%` }}
+                            transition={{ delay: 0.2 + i * 0.03 }}
+                            className={`flex-1 rounded-t-lg ${i === 12 ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.5)]' : 'bg-blue-500/60'}`}
+                          />
+                        ))}
                       </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Bottom Activity Bar */}
-                <div className="px-5 py-3 border-t border-white/10 bg-[#0a0d15] flex items-center justify-between text-[11px]">
-                  <span className="text-zinc-400 flex items-center gap-1.5 font-medium">
-                    <CheckCircle2 size={13} className="text-emerald-400" />
-                    <span>Traçabilité chirurgicale & médicamenteuse garantie</span>
-                  </span>
-                  <span className="font-bold text-amber-400 font-mono">Devises : FCFA • XAF • USD</span>
+                   </div>
                 </div>
               </div>
             </div>
           </motion.div>
-
         </div>
       </main>
 
       {/* Footer */}
-      <footer className={`relative z-20 px-6 sm:px-10 py-4 border-t backdrop-blur-md flex flex-col sm:flex-row justify-between items-center gap-2 text-center sm:text-left ${
-        theme === 'dark' ? 'border-white/15 bg-[#0a0c12]/95' : 'border-slate-200/80 bg-white/95'
-      }`}>
-        <p className={`text-xs font-semibold ${theme === 'dark' ? 'text-zinc-400' : 'text-slate-600'}`}>
-          {content.footerDesc}
-        </p>
+      <footer className={`relative z-20 px-6 sm:px-10 py-4 border-t backdrop-blur-md flex justify-between items-center ${theme === 'dark' ? 'border-white/15 bg-[#0a0c12]/90' : 'border-slate-200/80 bg-white/90'}`}>
+        <p className={`text-xs sm:text-sm font-semibold ${theme === 'dark' ? 'text-zinc-400' : 'text-slate-600'}`}>{content.footerDesc}</p>
         <div className="flex gap-3 items-center">
-          <span className={`text-xs font-bold ${theme === 'dark' ? 'text-zinc-300' : 'text-slate-700'}`}>
-            {content.trustCountries}
-          </span>
-          <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" title="Système Opérationnel" />
+           <span className={`text-xs sm:text-sm font-bold ${theme === 'dark' ? 'text-zinc-300' : 'text-slate-700'}`}>Système Opérationnel</span>
+           <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse"></div>
         </div>
       </footer>
 

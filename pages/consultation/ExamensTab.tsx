@@ -30,9 +30,19 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
           if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
             const key = data.id || docSnap.id;
             if (!reqMap.has(key)) {
+              // Deduplicate exams within request
+              const seenExamNames = new Set<string>();
+              const dedupedExams = (data.exams || []).filter((e: any) => {
+                const k = (typeof e === 'string' ? e : e?.name || '').trim().toLowerCase();
+                if (!k || seenExamNames.has(k)) return false;
+                seenExamNames.add(k);
+                return true;
+              });
+
               reqMap.set(key, {
                 ...data,
-                id: key
+                id: key,
+                exams: dedupedExams
               });
             }
           }
@@ -141,6 +151,43 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
       // Write to Firestore 'lab_requests' with strict multi-tenant isolation
       await setDoc(docRef, stampTenantData(newRequest, user));
 
+      // Generate payment request for Caisse
+      const invoiceItems = (request.exams || []).map((e: any, idx: number) => {
+        const itemPrice = e.price || 2500;
+        return {
+          id: `item-exam-${cleanId}-${idx}`,
+          name: `Examen Lab : ${e.name}`,
+          quantity: 1,
+          unitPrice: itemPrice,
+          totalPrice: itemPrice,
+          practitionerId: doctorId,
+          practitionerName: doctorName,
+          practitionerRole: user?.role || 'MEDECIN'
+        };
+      });
+      const totalAmount = invoiceItems.reduce((sum, item) => sum + item.totalPrice, 0);
+      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
+      await setDoc(doc(db, 'payment_requests', invoiceId), stampTenantData({
+        id: invoiceId,
+        patientId: patient.id,
+        patientName: `${patient.lastName || ''} ${patient.firstName || ''}`.trim(),
+        requestingService: 'Consultation',
+        sourceModule: 'Consultation',
+        type: 'LABORATOIRE',
+        items: invoiceItems,
+        totalAmount: totalAmount,
+        amountPaid: 0,
+        status: 'PENDING',
+        createdAt: today.toISOString(),
+        createdBy: doctorName,
+        createdById: doctorId,
+        practitionerId: doctorId,
+        practitionerName: doctorName,
+        practitionerRole: user?.role || 'MEDECIN',
+        requestedBy: doctorName,
+        requestedById: doctorId
+      }, user));
+
       // Save to local storage for local fallbacks
       const savedRequests = localStorage.getItem('hospital_lab_requests');
       const parsedRequests = savedRequests ? JSON.parse(savedRequests) : [];
@@ -154,11 +201,11 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
         time: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
         timestamp: today.toISOString(),
         action: `Transmission Laboratoire - Patient: ${patient.lastName} ${patient.firstName}`,
-        details: { requestId: cleanId, examsCount: request.exams.length, totalAmount: request.totalAmount },
+        details: { requestId: cleanId, examsCount: request.exams.length, totalAmount },
         module: 'Consultation'
       });
 
-      alert("✓ Examens transmis au laboratoire");
+      alert("✓ Examens transmis au Laboratoire et à la Caisse");
       setShowNewRequest(false);
     } catch (error) {
       console.error('Error saving to Firestore:', error);

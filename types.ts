@@ -659,7 +659,6 @@ export interface EstablishmentConfig {
   licence_id?: string;
   licenceId?: string;
   hospital_id?: string;
-  clinicId?: string;
   tenantId?: string;
   
   // Print / Ticket / Receipt Format Configuration
@@ -1003,6 +1002,7 @@ export interface Prescription {
   unitsPerIntake: number;
   totalUnits: number;
   totalBoxes: number;
+  price?: number;
   createdAt: string;
   status: 'DRAFT' | 'VALIDATED' | 'SUSPENDED' | 'STOPPED';
   monitoringParams?: string[];

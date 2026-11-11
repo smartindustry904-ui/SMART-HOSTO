@@ -96,14 +96,13 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
           });
           setMedications(list);
         } else {
-          setMedications(activeTenantId && activeTenantId !== 'default_hospital' ? [] : staticMedications);
+          setMedications(staticMedications);
         }
       });
       return () => unsubscribe();
     } catch (e) {
       console.warn("Medication collection error, using fallbacks: ", e);
-      const activeTenantId = getActiveTenantId(user, patient);
-      setMedications(activeTenantId && activeTenantId !== 'default_hospital' ? [] : staticMedications);
+      setMedications(staticMedications);
     }
   }, [user, patient]);
 
@@ -118,11 +117,21 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
       const doctorName = user?.name || user?.username || 'Dr. Sarr';
       const doctorId = user?.id || '';
 
+      const items = ord.traitements.map((t: any) => ({
+        name: t.medicationName,
+        posology: t.dosageScheme,
+        duration: t.duration,
+        quantity: t.totalBoxes || 1,
+        price: t.price || 1500,
+        practitionerId: doctorId,
+        practitionerName: doctorName
+      }));
+
       const payload = stampTenantData({
         id: newOrdId,
         firebaseId: docRef.id,
         patientId: patient.id,
-        patient: `${patient.lastName} ${patient.firstName}`,
+        patient: `${patient.lastName} ${patient.firstName}`.trim(),
         doctor: doctorName,
         doctorName: doctorName,
         doctorId: doctorId,
@@ -132,20 +141,46 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         practitionerName: doctorName,
         practitionerRole: user?.role || 'MEDECIN',
         date: dateStr,
-        items: ord.traitements.map((t: any) => ({
-          name: t.medicationName,
-          posology: t.dosageScheme,
-          duration: t.duration,
-          quantity: t.totalBoxes || 1,
-          price: t.price || 1500,
-          practitionerId: doctorId,
-          practitionerName: doctorName
-        })),
+        items: items,
         createdAt: today.toISOString(),
         status: 'pending'
       }, user);
 
       await setDoc(docRef, payload);
+
+      // Generate payment request for Caisse
+      const invoiceItems = items.map((it, idx) => ({
+        id: `item-pharm-${newOrdId}-${idx}`,
+        name: `Ordonnance : ${it.name}`,
+        quantity: it.quantity || 1,
+        unitPrice: it.price || 1500,
+        totalPrice: (it.quantity || 1) * (it.price || 1500),
+        practitionerId: doctorId,
+        practitionerName: doctorName,
+        practitionerRole: user?.role || 'MEDECIN'
+      }));
+      const totalAmount = invoiceItems.reduce((sum, item) => sum + item.totalPrice, 0);
+      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
+      await setDoc(doc(db, 'payment_requests', invoiceId), stampTenantData({
+        id: invoiceId,
+        patientId: patient.id,
+        patientName: `${patient.lastName} ${patient.firstName}`.trim(),
+        requestingService: 'Consultation',
+        sourceModule: 'Consultation',
+        type: 'PHARMACIE',
+        items: invoiceItems,
+        totalAmount: totalAmount,
+        amountPaid: 0,
+        status: 'PENDING',
+        createdAt: today.toISOString(),
+        createdBy: doctorName,
+        createdById: doctorId,
+        practitionerId: doctorId,
+        practitionerName: doctorName,
+        practitionerRole: user?.role || 'MEDECIN',
+        requestedBy: doctorName,
+        requestedById: doctorId
+      }, user));
 
       // Audit log the renewal
       await setDoc(doc(collection(db, 'audit_logs')), {
@@ -155,11 +190,11 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         time: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
         timestamp: today.toISOString(),
         action: `Renouvellement d'ordonnance - Patient: ${patient.lastName} ${patient.firstName}`,
-        details: { oldOrdId: ord.id, newOrdId },
+        details: { oldOrdId: ord.id, newOrdId, totalAmount },
         module: 'Consultation'
       });
 
-      alert(`✓ Ordonnance ${newOrdId} renouvelée et transmise à la pharmacie.`);
+      alert(`✓ Ordonnance ${newOrdId} renouvelée et transmise à la Pharmacie et à la Caisse.`);
     } catch (err) {
       console.error(err);
       alert("✗ Échec du renouvellement");
@@ -176,11 +211,22 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
       const doctorName = user?.name || user?.username || 'Dr. Sarr';
       const doctorId = user?.id || '';
 
-      await setDoc(docRef, {
+      const items = newOrd.traitements.map((t: any) => ({
+        name: t.medicationName || t.name,
+        posology: t.dosageScheme || t.posology || '1 comp x3/jour',
+        duration: t.duration || 5,
+        quantity: t.totalBoxes || t.quantity || 1,
+        price: t.price || 1500,
+        practitionerId: doctorId,
+        practitionerName: doctorName
+      }));
+
+      // 1. Write to pending_prescriptions with tenant stamping
+      await setDoc(docRef, stampTenantData({
         id: newOrd.id,
         firebaseId: docRef.id,
         patientId: patient.id,
-        patient: `${patient.lastName} ${patient.firstName}`,
+        patient: `${patient.lastName} ${patient.firstName}`.trim(),
         doctor: doctorName,
         doctorName: doctorName,
         doctorId: doctorId,
@@ -190,18 +236,44 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         practitionerName: doctorName,
         practitionerRole: user?.role || 'MEDECIN',
         date: dateStr,
-        items: newOrd.traitements.map((t: any) => ({
-          name: t.medicationName,
-          posology: t.dosageScheme,
-          duration: t.duration,
-          quantity: t.totalBoxes || 1,
-          price: t.price || 1500,
-          practitionerId: doctorId,
-          practitionerName: doctorName
-        })),
+        items: items,
         createdAt: today.toISOString(),
         status: 'pending'
-      });
+      }, user));
+
+      // 2. Generate payment request for Caisse
+      const invoiceItems = items.map((it, idx) => ({
+        id: `item-pharm-${newOrd.id}-${idx}`,
+        name: `Ordonnance : ${it.name}`,
+        quantity: it.quantity || 1,
+        unitPrice: it.price || 1500,
+        totalPrice: (it.quantity || 1) * (it.price || 1500),
+        practitionerId: doctorId,
+        practitionerName: doctorName,
+        practitionerRole: user?.role || 'MEDECIN'
+      }));
+      const totalAmount = invoiceItems.reduce((sum, item) => sum + item.totalPrice, 0);
+      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
+      await setDoc(doc(db, 'payment_requests', invoiceId), stampTenantData({
+        id: invoiceId,
+        patientId: patient.id,
+        patientName: `${patient.lastName} ${patient.firstName}`.trim(),
+        requestingService: 'Consultation',
+        sourceModule: 'Consultation',
+        type: 'PHARMACIE',
+        items: invoiceItems,
+        totalAmount: totalAmount,
+        amountPaid: 0,
+        status: 'PENDING',
+        createdAt: today.toISOString(),
+        createdBy: doctorName,
+        createdById: doctorId,
+        practitionerId: doctorId,
+        practitionerName: doctorName,
+        practitionerRole: user?.role || 'MEDECIN',
+        requestedBy: doctorName,
+        requestedById: doctorId
+      }, user));
 
       // Audit log
       await setDoc(doc(collection(db, 'audit_logs')), {
@@ -211,11 +283,11 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         time: timeStr,
         timestamp: today.toISOString(),
         action: `Création d'ordonnance - Patient: ${patient.lastName} ${patient.firstName}`,
-        details: { ordId: newOrd.id, itemsCount: newOrd.traitements.length },
+        details: { ordId: newOrd.id, itemsCount: newOrd.traitements.length, totalAmount },
         module: 'Consultation'
       });
 
-      alert("✓ Ordonnance transmise à la pharmacie");
+      alert("✓ Ordonnance transmise à la Pharmacie et à la Caisse");
       setShowNewPrescription(false);
     } catch (err) {
       console.error(err);
@@ -256,17 +328,38 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
           <CheckCircle2 size={18} className="text-emerald-600" /> Traitements Actifs
         </h4>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {prescriptions.filter(o => o.status === 'VALIDATED' || o.status === 'TRANSMITTED').flatMap(o => o.traitements).map(t => (
-            <div key={t.id} className="bg-white p-6 rounded-2xl border border-emerald-100 shadow-sm flex justify-between items-start group">
-              <div>
-                <p className="font-black text-slate-900">{t.medicationName}</p>
-                <p className="text-xs text-slate-500 font-medium mb-3">{t.dosageScheme}</p>
-                <div className="flex items-center gap-2 text-[10px] font-black text-emerald-600 uppercase tracking-widest">
-                  <Clock size={12} /> Reste {t.duration} jours
+          {(() => {
+            const allActive = prescriptions
+              .filter(o => o.status === 'VALIDATED' || o.status === 'TRANSMITTED')
+              .flatMap(o => o.traitements);
+            const seenNames = new Set<string>();
+            const deduped = allActive.filter(t => {
+              const k = (t.medicationName || '').trim().toLowerCase();
+              if (!k || seenNames.has(k)) return false;
+              seenNames.add(k);
+              return true;
+            });
+
+            if (deduped.length === 0) {
+              return (
+                <p className="col-span-full text-xs text-emerald-800 italic text-center py-4">
+                  Aucun traitement actif en cours.
+                </p>
+              );
+            }
+
+            return deduped.map(t => (
+              <div key={t.id} className="bg-white p-6 rounded-2xl border border-emerald-100 shadow-sm flex justify-between items-start group">
+                <div>
+                  <p className="font-black text-slate-900">{t.medicationName}</p>
+                  <p className="text-xs text-slate-500 font-medium mb-3">{t.dosageScheme}</p>
+                  <div className="flex items-center gap-2 text-[10px] font-black text-emerald-600 uppercase tracking-widest">
+                    <Clock size={12} /> Reste {t.duration} jours
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
       </div>
 

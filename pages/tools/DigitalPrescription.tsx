@@ -188,7 +188,33 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
       id: `presc_${Date.now()}`,
       medicationId: med.id,
       medicationName: med.name,
-      status: 'DRAFT',
+      dosageScheme: '1 comp x 3 / jour',
+      dosePerIntake: 1,
+      intakeUnit: 'comprimé(s)',
+      frequency: '3 fois par jour',
+      duration: 5,
+      totalBoxes: 1,
+      price: med.price || 1500,
+      status: 'VALIDATED',
+      createdAt: new Date().toISOString()
+    }]);
+  };
+
+  const handleAddCustomMedication = (customName: string) => {
+    const clean = customName.trim();
+    if (!clean) return;
+    setPrescriptions([...prescriptions, {
+      id: `presc_${Date.now()}`,
+      medicationId: `custom_${Date.now()}`,
+      medicationName: clean,
+      dosageScheme: '1 comp x 3 / jour',
+      dosePerIntake: 1,
+      intakeUnit: 'comprimé(s)',
+      frequency: '3 fois par jour',
+      duration: 5,
+      totalBoxes: 1,
+      price: 1500,
+      status: 'VALIDATED',
       createdAt: new Date().toISOString()
     }]);
   };
@@ -209,8 +235,26 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
       const artemether = medications.find(m => m.name.toLowerCase().includes('artemether') || m.name.toLowerCase().includes('coartem'));
       const paracetamol = medications.find(m => m.name.toLowerCase().includes('paracetamol'));
       
-      if (artemether) protocolMeds.push({ id: `presc_${Date.now()}_1`, medicationId: artemether.id, medicationName: artemether.name, status: 'DRAFT' });
-      if (paracetamol) protocolMeds.push({ id: `presc_${Date.now()}_2`, medicationId: paracetamol.id, medicationName: paracetamol.name, status: 'DRAFT' });
+      if (artemether) protocolMeds.push({ 
+        id: `presc_${Date.now()}_1`, 
+        medicationId: artemether.id, 
+        medicationName: artemether.name, 
+        dosageScheme: '4 comprimés à H0, H8, H24, H36, H48, H60',
+        duration: 3,
+        totalBoxes: 1,
+        price: artemether.price || 3500,
+        status: 'VALIDATED' 
+      });
+      if (paracetamol) protocolMeds.push({ 
+        id: `presc_${Date.now()}_2`, 
+        medicationId: paracetamol.id, 
+        medicationName: paracetamol.name, 
+        dosageScheme: '1g toutes les 8h si douleur ou fièvre',
+        duration: 3,
+        totalBoxes: 1,
+        price: paracetamol.price || 500,
+        status: 'VALIDATED' 
+      });
     }
     
     setPrescriptions([...prescriptions, ...protocolMeds]);
@@ -425,13 +469,26 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
                         e.target.value = '';
                       }
                     }}
-                    className="p-2 bg-indigo-600 text-white rounded-xl text-sm font-bold outline-none"
+                    className="p-2 bg-indigo-600 text-white rounded-xl text-sm font-bold outline-none cursor-pointer"
                   >
-                    <option value="">+ Médicament...</option>
+                    <option value="">+ Médicament du catalogue...</option>
                     {medications.map(m => (
                       <option key={m.id} value={m.id}>{m.name} ({m.form})</option>
                     ))}
                   </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const name = window.prompt("Nom du médicament à prescrire (ex: Amoxicilline 500mg) :");
+                      if (name && name.trim()) {
+                        handleAddCustomMedication(name.trim());
+                      }
+                    }}
+                    className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-sm font-bold transition-all cursor-pointer"
+                    title="Ajouter un médicament hors catalogue"
+                  >
+                    + Saisie libre
+                  </button>
                 </div>
               </div>
 

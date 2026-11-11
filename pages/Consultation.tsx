@@ -1083,11 +1083,11 @@ const Consultation: React.FC<ConsultationProps> = ({
         cloturedById: practitionerId,
         createdAt: today.toISOString()
       };
-      batch.set(consDocRef, sanitizeData(consultationPayload));
+      batch.set(consDocRef, sanitizeData(stampTenantData(consultationPayload, user)));
 
       // Write to patient_history collection with status 'cloture'
       const historyId = `HIST-${targetPid}-${consultationId}`;
-      batch.set(doc(db, 'patient_history', historyId), sanitizeData({
+      batch.set(doc(db, 'patient_history', historyId), sanitizeData(stampTenantData({
         id: historyId,
         patientId: targetPid,
         consultationId: consultationId,
@@ -1107,12 +1107,12 @@ const Consultation: React.FC<ConsultationProps> = ({
         isClotured: true,
         cloturedAt: today.toISOString(),
         updatedAt: today.toISOString()
-      }));
+      }, user)));
 
       // 2. Create the Pharmacy Request document in 'pending_prescriptions'
       if (compilationData.prescriptions && compilationData.prescriptions.length > 0) {
         const pharmDocRef = doc(collection(db, 'pending_prescriptions'));
-        batch.set(pharmDocRef, {
+        batch.set(pharmDocRef, sanitizeData(stampTenantData({
           id: `ORD-${Math.floor(Math.random() * 1000000)}`,
           patientId: activePatient.id,
           patient: `${activePatient.lastName} ${activePatient.firstName}`,
@@ -1134,13 +1134,13 @@ const Consultation: React.FC<ConsultationProps> = ({
           })),
           createdAt: today.toISOString(),
           status: 'pending'
-        });
+        }, user)));
       }
 
       // 3. Create the Laboratory Exam Request document in 'lab_requests'
       if (compilationData.examensDemandes && compilationData.examensDemandes.length > 0) {
         const labDocRef = doc(collection(db, 'lab_requests'));
-        batch.set(labDocRef, {
+        batch.set(labDocRef, sanitizeData(stampTenantData({
           id: `LAB-${Math.floor(Math.random() * 1000000)}`,
           patientId: activePatient.id,
           patientName: `${activePatient.lastName} ${activePatient.firstName}`,
@@ -1162,7 +1162,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             practitionerName: practitionerName
           })),
           createdAt: today.toISOString()
-        });
+        }, user)));
       }
 
       // 4. Update appointment status to COMPLETED asynchronously (offline-first, non-blocking)
@@ -1315,7 +1315,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             cloturedAt: today.toISOString()
           };
 
-          batch.set(doc(db, 'payment_requests', invoiceId), sanitizeData(newPaymentRequest));
+          batch.set(doc(db, 'payment_requests', invoiceId), sanitizeData(stampTenantData(newPaymentRequest, user)));
         }
       }
 
@@ -1335,7 +1335,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       const dischargeId = `DIS-${targetPid}`;
       const isPatientPaid = checkPatientIsPaid(activePatient);
       const dischargeDocRef = doc(db, 'discharges_waiting', dischargeId);
-      batch.set(dischargeDocRef, sanitizeData({
+      batch.set(dischargeDocRef, sanitizeData(stampTenantData({
         id: dischargeId,
         docId: dischargeId,
         patientId: targetPid,
@@ -1353,7 +1353,7 @@ const Consultation: React.FC<ConsultationProps> = ({
         source: 'CONSULTATION',
         consultationId: consultationId,
         createdAt: today.toISOString()
-      }), { merge: true });
+      }, user)), { merge: true });
 
       // 8. Optimistic Offline-First UI Update (0ms delay)
       const targetPatientId = activePatient.id;
@@ -1471,8 +1471,42 @@ const Consultation: React.FC<ConsultationProps> = ({
         status: 'pending'
       }, user)));
 
-      // 2. Direct to Pharmacy POS (Medication billing & dispensing happens exclusively at Pharmacy POS)
-      const totalEstimated = prescriptions.reduce((sum: number, p: any) => sum + (p.price || 1500), 0);
+      // 2. Route Payment Request to Caisse
+      const invoiceItems = prescriptions.map((p: any, idx: number) => {
+        const itemPrice = p.price || 1500;
+        return {
+          id: `item-med-${prescriptionId}-${idx}`,
+          name: `Ordonnance : ${p.name}`,
+          quantity: p.quantity || 1,
+          unitPrice: itemPrice,
+          totalPrice: (p.quantity || 1) * itemPrice,
+          practitionerId: user?.id || '',
+          practitionerName: user?.name || user?.username || 'Dr. Sarr',
+          practitionerRole: user?.role || 'MEDECIN'
+        };
+      });
+      const totalAmount = invoiceItems.reduce((sum: number, p: any) => sum + p.totalPrice, 0);
+      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
+      await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(stampTenantData({
+        id: invoiceId,
+        patientId: activePatient.id,
+        patientName: `${activePatient.lastName} ${activePatient.firstName}`,
+        requestingService: 'Consultation',
+        sourceModule: 'Consultation',
+        type: 'PHARMACIE',
+        items: invoiceItems,
+        totalAmount: totalAmount,
+        amountPaid: 0,
+        status: 'PENDING',
+        createdAt: today.toISOString(),
+        createdBy: user?.name || user?.username || 'Dr. Sarr',
+        createdById: user?.id || '',
+        practitionerId: user?.id || '',
+        practitionerName: user?.name || user?.username || 'Dr. Sarr',
+        practitionerRole: user?.role || 'MEDECIN',
+        requestedBy: user?.name || user?.username || 'Dr. Sarr',
+        requestedById: user?.id || ''
+      }, user)));
 
       // 3. Create Audit Log
       await setDoc(doc(collection(db, 'audit_logs')), sanitizeData({
@@ -1481,13 +1515,13 @@ const Consultation: React.FC<ConsultationProps> = ({
         date: dateStr,
         time: timeStr,
         timestamp: today.toISOString(),
-        action: `Transmission ordonnance exclusivement au comptoir Pharmacie (POS) - Patient: ${activePatient.lastName} ${activePatient.firstName}`,
-        details: { prescriptionId, totalEstimated, medsCount: prescriptions.length },
+        action: `Transmission ordonnance au comptoir Pharmacie et à la Caisse - Patient: ${activePatient.lastName} ${activePatient.firstName}`,
+        details: { prescriptionId, invoiceId, totalAmount, medsCount: prescriptions.length },
         module: 'Consultation'
       }));
 
       window.dispatchEvent(new CustomEvent('app-notification', { 
-        detail: `✓ Ordonnance transmise au guichet Pharmacie (Paiement et délivrance directs)` 
+        detail: `✓ Ordonnance transmise à la Pharmacie et à la Caisse` 
       }));
     } catch (e) {
       console.error("Prescription dispatch failed: ", e);

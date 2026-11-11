@@ -7,6 +7,7 @@ import {
 import { db, sanitizeData } from '../../src/firebase';
 import { collection, doc, setDoc, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { User as UserType } from '../../types';
+import { stampTenantData } from '../../src/utils/tenant';
 
 interface PrescriptionSoinsTabProps {
   patient: any;
@@ -261,18 +262,65 @@ export const PrescriptionSoinsTab: React.FC<PrescriptionSoinsTabProps> = ({
         time: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
       };
 
-      await setDoc(actDocRef, sanitizeData(payload));
+      await setDoc(actDocRef, sanitizeData(stampTenantData(payload, user)));
+
+      // Generate payment request for Caisse
+      const carePrice = 2000;
+      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
+      const invoiceItems = [{
+        id: `item-care-${actDocRef.id}`,
+        name: `Soin infirmier : ${selectedProtocol}`,
+        quantity: 1,
+        unitPrice: carePrice,
+        totalPrice: carePrice,
+        practitionerId: user?.id || '',
+        practitionerName: doctorName,
+        practitionerRole: isUrgence ? 'Médecin Urgentiste' : 'Médecin'
+      }];
+
+      await setDoc(doc(db, 'payment_requests', invoiceId), sanitizeData(stampTenantData({
+        id: invoiceId,
+        patientId: String(patient.patientId || patient.id),
+        patientName: `${patient.lastName || ''} ${patient.firstName || ''}`.trim(),
+        requestingService: isUrgence ? 'Urgences' : 'Soins Infirmiers',
+        sourceModule: isUrgence ? 'Emergency' : 'Consultation',
+        type: 'SOINS_INFIRMIERS',
+        items: invoiceItems,
+        totalAmount: carePrice,
+        amountPaid: 0,
+        status: 'PENDING',
+        createdAt: today.toISOString(),
+        createdBy: doctorName,
+        createdById: user?.id || '',
+        practitionerId: user?.id || '',
+        practitionerName: doctorName,
+        practitionerRole: isUrgence ? 'Médecin Urgentiste' : 'Médecin',
+        requestedBy: doctorName,
+        requestedById: user?.id || ''
+      }, user)));
+
+      // Write audit log
+      await setDoc(doc(collection(db, 'audit_logs')), {
+        user: doctorName,
+        role: isUrgence ? 'DOCTOR_URG' : 'DOCTOR',
+        date: today.toLocaleDateString('fr-FR'),
+        time: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+        timestamp: today.toISOString(),
+        action: `Prescription de Soin Infirmier - Patient: ${patient.lastName} ${patient.firstName}`,
+        details: { actId: actDocRef.id, protocol: selectedProtocol, priority: isUrgence ? 'HIGH' : priority, totalAmount: carePrice },
+        module: 'Consultation'
+      });
 
       window.dispatchEvent(new CustomEvent('app-notification', {
         detail: isUrgence
-          ? `🚨 Soin d'urgence « ${selectedProtocol} » transmis en priorité HAUTE aux Soins Infirmiers.`
-          : `💉 Soin infirmier « ${selectedProtocol} » transmis en attente à l'équipe infirmière.`
+          ? `🚨 Soin d'urgence « ${selectedProtocol} » transmis en priorité HAUTE aux Soins Infirmiers et à la Caisse.`
+          : `💉 Soin infirmier « ${selectedProtocol} » transmis aux Soins Infirmiers et à la Caisse.`
       }));
 
       setSuccessMessage(
         isUrgence
-          ? `✓ Soin d'urgence « ${selectedProtocol} » transmis immédiatement à l'équipe infirmière (Priorité Haute).`
-          : `✓ Prescription de « ${selectedProtocol} » transmise avec succès à la file des Soins Infirmiers.`
+          ? `✓ Soin d'urgence « ${selectedProtocol} » transmis immédiatement à l'équipe infirmière et à la Caisse.`
+          : `✓ Prescription de « ${selectedProtocol} » transmise avec succès aux Soins Infirmiers et à la Caisse.`
       );
       setTimeout(() => setSuccessMessage(null), 5000);
 

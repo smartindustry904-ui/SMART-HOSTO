@@ -42,7 +42,7 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
     }
   }, [patient]);
 
-  // Subscribe to actual active treatments from pending_prescriptions
+  // Subscribe to actual active treatments from pending_prescriptions (Strict Deduplication)
   useEffect(() => {
     if (!patient?.id) return;
     try {
@@ -53,11 +53,12 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
           const data = docSnap.data();
           if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
             (data.items || []).forEach((it: any, idx: number) => {
-              const uniqueKey = `${docSnap.id}-${it.name?.toLowerCase().trim()}`;
-              if (!treatMap.has(uniqueKey)) {
+              const cleanName = (it.name || '').trim();
+              const uniqueKey = cleanName.toLowerCase();
+              if (uniqueKey && !treatMap.has(uniqueKey)) {
                 treatMap.set(uniqueKey, {
                   id: `${docSnap.id}-${idx}`,
-                  name: it.name,
+                  name: cleanName,
                   posology: it.posology || '1 comp x3/jour',
                   status: data.status || 'pending'
                 });
@@ -73,7 +74,7 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
     }
   }, [patient?.id]);
 
-  // Subscribe to actual requested exams from lab_requests
+  // Subscribe to actual requested exams from lab_requests (Strict Deduplication)
   useEffect(() => {
     if (!patient?.id) return;
     try {
@@ -84,11 +85,13 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
           const data = docSnap.data();
           if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
             (data.exams || []).forEach((ex: any, idx: number) => {
-              const uniqueKey = `${docSnap.id}-${ex.name?.toLowerCase().trim()}`;
-              if (!examMap.has(uniqueKey)) {
+              const examName = typeof ex === 'string' ? ex : (ex.name || '');
+              const cleanName = examName.trim();
+              const uniqueKey = cleanName.toLowerCase();
+              if (uniqueKey && !examMap.has(uniqueKey)) {
                 examMap.set(uniqueKey, {
                   id: `${docSnap.id}-${idx}`,
-                  name: ex.name,
+                  name: cleanName,
                   status: data.status || 'en attente'
                 });
               }

@@ -57,10 +57,23 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
 
     const updateAllItems = () => {
       const merged = [...consultationsList, ...prescriptionsList, ...labList, ...nursingList];
-      // Deduplicate by ID
+      // Deduplicate by ID and semantic content to prevent duplicate med/exam history cards
       const map = new Map<string, TimelineItem>();
+      const seenSemanticKeys = new Set<string>();
+
       merged.forEach(item => {
+        const contentStr = (item.treatment || item.exams || item.diagnosis || item.title || '').trim().toLowerCase();
+        const patientKey = String(item.patientId || '').trim();
+        const dateKey = String(item.date || '').trim();
+        const semanticKey = `${item.itemType}-${patientKey}-${dateKey}-${contentStr}`;
+
         if (!map.has(item.id)) {
+          if (contentStr.length > 5 && seenSemanticKeys.has(semanticKey)) {
+            return; // Skip redundant duplicate entry
+          }
+          if (contentStr.length > 5) {
+            seenSemanticKeys.add(semanticKey);
+          }
           map.set(item.id, item);
         }
       });
@@ -111,7 +124,13 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
           const dateStr = d.createdAt ? d.createdAt.split('T')[0] : 'Récemment';
           const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
           const items = d.items || [];
-          const treatmentSummary = items.map((i: any) => `${i.name} (${i.posology || ''})`).join(', ');
+          const uniqueItemsMap = new Map<string, any>();
+          items.forEach((i: any) => {
+            const k = (i.name || '').trim().toLowerCase();
+            if (k && !uniqueItemsMap.has(k)) uniqueItemsMap.set(k, i);
+          });
+          const treatmentSummary = Array.from(uniqueItemsMap.values())
+            .map((i: any) => `${i.name} (${i.posology || ''})`).join(', ');
 
           return {
             id: docSnap.id,
@@ -146,7 +165,14 @@ const HistoryComponent: React.FC<HistoryProps> = ({ patientId }) => {
           const dateStr = d.createdAt ? d.createdAt.split('T')[0] : 'Récemment';
           const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
           const examsArr = d.exams || [];
-          const examSummary = Array.isArray(examsArr) ? examsArr.map((e: any) => typeof e === 'string' ? e : e.name).join(', ') : 'Examen de laboratoire';
+          const uniqueExamsMap = new Map<string, string>();
+          examsArr.forEach((e: any) => {
+            const rawName = typeof e === 'string' ? e : e?.name || '';
+            const clean = rawName.trim();
+            const k = clean.toLowerCase();
+            if (k && !uniqueExamsMap.has(k)) uniqueExamsMap.set(k, clean);
+          });
+          const examSummary = Array.from(uniqueExamsMap.values()).join(', ') || 'Examen de laboratoire';
 
           return {
             id: docSnap.id,
