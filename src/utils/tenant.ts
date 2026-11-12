@@ -9,9 +9,27 @@ import { User, EstablishmentConfig } from '../../types';
  *   - strictly returns their hospital/clinic ID (e.g. 'tenant_saintluc_123').
  */
 export function getActiveTenantId(user?: User | null, establishment?: EstablishmentConfig | null): string {
-  // 1. If user object is provided
+  // 1. Resolve explicit tenant from establishment first if valid and not default/ALL
+  const estTenant = 
+    establishment?.tenantId || 
+    (establishment as any)?.hospital_id || 
+    (establishment as any)?.clinicId ||
+    (establishment as any)?.id;
+
+  // 2. If user object is provided
   if (user) {
-    // SuperAdmin global overview unless an explicit context is locked
+    // Check user-assigned clinic/hospital/tenant
+    const userTenant = 
+      (user as any).tenantId ||
+      (user as any).clinicId ||
+      (user as any).hospital_id ||
+      (user as any).structureId;
+
+    if (userTenant && String(userTenant).trim() !== '' && String(userTenant).trim() !== 'ALL') {
+      return String(userTenant).trim();
+    }
+
+    // SuperAdmin check
     const isSuperAdmin = 
       user.role === 'SUPER_ADMIN' || 
       String(user.role).toUpperCase() === 'SUPER_ADMIN' ||
@@ -21,41 +39,43 @@ export function getActiveTenantId(user?: User | null, establishment?: Establishm
 
     if (isSuperAdmin) {
       const override = (user as any).activeTenantId || (user as any).selectedTenantId;
-      return override ? String(override).trim() : 'ALL';
+      if (override && String(override).trim() !== '' && String(override).trim() !== 'ALL') {
+        return String(override).trim();
+      }
+      // If an establishment is configured with a specific tenant/id, prioritize that hospital
+      if (estTenant && estTenant !== 'default_hospital' && estTenant !== 'ALL') {
+        return String(estTenant).trim();
+      }
+      return 'ALL';
     }
-
-    const tenantId = 
-      (user as any).clinicId ||
-      (user as any).hospital_id ||
-      (user as any).structureId;
-
-    if (tenantId) return String(tenantId).trim();
   }
 
-  // 2. Check establishment config
-  const estTenant = 
-    establishment?.tenantId || 
-    (establishment as any)?.hospital_id || 
-    (establishment as any)?.clinicId ||
-    (establishment as any)?.id;
-
-  if (estTenant && estTenant !== 'default_hospital') {
+  // 3. Check establishment config
+  if (estTenant && estTenant !== 'default_hospital' && estTenant !== 'ALL') {
     return String(estTenant).trim();
   }
 
-  // 3. Check persisted browser session in case user prop was omitted in sub-component
+  // 4. Check persisted browser session in case user prop was omitted in sub-component
   if (typeof localStorage !== 'undefined') {
     try {
       const savedSession = localStorage.getItem('hospital_session');
       if (savedSession) {
         const u = JSON.parse(savedSession);
+        const uTenant = u.tenantId || u.clinicId || u.hospital_id || u.structureId;
+        if (uTenant && String(uTenant).trim() !== '' && String(uTenant).trim() !== 'ALL') {
+          return String(uTenant).trim();
+        }
         const isSuper = u.role === 'SUPER_ADMIN' || u.username === 'superadmin' || u.username === 'sa1';
         if (isSuper) {
           const override = u.activeTenantId || u.selectedTenantId;
-          return override ? String(override).trim() : 'ALL';
+          if (override && String(override).trim() !== '' && String(override).trim() !== 'ALL') {
+            return String(override).trim();
+          }
+          if (estTenant && estTenant !== 'default_hospital' && estTenant !== 'ALL') {
+            return String(estTenant).trim();
+          }
+          return 'ALL';
         }
-        const uTenant = u.clinicId || u.hospital_id || u.structureId;
-        if (uTenant) return String(uTenant).trim();
       }
     } catch {}
   }

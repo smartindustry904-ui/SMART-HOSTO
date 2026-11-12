@@ -420,7 +420,14 @@ const Reception: React.FC<ReceptionProps> = ({
   const { services: hospitalServices } = useHospitalServices();
   const { acts: medicalActs } = useMedicalActs();
   const currency = establishment?.currency || 'CFA';
-  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+  const activeTenantId = useMemo(() => {
+    const tid = getActiveTenantId(user, establishment);
+    if (tid === 'ALL') {
+      const estId = establishment?.tenantId || (establishment as any)?.hospital_id || (establishment as any)?.clinicId || (establishment as any)?.id;
+      return (estId && estId !== 'ALL') ? String(estId).trim() : 'default_hospital';
+    }
+    return tid;
+  }, [user, establishment]);
   const { roles: customRoles } = useCustomRoles(user);
   const permissions = useMemo(() => getUserModulePermissions(user, Role.RECEPTION, customRoles), [user, customRoles]);
   const [step, setStep] = useState<'search' | 'register' | 'triage' | 'payment' | 'summary'>('search');

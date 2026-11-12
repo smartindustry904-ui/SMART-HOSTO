@@ -54,7 +54,14 @@ const Consultation: React.FC<ConsultationProps> = ({
 }) => {
   const [activePatient, setActivePatient] = useState<any | null>(null);
   const { establishment } = useSettings();
-  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+  const activeTenantId = useMemo(() => {
+    const tid = getActiveTenantId(user, establishment);
+    if (tid === 'ALL') {
+      const estId = establishment?.tenantId || (establishment as any)?.hospital_id || (establishment as any)?.clinicId || (establishment as any)?.id;
+      return (estId && estId !== 'ALL') ? String(estId).trim() : 'default_hospital';
+    }
+    return tid;
+  }, [user, establishment]);
   const { services: hospitalServices } = useHospitalServices();
   const [selectedSpecialty, setSelectedSpecialty] = useState<string>('ALL');
   const isSendingPrescriptionRef = useRef(false);
@@ -3043,19 +3050,26 @@ const Consultation: React.FC<ConsultationProps> = ({
                           isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
                           (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((p.name || '').toLowerCase()))
                         );
+                        const displayPrice = (p.price !== undefined && p.price !== null && !isNaN(Number(p.price))) ? Number(p.price) : 0;
                         return (
                           <div key={idx} className="flex justify-between items-center text-slate-600 pt-2 font-medium">
                             <span className="truncate max-w-[200px] flex items-center gap-1.5">
                               💊 {p.name}
-                              {isAlreadyPaidOrSent && (
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-slate-900 text-xs">
+                                {displayPrice > 0 ? `${displayPrice.toLocaleString()} FCFA` : 'Tarif standard'}
+                              </span>
+                              {isAlreadyPaidOrSent ? (
                                 <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[8.5px] font-black">
                                   ✓ Transmis / Réglé
                                 </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[8.5px] font-bold">
+                                  À régler
+                                </span>
                               )}
-                            </span>
-                            <span className={isAlreadyPaidOrSent ? "text-emerald-600 font-bold" : ""}>
-                              {isAlreadyPaidOrSent ? "0 FCFA" : `${(p.price || 1500).toLocaleString()} FCFA`}
-                            </span>
+                            </div>
                           </div>
                         );
                       })}
@@ -3065,19 +3079,26 @@ const Consultation: React.FC<ConsultationProps> = ({
                           isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
                           (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((e.name || '').toLowerCase()))
                         );
+                        const displayPrice = (e.price !== undefined && e.price !== null && !isNaN(Number(e.price))) ? Number(e.price) : 0;
                         return (
                           <div key={idx} className="flex justify-between items-center text-slate-600 pt-2 font-medium">
                             <span className="truncate max-w-[200px] flex items-center gap-1.5">
                               🔬 Ex: {e.name}
-                              {isAlreadyPaidOrSent && (
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-slate-900 text-xs">
+                                {displayPrice > 0 ? `${displayPrice.toLocaleString()} FCFA` : 'Tarif standard'}
+                              </span>
+                              {isAlreadyPaidOrSent ? (
                                 <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[8.5px] font-black">
                                   ✓ Transmis / Réglé
                                 </span>
+                              ) : (
+                                <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[8.5px] font-bold">
+                                  À régler
+                                </span>
                               )}
-                            </span>
-                            <span className={isAlreadyPaidOrSent ? "text-emerald-600 font-bold" : ""}>
-                              {isAlreadyPaidOrSent ? "0 FCFA" : `${(e.price || 2500).toLocaleString()} FCFA`}
-                            </span>
+                            </div>
                           </div>
                         );
                       })}

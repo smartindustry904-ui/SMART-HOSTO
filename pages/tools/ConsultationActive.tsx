@@ -342,37 +342,26 @@ export default function ConsultationActive({
     }
   }, [patient?.id]);
 
-  // Fetch medication catalog from central pharmacy_inventory
+  // Fetch medication catalog from central pharmacy_inventory (Strict Tenant Isolation, No Dummy Data)
   useEffect(() => {
     try {
       const activeTenantId = getActiveTenantId(user, patient);
       const q = query(collection(db, 'pharmacy_inventory'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fallbackMedications = [
-          { id: 'm1', name: 'Paracétamol 500mg (Boite)', price: 500, defaultPosology: '1 comprimé toutes les 8 heures (3 fois/jour) pendant 5 jours', family: 'Antalgique', stock: 100, forms: ['Comprimé'] },
-          { id: 'm2', name: 'Amoxicilline 1g (Boite)', price: 2500, defaultPosology: '1 comprimé matin et soir pendant 7 jours', family: 'Antibiotique', stock: 50, forms: ['Gélule'] },
-          { id: 'm3', name: 'Artemether-Lumefantrine (Coartem)', price: 2000, defaultPosology: '1 comprimé par jour au cours des repas pendant 3 jours', family: 'Antipaludique', stock: 30, forms: ['Comprimé'] },
-          { id: 'm4', name: 'Amlodipine 5mg (Boite)', price: 2250, defaultPosology: '1 comprimé par jour le matin en continu', family: 'Anti-hypertenseur', stock: 40, forms: ['Comprimé'] },
-          { id: 'm5', name: 'Ciprofloxacine 500mg', price: 3500, defaultPosology: '1 comprimé 2 fois par jour pendant 5 jours', family: 'Antibiotique', stock: 60, forms: ['Comprimé'] },
-          { id: 'm6', name: 'Spasfon Comprimés', price: 1500, defaultPosology: '1 comprimé lors des accès douloureux, max 3/jour', family: 'Antispasmodique', stock: 80, forms: ['Comprimé'] },
-          { id: 'm7', name: 'Gaviscon Suspension (Flacon)', price: 3000, defaultPosology: '1 sachet / cuillère 3 fois par jour après les repas', family: 'Antiacide', stock: 45, forms: ['Suspension Buvable'] },
-          { id: 'm8', name: 'Metformine 500mg (Flacon)', price: 1800, defaultPosology: '1 comprimé matin et soir pendant le repas', family: 'Antidiabétique', stock: 70, forms: ['Comprimé'] }
-        ];
-
         const tenantDocs = snapshot.docs.filter(ds => belongsToTenant(ds.data(), activeTenantId));
 
         if (tenantDocs.length === 0) {
-          setDbMedications(activeTenantId && activeTenantId !== 'default_hospital' ? [] : fallbackMedications);
+          setDbMedications([]);
         } else {
           const list = tenantDocs.map(ds => {
             const d = ds.data();
             return {
               id: ds.id,
-              name: d.name || d.nomCommercial || d.nom,
-              price: parseFloat(d.price) || parseFloat(d.prixVente) || 1500,
+              name: d.name || d.nomCommercial || d.nom || 'Médicament',
+              price: parseFloat(d.price) || parseFloat(d.prixVente) || parseFloat(d.prixUnitaire) || 0,
               defaultPosology: d.defaultPosology || d.frequenceStandard || d.posology || 'Selon prescription',
-              family: d.family || d.classeTherapeutique || 'Autre',
-              stock: parseInt(d.stock) || parseInt(d.quantite) || parseInt(d.unitesParConditionnement) || 50,
+              family: d.family || d.classeTherapeutique || d.famille || 'Autre',
+              stock: parseInt(d.stock) || parseInt(d.quantite) || parseInt(d.unitesParConditionnement) || 0,
               forms: d.forms || (d.formeGalenique ? [d.formeGalenique] : ['Comprimé'])
             };
           });
@@ -385,35 +374,23 @@ export default function ConsultationActive({
     }
   }, [user, patient]);
 
-  // Fetch exam catalog from central medical_acts
+  // Fetch exam catalog from central medical_acts (Strict Tenant Isolation, No Dummy Data)
   useEffect(() => {
     try {
       const activeTenantId = getActiveTenantId(user, patient);
       const q = query(collection(db, 'medical_acts'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fallbackExams = [
-          { id: 'e1', name: 'NFS (Hémogramme)', price: 4000, category: 'Hématologie' },
-          { id: 'e2', name: 'TDR Paludisme / Goutte Épaisse', price: 2000, category: 'Parasitologie' },
-          { id: 'e3', name: 'CRP (Protéine C Réactive)', price: 5000, category: 'Immunologie' },
-          { id: 'e4', name: 'ECBU (Urines)', price: 6000, category: 'Bactériologie' },
-          { id: 'e5', name: 'Créatininémie', price: 3500, category: 'Biochimie' },
-          { id: 'e6', name: 'Glycémie à jeun', price: 1500, category: 'Biochimie' },
-          { id: 'e7', name: 'Échographie Obstétricale / Pelvienne', price: 10000, category: 'Imagerie' },
-          { id: 'e8', name: 'Radiographie Thoracique (Face)', price: 8000, category: 'Imagerie' },
-          { id: 'e9', name: 'ECG de repos 12 dérivations', price: 7000, category: 'Imagerie' }
-        ];
-
         const tenantDocs = snapshot.docs.filter(ds => belongsToTenant(ds.data(), activeTenantId));
 
         if (tenantDocs.length === 0) {
-          setDbExams(activeTenantId && activeTenantId !== 'default_hospital' ? [] : fallbackExams);
+          setDbExams([]);
         } else {
           const list = tenantDocs.map(ds => {
             const d = ds.data();
             return {
               id: ds.id,
-              name: d.name || d.nom,
-              price: parseFloat(d.price) || parseFloat(d.prixVente) || 2500,
+              name: d.name || d.nom || 'Examen',
+              price: parseFloat(d.price) || parseFloat(d.prixVente) || parseFloat(d.tarif) || 0,
               category: d.category || d.categorie || d.sousCategorie || 'Général'
             };
           });
@@ -424,7 +401,7 @@ export default function ConsultationActive({
     } catch (e) {
       console.warn("Error subscribing to medical_acts:", e);
     }
-  }, []);
+  }, [user, patient]);
 
   // Chronological prescription states
   const [posologyDose, setPosologyDose] = useState('1 comprimé');
@@ -2934,71 +2911,8 @@ Orientation: ${orientation}
             })()}
 
             {activeTab === 'examens' && (() => {
-              // Predefined catalog of exams
-              const EXAMS_CATALOG = dbExams.length > 0 ? dbExams : [
-                { name: 'NFS (Hémogramme)', price: 4000, category: 'Hématologie' },
-                { name: 'TDR Paludisme / Goutte Épaisse', price: 2000, category: 'Parasitologie' },
-                { name: 'CRP (Protéine C Réactive)', price: 5000, category: 'Immunologie' },
-                { name: 'ECBU (Urines)', price: 6000, category: 'Bactériologie' },
-                { name: 'Créatininémie', price: 3500, category: 'Biochimie' },
-                { name: 'Glycémie à jeun', price: 1500, category: 'Biochimie' },
-                { name: 'Échographie Obstétricale / Pelvienne', price: 10000, category: 'Imagerie' },
-                { name: 'Radiographie Thoracique (Face)', price: 8000, category: 'Imagerie' },
-                { name: 'ECG de repos 12 dérivations', price: 7000, category: 'Imagerie' }
-              ];
-
-              // Predefined clinical packs (Point 6)
-              const CLINICAL_PACKS = [
-                {
-                  id: 'pack_palu',
-                  name: 'Pack Paludisme',
-                  description: 'TDR Paludisme + NFS (Hémogramme) + Goutte Épaisse',
-                  exams: [
-                    { name: 'NFS (Hémogramme)', price: 4000 },
-                    { name: 'TDR Paludisme / Goutte Épaisse', price: 2000 }
-                  ]
-                },
-                {
-                  id: 'pack_cardio',
-                  name: 'Pack Cardio / Rénal',
-                  description: 'Créatininémie + Glycémie + ECG de repos',
-                  exams: [
-                    { name: 'Créatininémie', price: 3500 },
-                    { name: 'Glycémie à jeun', price: 1500 },
-                    { name: 'ECG de repos 12 dérivations', price: 7000 }
-                  ]
-                },
-                {
-                  id: 'pack_inf',
-                  name: 'Pack Syndr. Infectieux',
-                  description: 'NFS + CRP + ECBU',
-                  exams: [
-                    { name: 'NFS (Hémogramme)', price: 4000 },
-                    { name: 'CRP (Protéine C Réactive)', price: 5000 },
-                    { name: 'ECBU (Urines)', price: 6000 }
-                  ]
-                }
-              ];
-
-              const handleAddPack = (pack: any) => {
-                let addedCount = 0;
-                setExamensDemandes(prev => {
-                  const currentExams = [...prev];
-                  pack.exams.forEach((item: any) => {
-                    const cleanName = item.name.trim();
-                    if (!currentExams.some(e => e.name.trim().toLowerCase() === cleanName.toLowerCase())) {
-                      currentExams.push({ id: `exam-${Date.now()}-${Math.floor(Math.random() * 1000)}`, name: cleanName, urgent: false, price: item.price });
-                      addedCount++;
-                    }
-                  });
-                  return currentExams;
-                });
-                if (addedCount === 0) {
-                  window.dispatchEvent(new CustomEvent('app-notification', { detail: `ℹ️ Tous les examens du pack « ${pack.name} » sont déjà dans le bulletin (aucun doublon créé).` }));
-                } else {
-                  window.dispatchEvent(new CustomEvent('app-notification', { detail: `✓ ${addedCount} examen(s) du pack « ${pack.name} » ajouté(s) sans doublon.` }));
-                }
-              };
+              // Catalog of exams (Strictly from real database referential)
+              const EXAMS_CATALOG = dbExams;
 
               const handleAddCustomExam = () => {
                 if (!customExamName.trim()) return;
@@ -3007,26 +2921,67 @@ Orientation: ${orientation}
                   window.dispatchEvent(new CustomEvent('app-notification', { detail: `⚠️ L'examen « ${clean} » est déjà présent dans le bulletin (doublon refusé).` }));
                   return;
                 }
+                const foundInDb = EXAMS_CATALOG.find(e => e.name.trim().toLowerCase() === clean.toLowerCase());
+                const finalPrice = customExamPrice || foundInDb?.price || 0;
                 setExamensDemandes(prev => [
                   ...prev,
                   {
                     id: `exam-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
                     name: clean,
                     urgent: false,
-                    price: customExamPrice || 2500,
+                    price: finalPrice,
                     status: 'demandé'
                   }
                 ]);
                 window.dispatchEvent(new CustomEvent('app-notification', { detail: `✓ Examen « ${clean} » ajouté au bulletin.` }));
                 setCustomExamName('');
-                setCustomExamPrice(2500);
+                setCustomExamPrice(0);
               };
 
               return (
-                <div className="space-y-6 animate-in fade-in">
+                <div className="space-y-5 animate-in fade-in">
                   <div className="flex justify-between items-center border-b pb-2">
                     <h3 className="text-lg font-black text-slate-800">Bulletin d'Examens Connecté</h3>
                     <span className="text-[10px] font-black uppercase text-purple-600 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-100">Facturation & Labo Liés</span>
+                  </div>
+
+                  {/* STICKY / IMMEDIATE QUICK-ADD TOOLBAR - VISIBLE DIRECTLY WITHOUT SCROLLING */}
+                  <div className="bg-purple-50/80 p-3.5 border border-purple-200 rounded-2xl flex flex-col sm:flex-row gap-2.5 items-center justify-between shadow-xs">
+                    <div className="flex-1 w-full flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Beaker className="absolute left-3 top-1/2 -translate-y-1/2 text-purple-600" size={15} />
+                        <input 
+                          type="text"
+                          value={customExamName}
+                          onChange={(e) => setCustomExamName(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddCustomExam();
+                            }
+                          }}
+                          placeholder="Prescrire un examen (ex: NFS, Glycémie, Échographie...)..."
+                          className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-purple-600 shadow-xs"
+                        />
+                      </div>
+                      <div className="relative w-28 shrink-0">
+                        <input 
+                          type="number"
+                          value={customExamPrice || ''}
+                          onChange={(e) => setCustomExamPrice(Number(e.target.value) || 0)}
+                          placeholder="Tarif FCFA"
+                          className="w-full px-2 py-2 bg-white border border-slate-200 rounded-xl text-xs font-black text-center text-slate-800 focus:outline-none focus:border-purple-600 shadow-xs"
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddCustomExam}
+                      disabled={!customExamName.trim()}
+                      className="w-full sm:w-auto px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-md shadow-purple-600/20 shrink-0 flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus size={15} /> Ajouter au Bulletin
+                    </button>
                   </div>
 
                   {/* Biological Results Direct Viewer for Consultation */}
@@ -3160,28 +3115,6 @@ Orientation: ${orientation}
                     )}
                   </div>
 
-                  {/* Predefined packs & protocoles */}
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block font-bold">Packs & Protocoles Cliniques Rapides</label>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      {CLINICAL_PACKS.map(p => (
-                        <div key={p.id} className="p-4 bg-purple-50/50 border border-purple-100 rounded-2xl flex flex-col justify-between hover:border-purple-300 transition-all border-dashed">
-                          <div>
-                            <h4 className="font-black text-xs text-purple-900 mb-0.5">{p.name}</h4>
-                            <p className="text-[10px] text-purple-600 font-semibold mb-3 leading-tight">{p.description}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => handleAddPack(p)}
-                            className="w-full py-2 bg-purple-600 text-white rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-purple-700 transition-colors shadow-sm cursor-pointer"
-                          >
-                            Sélectionner le pack
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 border-t pt-4">
                     {/* Add individual exam */}
                     <div className="lg:col-span-2 space-y-4">
@@ -3205,7 +3138,7 @@ Orientation: ${orientation}
                                   type="text"
                                   value={examSearchQuery}
                                   onChange={(e) => setExamSearchQuery(e.target.value)}
-                                  placeholder="Rechercher un examen (ex: NFS, ECBU, Échographie...)"
+                                  placeholder="Rechercher dans le catalogue de l'établissement..."
                                   className="w-full pl-9 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-purple-500 shadow-sm"
                                 />
                                 {examSearchQuery && (
@@ -3235,85 +3168,56 @@ Orientation: ${orientation}
                             </div>
 
                             {/* Filtered Exams List */}
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
-                              {filteredExams.map((ex) => {
-                                const cleanExamName = ex.name.trim();
-                                const isAdded = examensDemandes.some(item => item.name.trim().toLowerCase() === cleanExamName.toLowerCase());
-                                return (
-                                  <button
-                                    key={ex.id || cleanExamName}
-                                    type="button"
-                                    onClick={() => {
-                                      setExamensDemandes(prev => {
-                                        if (isAdded) {
-                                          return prev.filter(item => item.name.trim().toLowerCase() !== cleanExamName.toLowerCase());
-                                        } else {
-                                          return [...prev, { id: ex.id || `exam-${Date.now()}-${Math.floor(Math.random() * 1000)}`, name: cleanExamName, urgent: false, price: ex.price || 2500 }];
-                                        }
-                                      });
-                                    }}
-                                    className={`p-3 rounded-2xl border text-left flex items-center justify-between transition-all group cursor-pointer ${
-                                      isAdded 
-                                        ? 'bg-purple-50 border-purple-300 shadow-sm' 
-                                        : 'bg-white border-slate-200 hover:border-purple-300 hover:bg-purple-50/20'
-                                    }`}
-                                  >
-                                    <div>
-                                      <span className="font-extrabold text-xs text-slate-800 block group-hover:text-purple-700 transition-colors">{ex.name}</span>
-                                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{ex.category || 'Général'}</span>
-                                    </div>
-                                    <div className="text-right flex flex-col items-end gap-1 shrink-0">
-                                      <span className="text-[10px] font-black text-purple-600">{ex.price || 2500} FCFA</span>
-                                      {isAdded ? (
-                                        <span className="inline-flex items-center gap-1 bg-purple-100 text-purple-700 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md">
-                                          Ajouté ✓
-                                        </span>
-                                      ) : (
-                                        <span className="text-[9px] font-bold text-slate-450 group-hover:text-purple-600 transition-colors">
-                                          + Ajouter
-                                        </span>
-                                      )}
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                              {filteredExams.length === 0 && (
-                                <p className="col-span-2 text-center p-6 text-slate-450 text-xs italic">Aucun examen trouvé pour cette recherche.</p>
-                              )}
-                            </div>
-                            {/* Custom Exam Input */}
-                            <div className="pt-3 border-t border-slate-200/80 flex flex-col sm:flex-row gap-2 items-center">
-                              <input 
-                                type="text"
-                                value={customExamName}
-                                onChange={(e) => setCustomExamName(e.target.value)}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    handleAddCustomExam();
-                                  }
-                                }}
-                                placeholder="Ajouter un autre examen personnalisé..."
-                                className="flex-1 w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold focus:outline-none focus:border-purple-500 shadow-sm"
-                              />
-                              <div className="flex items-center gap-2 w-full sm:w-auto">
-                                <input 
-                                  type="number"
-                                  value={customExamPrice}
-                                  onChange={(e) => setCustomExamPrice(Number(e.target.value))}
-                                  placeholder="Prix"
-                                  className="w-24 px-2 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-center focus:outline-none focus:border-purple-500 shadow-sm"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleAddCustomExam}
-                                  disabled={!customExamName.trim()}
-                                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-sm shrink-0 flex items-center gap-1 cursor-pointer"
-                                >
-                                  + Ajouter
-                                </button>
+                            {filteredExams.length > 0 ? (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
+                                {filteredExams.map((ex) => {
+                                  const cleanExamName = ex.name.trim();
+                                  const isAdded = examensDemandes.some(item => item.name.trim().toLowerCase() === cleanExamName.toLowerCase());
+                                  return (
+                                    <button
+                                      key={ex.id || cleanExamName}
+                                      type="button"
+                                      onClick={() => {
+                                        setExamensDemandes(prev => {
+                                          if (isAdded) {
+                                            return prev.filter(item => item.name.trim().toLowerCase() !== cleanExamName.toLowerCase());
+                                          } else {
+                                            return [...prev, { id: ex.id || `exam-${Date.now()}-${Math.floor(Math.random() * 1000)}`, name: cleanExamName, urgent: false, price: ex.price || 0 }];
+                                          }
+                                        });
+                                      }}
+                                      className={`p-3 rounded-2xl border text-left flex items-center justify-between transition-all group cursor-pointer ${
+                                        isAdded 
+                                          ? 'bg-purple-50 border-purple-300 shadow-sm' 
+                                          : 'bg-white border-slate-200 hover:border-purple-300 hover:bg-purple-50/20'
+                                      }`}
+                                    >
+                                      <div>
+                                        <span className="font-extrabold text-xs text-slate-800 block group-hover:text-purple-700 transition-colors">{ex.name}</span>
+                                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{ex.category || 'Général'}</span>
+                                      </div>
+                                      <div className="text-right flex flex-col items-end gap-1 shrink-0">
+                                        <span className="text-[10px] font-black text-purple-600 font-mono">{ex.price ? `${ex.price.toLocaleString()} FCFA` : 'Non tarifé'}</span>
+                                        {isAdded ? (
+                                          <span className="inline-flex items-center gap-1 bg-purple-100 text-purple-700 text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md">
+                                            Ajouté ✓
+                                          </span>
+                                        ) : (
+                                          <span className="text-[9px] font-bold text-slate-400 group-hover:text-purple-600 transition-colors">
+                                            + Ajouter
+                                          </span>
+                                        )}
+                                      </div>
+                                    </button>
+                                  );
+                                })}
                               </div>
-                            </div>
+                            ) : (
+                              <div className="p-4 bg-white border border-dashed border-slate-200 rounded-2xl text-center text-slate-400 text-xs">
+                                <p className="font-semibold text-slate-600">Aucun examen paramétré dans le catalogue de cet établissement</p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">Saisissez l'examen dans la barre d'ajout rapide ci-dessus pour le prescrire directement.</p>
+                              </div>
+                            )}
                           </div>
                         );
                       })()}
@@ -3461,17 +3365,8 @@ Orientation: ${orientation}
             })()}
 
             {activeTab === 'prise_en_charge' && (() => {
-              // Drug catalog with details & pricing (Point 5)
-              const MEDICINE_CATALOG = dbMedications.length > 0 ? dbMedications : [
-                { name: 'Paracétamol 500mg (Boite)', price: 500, defaultPosology: '1 comprimé toutes les 8 heures (3 fois/jour) pendant 5 jours', family: 'Antalgique' },
-                { name: 'Amoxicilline 1g (Boite)', price: 2500, defaultPosology: '1 comprimé matin et soir pendant 7 jours', family: 'Antibiotique' },
-                { name: 'Artemether-Lumefantrine (Coartem)', price: 2000, defaultPosology: '1 comprimé par jour au cours des repas pendant 3 jours', family: 'Antipaludique' },
-                { name: 'Amlodipine 5mg (Boite)', price: 2250, defaultPosology: '1 comprimé par jour le matin en continu', family: 'Anti-hypertenseur' },
-                { name: 'Ciprofloxacine 500mg', price: 3500, defaultPosology: '1 comprimé 2 fois par jour pendant 5 jours', family: 'Antibiotique' },
-                { name: 'Spasfon Comprimés', price: 1500, defaultPosology: '1 comprimé lors des accès douloureux, max 3/jour', family: 'Antispasmodique' },
-                { name: 'Gaviscon Suspension (Flacon)', price: 3000, defaultPosology: '1 sachet / cuillère 3 fois par jour après les repas', family: 'Antiacide' },
-                { name: 'Metformine 500mg (Flacon)', price: 1800, defaultPosology: '1 comprimé matin et soir pendant le repas', family: 'Antidiabétique' }
-              ];
+              // Drug catalog with details & pricing (Strictly from real database referential)
+              const MEDICINE_CATALOG = dbMedications;
 
               const families = ['Tous', ...Array.from(new Set(MEDICINE_CATALOG.map(d => d.family)))];
 
@@ -3495,11 +3390,11 @@ Orientation: ${orientation}
                     updated[existingIdx] = {
                       ...updated[existingIdx],
                       posologie: posology || updated[existingIdx].posologie || 'Selon prescription',
-                      price: price || updated[existingIdx].price || 1500
+                      price: price || updated[existingIdx].price || 0
                     };
                     return updated;
                   }
-                  return [...prev, { id: `med-${Date.now()}-${Math.floor(Math.random() * 1000)}`, name: cleanName, posologie: posology, price }];
+                  return [...prev, { id: `med-${Date.now()}-${Math.floor(Math.random() * 1000)}`, name: cleanName, posologie: posology, price: price || 0 }];
                 });
 
                 if (isExisting) {
@@ -3534,35 +3429,75 @@ Orientation: ${orientation}
                     <div className="lg:col-span-4 bg-white border border-slate-200 rounded-[32px] p-6 shadow-sm space-y-4">
                       <div>
                         <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-1">1. Choisir le médicament</h4>
-                        <p className="text-[11px] text-slate-500 font-medium">Recherchez ou sélectionnez un produit.</p>
+                        <p className="text-[11px] text-slate-500 font-medium">Recherchez ou saisissez directement sans défilement.</p>
+                      </div>
+
+                      {/* Quick Add Custom Medicine (Top of Col 1, Immediately Visible) */}
+                      <div className="bg-emerald-50/70 p-3 border border-emerald-200/80 rounded-2xl space-y-2">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-emerald-800 block">Saisie Directe Hors Catalogue</span>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Nom du médicament..."
+                            value={selectedDrugIndex === null ? customDrugName : ''}
+                            onChange={e => {
+                              setSelectedDrugIndex(null);
+                              setCustomDrugName(e.target.value);
+                              if (posologyMode === 'manual') {
+                                setCustomPosology('');
+                              }
+                            }}
+                            className="flex-1 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-emerald-600"
+                          />
+                          <input
+                            type="number"
+                            placeholder="Prix (F)"
+                            value={selectedDrugIndex === null ? (customDrugPrice || '') : ''}
+                            onChange={e => {
+                              setSelectedDrugIndex(null);
+                              setCustomDrugPrice(parseInt(e.target.value) || 0);
+                            }}
+                            className="w-20 p-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-center outline-none focus:border-emerald-600"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!customDrugName.trim()}
+                          onClick={() => handleAddPrescription(customDrugName, customPosology || 'Selon prescription médicale', customDrugPrice)}
+                          className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-1 transition-all shadow-xs cursor-pointer"
+                        >
+                          <Plus size={13} /> Ajouter Directement
+                        </button>
                       </div>
 
                       {/* Search & Categories */}
                       <div className="space-y-3">
                         <input 
                           type="text"
-                          placeholder="🔍 Rechercher un produit..."
+                          placeholder="🔍 Rechercher dans le stock..."
                           value={medSearchQuery}
                           onChange={e => setMedSearchQuery(e.target.value)}
                           className="w-full p-3 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:border-blue-600 bg-slate-50/50"
                         />
                         
-                        <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
-                          {families.map(fam => (
-                            <button
-                              key={fam}
-                              type="button"
-                              onClick={() => setSelectedMedFamily(fam)}
-                              className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
-                                selectedMedFamily === fam 
-                                  ? 'bg-blue-600 text-white border-blue-600' 
-                                  : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
-                              }`}
-                            >
-                              {fam}
-                            </button>
-                          ))}
-                        </div>
+                        {families.length > 1 && (
+                          <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto custom-scrollbar">
+                            {families.map(fam => (
+                              <button
+                                key={fam}
+                                type="button"
+                                onClick={() => setSelectedMedFamily(fam)}
+                                className={`px-2.5 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all cursor-pointer border ${
+                                  selectedMedFamily === fam 
+                                    ? 'bg-blue-600 text-white border-blue-600' 
+                                    : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'
+                                }`}
+                              >
+                                {fam}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       {/* Medicine Cards List */}
@@ -3570,7 +3505,7 @@ Orientation: ${orientation}
                         {filteredCatalog.map((drug, cIdx) => {
                           const realIdx = MEDICINE_CATALOG.findIndex(d => d.name === drug.name);
                           const isSelected = selectedDrugIndex === realIdx;
-                          const currentStock = drug.stock !== undefined ? drug.stock : 50;
+                          const currentStock = drug.stock !== undefined ? drug.stock : 0;
                           const isOutOfStock = currentStock <= 0;
                           const existingPrescr = prescriptions.find(p => p.name.trim().toLowerCase() === drug.name.trim().toLowerCase());
                           const isPrescribed = Boolean(existingPrescr);
@@ -3595,7 +3530,7 @@ Orientation: ${orientation}
 
                                 setSelectedDrugIndex(realIdx);
                                 setCustomDrugName(drug.name);
-                                setCustomDrugPrice(drug.price);
+                                setCustomDrugPrice(drug.price || 0);
                                 
                                 if (isPrescribed && existingPrescr) {
                                   setCustomPosology(existingPrescr.posologie);
@@ -3650,7 +3585,7 @@ Orientation: ${orientation}
                                   )}
                                   <span className={`text-[10px] font-black font-mono px-1.5 py-0.5 rounded ${
                                     isSelected ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'
-                                  }`}>{drug.price} F</span>
+                                  }`}>{drug.price || 0} F</span>
                                 </div>
                               </div>
                               <h5 className={`font-extrabold text-xs mt-1 ${isOutOfStock ? 'text-rose-900' : 'text-slate-900'}`}>{drug.name}</h5>
@@ -3661,38 +3596,11 @@ Orientation: ${orientation}
                           );
                         })}
                         {filteredCatalog.length === 0 && (
-                          <p className="text-center text-xs text-slate-400 italic py-4">Aucun médicament trouvé.</p>
+                          <div className="p-4 bg-slate-50 border border-dashed border-slate-200 rounded-2xl text-center text-slate-400 text-xs">
+                            <p className="font-semibold text-slate-600">Aucun médicament référencé dans la pharmacie</p>
+                            <p className="text-[10px] text-slate-400 mt-0.5">Utilisez le formulaire de saisie directe ci-dessus.</p>
+                          </div>
                         )}
-                      </div>
-
-                      {/* Custom Medicine (Hors Catalogue) */}
-                      <div className="border-t border-slate-100 pt-3 space-y-2">
-                        <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Ou Saisir un autre médicament</span>
-                        <div className="space-y-2">
-                          <input
-                            type="text"
-                            placeholder="Nom du médicament personnalisé..."
-                            value={selectedDrugIndex === null ? customDrugName : ''}
-                            onChange={e => {
-                              setSelectedDrugIndex(null);
-                              setCustomDrugName(e.target.value);
-                              if (posologyMode === 'manual') {
-                                setCustomPosology('');
-                              }
-                            }}
-                            className="w-full p-2.5 text-xs font-bold border border-slate-200 rounded-xl outline-none focus:border-blue-500 bg-slate-50/50"
-                          />
-                          <input
-                            type="number"
-                            placeholder="Prix estimé (FCFA)"
-                            value={selectedDrugIndex === null ? (customDrugPrice || '') : ''}
-                            onChange={e => {
-                              setSelectedDrugIndex(null);
-                              setCustomDrugPrice(parseInt(e.target.value) || 0);
-                            }}
-                            className="w-full p-2.5 text-xs font-bold border border-slate-200 rounded-xl outline-none focus:border-blue-500 bg-slate-50/50"
-                          />
-                        </div>
                       </div>
                     </div>
 
@@ -3705,20 +3613,27 @@ Orientation: ${orientation}
                             <Pill size={24} className="text-slate-300" />
                           </div>
                           <h5 className="text-xs font-black uppercase tracking-wider text-slate-700">Aucun produit sélectionné</h5>
-                          <p className="text-xs text-slate-400 mt-1 max-w-[200px]">Sélectionnez un médicament à gauche pour configurer sa posologie.</p>
+                          <p className="text-xs text-slate-400 mt-1 max-w-[200px]">Sélectionnez un médicament à gauche ou utilisez la saisie directe pour configurer sa posologie.</p>
                         </div>
                       ) : (
                         <div className="flex-1 flex flex-col justify-between space-y-4 animate-in fade-in duration-300">
                           
-                          {/* Selected Drug Banner */}
-                          <div className="bg-slate-50 border border-slate-150 p-4 rounded-2xl flex justify-between items-center">
+                          {/* Selected Drug Banner with IMMEDIATE TOP ACTION BUTTON (No Scroll Needed!) */}
+                          <div className="bg-slate-50 border border-slate-150 p-4 rounded-2xl flex flex-wrap justify-between items-center gap-2 shadow-xs">
                             <div>
-                              <span className="text-[8px] font-black uppercase tracking-widest text-slate-400">PRODUIT SÉLECTIONNÉ</span>
-                              <h5 className="text-sm font-black text-slate-900 mt-0.5">{customDrugName}</h5>
+                              <span className="text-[8px] font-black uppercase tracking-widest text-slate-400 block">PRODUIT SÉLECTIONNÉ</span>
+                              <h5 className="text-sm font-black text-slate-900 mt-0.5 truncate max-w-[200px]">{customDrugName}</h5>
+                              <span className="text-xs font-black text-emerald-700 font-mono">
+                                {customDrugPrice || 0} FCFA
+                              </span>
                             </div>
-                            <span className="text-xs font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-xl font-mono font-bold">
-                              {customDrugPrice} FCFA
-                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleAddPrescription(customDrugName, customPosology, customDrugPrice)}
+                              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl transition-all shadow-md shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer shrink-0"
+                            >
+                              <CheckCircle2 size={16} /> Ajouter à l'Ordonnance
+                            </button>
                           </div>
 
                           {/* Toggle Mode: Calculator vs Manual */}

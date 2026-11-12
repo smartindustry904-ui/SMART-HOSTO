@@ -96,7 +96,14 @@ const Cashier: React.FC<CashierProps> = ({
   theme = 'light'
 }) => {
   const { establishment } = useSettings();
-  const activeTenantId = useMemo(() => getActiveTenantId(user, establishment), [user, establishment]);
+  const activeTenantId = useMemo(() => {
+    const tid = getActiveTenantId(user, establishment);
+    if (tid === 'ALL') {
+      const estId = establishment?.tenantId || (establishment as any)?.hospital_id || (establishment as any)?.clinicId || (establishment as any)?.id;
+      return (estId && estId !== 'ALL') ? String(estId).trim() : 'default_hospital';
+    }
+    return tid;
+  }, [user, establishment]);
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState<PaymentRequest | null>(null);
