@@ -953,8 +953,10 @@ const Consultation: React.FC<ConsultationProps> = ({
         practitionerName: practitionerName,
         practitionerRole: user?.role || 'MEDECIN',
         doctorEmail: user?.email || '',
-        motif: data.motif || '',
-        diagnosis: data.hypotheses?.principal || 'Diagnostic non précisé',
+        motif: data.motif || activePatient.motif || '',
+        diagnosis: (data.hypotheses?.principal && data.hypotheses.principal !== 'Diagnostic non précisé')
+          ? data.hypotheses.principal
+          : (data.motif || activePatient.motif || 'Consultation Clinique'),
         treatment: data.prescriptions?.map((p: any) => p.name).join(', ') || 'Néant',
         exams: data.examensDemandes?.map((e: any) => e.name).join(', ') || 'Néant',
         observation: data.observation || '',
@@ -981,8 +983,10 @@ const Consultation: React.FC<ConsultationProps> = ({
         practitionerId: practitionerId,
         practitionerName: practitionerName,
         practitionerRole: user?.role || 'MEDECIN',
-        motif: data.motif || '',
-        diagnosis: data.hypotheses?.principal || 'Diagnostic non précisé',
+        motif: data.motif || activePatient.motif || '',
+        diagnosis: (data.hypotheses?.principal && data.hypotheses.principal !== 'Diagnostic non précisé')
+          ? data.hypotheses.principal
+          : (data.motif || activePatient.motif || 'Consultation Clinique'),
         treatment: data.prescriptions || [],
         exams: data.examensDemandes || [],
         observation: data.observation || '',
@@ -1025,10 +1029,12 @@ const Consultation: React.FC<ConsultationProps> = ({
       return;
     }
 
-    const fallbackDiagnosis = data.hypotheses?.principal || "Diagnostic non précisé";
+    const fallbackDiagnosis = (data.hypotheses?.principal && data.hypotheses.principal.trim() !== '' && data.hypotheses.principal !== 'Diagnostic non précisé')
+      ? data.hypotheses.principal.trim()
+      : (data.motif || activePatient.motif || 'Consultation Clinique');
     const fallbackObservation = (data.observation && data.observation.trim().length >= 10)
       ? data.observation
-      : `Consultation réalisée par ${user?.name || 'Dr. Sarr'}. Motif : ${data.motif || 'Non précisé'}.`;
+      : `Consultation réalisée par ${user?.name || 'Dr. Sarr'}. Motif : ${data.motif || activePatient.motif || 'Non précisé'}.`;
 
     const validatedData = {
       ...data,
@@ -1081,8 +1087,10 @@ const Consultation: React.FC<ConsultationProps> = ({
         practitionerName: practitionerName,
         practitionerRole: user?.role || 'MEDECIN',
         doctorEmail: user?.email || '',
-        motif: compilationData.motif,
-        diagnosis: compilationData.hypotheses?.principal || 'Diagnostic non précisé',
+        motif: compilationData.motif || activePatient?.motif || '',
+        diagnosis: (compilationData.hypotheses?.principal && compilationData.hypotheses.principal !== 'Diagnostic non précisé')
+          ? compilationData.hypotheses.principal
+          : (compilationData.motif || activePatient?.motif || 'Consultation Clinique'),
         treatment: compilationData.prescriptions?.map((p: any) => p.name).join(', ') || 'Néant',
         exams: compilationData.examensDemandes?.map((e: any) => e.name).join(', ') || 'Néant',
         observation: compilationData.observation,
@@ -1109,8 +1117,10 @@ const Consultation: React.FC<ConsultationProps> = ({
         doctorId: practitionerId,
         practitionerId: practitionerId,
         practitionerName: practitionerName,
-        motif: compilationData.motif || '',
-        diagnosis: compilationData.hypotheses?.principal || 'Diagnostic non précisé',
+        motif: compilationData.motif || activePatient?.motif || '',
+        diagnosis: (compilationData.hypotheses?.principal && compilationData.hypotheses.principal !== 'Diagnostic non précisé')
+          ? compilationData.hypotheses.principal
+          : (compilationData.motif || activePatient?.motif || 'Consultation Clinique'),
         treatment: compilationData.prescriptions || [],
         exams: compilationData.examensDemandes || [],
         observation: compilationData.observation || '',
@@ -2937,7 +2947,11 @@ const Consultation: React.FC<ConsultationProps> = ({
                 </div>
                 <div>
                   <h4 className="text-xs font-black text-slate-900 uppercase">2. Diagnostic d'entrée codé</h4>
-                  <p className="text-[10px] text-blue-600 font-black uppercase font-mono mt-0.5">{compilationData.hypotheses?.principal}</p>
+                  <p className="text-[10px] text-blue-600 font-black uppercase font-mono mt-0.5">
+                    {(compilationData.hypotheses?.principal && compilationData.hypotheses.principal !== 'Diagnostic non précisé')
+                      ? compilationData.hypotheses.principal
+                      : (compilationData.motif || activePatient?.motif || 'Consultation Clinique')}
+                  </p>
                 </div>
               </div>
 
@@ -3002,54 +3016,68 @@ const Consultation: React.FC<ConsultationProps> = ({
                 );
 
                 const consultFee = isConsultationPaid ? 0 : 10000;
-                
-                // Track unpaid prescriptions
-                const unpaidPrescriptions = (compilationData.prescriptions || []).filter((p: any) => {
-                  if (p.isTransmitted) return false; // Already sent/invoiced
-                  const isPaid = p.isPaid || p.status === 'PAID' || (paymentRequests || []).some(pr => 
-                    isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
-                    (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((p.name || '').toLowerCase()))
-                  );
-                  return !isPaid;
-                });
 
-                // Track unpaid exams
-                const unpaidExams = (compilationData.examensDemandes || []).filter((e: any) => {
-                  if (e.isTransmitted) return false; // Already sent/invoiced
-                  const isPaid = e.isPaid || e.status === 'payé' || e.status === 'PAID' || (paymentRequests || []).some(pr => 
-                    isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
-                    (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((e.name || '').toLowerCase()))
+                const checkItemIsPaid = (item: any) => {
+                  return Boolean(
+                    item.isPaid === true ||
+                    item.status === 'PAID' ||
+                    item.status === 'SOLDE' ||
+                    item.status === 'payé' ||
+                    (paymentRequests || []).some(pr => 
+                      isPatientMatch(pr.patientId) && 
+                      (pr.status === 'PAID' || pr.status === 'SOLDE' || (pr as any).isPaid === true) &&
+                      (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((item.name || '').toLowerCase()))
+                    )
                   );
-                  return !isPaid;
-                });
+                };
 
-                const prescrTotal = unpaidPrescriptions.reduce((sum: number, p: any) => sum + (p.price || 1500), 0);
-                const examsTotal = unpaidExams.reduce((sum: number, e: any) => sum + (e.price || 2500), 0);
-                const totalToInvoice = consultFee + prescrTotal + examsTotal;
+                const checkItemIsTransmitted = (item: any) => {
+                  return Boolean(
+                    item.isTransmitted === true ||
+                    item.status === 'TRANSMITTED' ||
+                    item.transmitted === true ||
+                    (paymentRequests || []).some(pr => 
+                      isPatientMatch(pr.patientId) &&
+                      (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((item.name || '').toLowerCase()))
+                    )
+                  );
+                };
+
+                const allPrescriptions = compilationData.prescriptions || [];
+                const allExams = compilationData.examensDemandes || [];
+
+                const unpaidPrescriptions = allPrescriptions.filter((p: any) => !checkItemIsPaid(p));
+                const unpaidExams = allExams.filter((e: any) => !checkItemIsPaid(e));
+
+                const prescrDue = unpaidPrescriptions.reduce((sum: number, p: any) => sum + (Number(p.price) || 0), 0);
+                const examsDue = unpaidExams.reduce((sum: number, e: any) => sum + (Number(e.price) || 0), 0);
+                const totalPatientDue = consultFee + prescrDue + examsDue;
+
+                const transmittedPendingDue = 
+                  unpaidPrescriptions.filter((p: any) => checkItemIsTransmitted(p)).reduce((sum: number, p: any) => sum + (Number(p.price) || 0), 0) +
+                  unpaidExams.filter((e: any) => checkItemIsTransmitted(e)).reduce((sum: number, e: any) => sum + (Number(e.price) || 0), 0);
 
                 return (
                   <div className="p-5 bg-blue-50/50 border border-blue-100 rounded-2xl">
                     <h4 className="text-xs font-black text-blue-900 uppercase mb-3 tracking-wider">4. Ventilation de paiement générée</h4>
-                    <div className="text-xs font-bold space-y-2 divide-y divide-blue-100/50">
+                    <div className="text-xs font-bold space-y-2.5 divide-y divide-blue-100/60">
                       <div className="flex justify-between items-center text-slate-700 pt-1">
                         <span className="flex items-center gap-1.5">
                           Acte de Consultation
                           {isConsultationPaid && (
                             <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase">
-                              ✓ Déjà Réglé
+                              ✓ Soldé
                             </span>
                           )}
                         </span>
-                        <span className={isConsultationPaid ? "text-emerald-700 font-black" : "text-slate-900 font-bold"}>
+                        <span className={isConsultationPaid ? "text-emerald-700 font-black font-mono" : "text-slate-900 font-bold font-mono"}>
                           {isConsultationPaid ? "0 FCFA (Soldé)" : "10 000 FCFA"}
                         </span>
                       </div>
 
-                      {compilationData.prescriptions && compilationData.prescriptions.map((p: any, idx: number) => {
-                        const isAlreadyPaidOrSent = p.isTransmitted || p.isPaid || p.status === 'PAID' || (paymentRequests || []).some(pr => 
-                          isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
-                          (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((p.name || '').toLowerCase()))
-                        );
+                      {allPrescriptions.map((p: any, idx: number) => {
+                        const isPaid = checkItemIsPaid(p);
+                        const isTransmitted = checkItemIsTransmitted(p);
                         const displayPrice = (p.price !== undefined && p.price !== null && !isNaN(Number(p.price))) ? Number(p.price) : 0;
                         return (
                           <div key={idx} className="flex justify-between items-center text-slate-600 pt-2 font-medium">
@@ -3060,13 +3088,18 @@ const Consultation: React.FC<ConsultationProps> = ({
                               <span className="font-mono font-bold text-slate-900 text-xs">
                                 {displayPrice > 0 ? `${displayPrice.toLocaleString()} FCFA` : 'Tarif standard'}
                               </span>
-                              {isAlreadyPaidOrSent ? (
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[8.5px] font-black">
-                                  ✓ Transmis / Réglé
+                              {isPaid ? (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[8.5px] font-black uppercase">
+                                  ✓ Soldé en Caisse
+                                </span>
+                              ) : isTransmitted ? (
+                                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[8.5px] font-black uppercase flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                                  Transmis en Caisse
                                 </span>
                               ) : (
-                                <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[8.5px] font-bold">
-                                  À régler
+                                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[8.5px] font-bold uppercase">
+                                  ⏳ À facturer
                                 </span>
                               )}
                             </div>
@@ -3074,11 +3107,9 @@ const Consultation: React.FC<ConsultationProps> = ({
                         );
                       })}
 
-                      {compilationData.examensDemandes && compilationData.examensDemandes.map((e: any, idx: number) => {
-                        const isAlreadyPaidOrSent = e.isTransmitted || e.isPaid || e.status === 'payé' || (paymentRequests || []).some(pr => 
-                          isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
-                          (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((e.name || '').toLowerCase()))
-                        );
+                      {allExams.map((e: any, idx: number) => {
+                        const isPaid = checkItemIsPaid(e);
+                        const isTransmitted = checkItemIsTransmitted(e);
                         const displayPrice = (e.price !== undefined && e.price !== null && !isNaN(Number(e.price))) ? Number(e.price) : 0;
                         return (
                           <div key={idx} className="flex justify-between items-center text-slate-600 pt-2 font-medium">
@@ -3089,13 +3120,18 @@ const Consultation: React.FC<ConsultationProps> = ({
                               <span className="font-mono font-bold text-slate-900 text-xs">
                                 {displayPrice > 0 ? `${displayPrice.toLocaleString()} FCFA` : 'Tarif standard'}
                               </span>
-                              {isAlreadyPaidOrSent ? (
-                                <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[8.5px] font-black">
-                                  ✓ Transmis / Réglé
+                              {isPaid ? (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[8.5px] font-black uppercase">
+                                  ✓ Soldé en Caisse
+                                </span>
+                              ) : isTransmitted ? (
+                                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[8.5px] font-black uppercase flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                                  Transmis en Caisse
                                 </span>
                               ) : (
-                                <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[8.5px] font-bold">
-                                  À régler
+                                <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[8.5px] font-bold uppercase">
+                                  ⏳ À facturer
                                 </span>
                               )}
                             </div>
@@ -3103,11 +3139,18 @@ const Consultation: React.FC<ConsultationProps> = ({
                         );
                       })}
 
-                      <div className="flex justify-between items-center text-blue-900 pt-3 font-black text-sm">
-                        <span>Reste net à facturer</span>
-                        <span className={totalToInvoice === 0 ? "text-emerald-600 font-black" : "text-blue-900"}>
-                          {totalToInvoice === 0 ? "0 FCFA (Tout est soldé)" : `${totalToInvoice.toLocaleString()} FCFA`}
-                        </span>
+                      <div className="pt-3">
+                        <div className="flex justify-between items-center text-slate-900 font-black text-sm">
+                          <span>Reste à régler par le patient :</span>
+                          <span className={totalPatientDue === 0 ? "text-emerald-600 font-black" : "text-amber-800 font-black font-mono text-base"}>
+                            {totalPatientDue === 0 ? "0 FCFA (Tout est soldé)" : `${totalPatientDue.toLocaleString()} FCFA`}
+                          </span>
+                        </div>
+                        {totalPatientDue > 0 && transmittedPendingDue > 0 && (
+                          <p className="text-[10px] text-blue-700 font-bold mt-1 text-right">
+                            📡 {transmittedPendingDue.toLocaleString()} FCFA déjà transmis à la Caisse / Pharmacie (en attente de paiement)
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>

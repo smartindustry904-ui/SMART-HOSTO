@@ -18,43 +18,46 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
   const [medications, setMedications] = useState<Medication[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Fallback medications catalog if none in Firestore
-  const staticMedications: Medication[] = [
-    { id: 'm1', name: 'Paracétamol', dosage: '500mg', price: 500, stock: 100, forms: ['Comprimé'] },
-    { id: 'm2', name: 'Amoxicilline', dosage: '1g', price: 2500, stock: 50, forms: ['Gélule'] },
-    { id: 'm3', name: 'Artéméther/Luméfantrine', dosage: '20/120mg', price: 3500, stock: 30, forms: ['Comprimé'] },
-    { id: 'm4', name: 'Spasfon', dosage: '80mg', price: 1500, stock: 80, forms: ['Comprimé'] },
-    { id: 'm5', name: 'Gaviscon', dosage: 'Sachet', price: 3000, stock: 40, forms: ['Suspension Buvable'] }
-  ];
-
   // 1. Listen to real pending_prescriptions for this specific patient
   useEffect(() => {
     try {
+      const patientIdVariants = [
+        patient.id,
+        patient.patientId,
+        (patient as any).docId,
+        (patient as any).dmeId
+      ].filter(Boolean).map(x => String(x).toLowerCase());
+
+      const isPatientMatch = (targetId?: string, dmeId?: string) => {
+        const pIdStr = String(targetId || '').toLowerCase();
+        const dmeStr = String(dmeId || '').toLowerCase();
+        return patientIdVariants.includes(pIdStr) || (dmeStr && patientIdVariants.includes(dmeStr));
+      };
+
       const q = query(collection(db, 'pending_prescriptions'), orderBy('createdAt', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const prescrMap = new Map<string, Ordonnance>();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
-          // Filter by patient ID safely (case-insensitive string match or numeric match)
-          if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
+          if (isPatientMatch(data.patientId, data.dmeId)) {
             const key = data.id || docSnap.id;
             if (!prescrMap.has(key)) {
               // Map Firestore model to the Ordonnance type
               prescrMap.set(key, {
                 id: key,
-                patientId: data.patientId,
-                prescripteurId: data.doctorEmail || 'DOC-001',
-                prescripteurName: data.doctor || 'Dr. Sarr',
+                patientId: data.patientId || patient.id,
+                prescripteurId: data.doctorEmail || data.doctorId || 'DOC-001',
+                prescripteurName: data.doctor || data.doctorName || 'Médecin Référent',
                 date: data.createdAt || new Date().toISOString(),
                 status: data.status === 'pending' ? 'TRANSMITTED' : 'VALIDATED',
                 traitements: (data.items || []).map((it: any, index: number) => ({
                   id: `p-${docSnap.id}-${index}`,
-                  patientId: data.patientId,
+                  patientId: data.patientId || patient.id,
                   medicationName: it.name,
                   dosageScheme: it.posology || '1 tab x3/jour',
                   duration: it.duration || 5,
                   totalBoxes: it.quantity || 1,
-                  price: it.price || 1500
+                  price: it.price || 0
                 }))
               });
             }
@@ -73,9 +76,9 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
       console.error(e);
       setLoading(false);
     }
-  }, [patient.id]);
+  }, [patient.id, (patient as any).patientId, (patient as any).dmeId]);
 
-  // 2. Fetch medication catalog from pharmacy_inventory (Settings)
+  // 2. Fetch medication catalog from pharmacy_inventory (Settings) - Zero dummy data
   useEffect(() => {
     try {
       const activeTenantId = getActiveTenantId(user, patient);
@@ -96,13 +99,13 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
           });
           setMedications(list);
         } else {
-          setMedications(staticMedications);
+          setMedications([]);
         }
       });
       return () => unsubscribe();
     } catch (e) {
-      console.warn("Medication collection error, using fallbacks: ", e);
-      setMedications(staticMedications);
+      console.warn("Medication collection error: ", e);
+      setMedications([]);
     }
   }, [user, patient]);
 
@@ -122,15 +125,18 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         posology: t.dosageScheme,
         duration: t.duration,
         quantity: t.totalBoxes || 1,
-        price: t.price || 1500,
+        price: (t.price !== undefined && t.price !== null && !isNaN(Number(t.price))) ? Number(t.price) : 0,
         practitionerId: doctorId,
         practitionerName: doctorName
       }));
+
+      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
 
       const payload = stampTenantData({
         id: newOrdId,
         firebaseId: docRef.id,
         patientId: patient.id,
+        dmeId: (patient as any).dmeId || patient.id,
         patient: `${patient.lastName} ${patient.firstName}`.trim(),
         doctor: doctorName,
         doctorName: doctorName,
@@ -142,6 +148,7 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         practitionerRole: user?.role || 'MEDECIN',
         date: dateStr,
         items: items,
+        paymentRequestId: invoiceId,
         createdAt: today.toISOString(),
         status: 'pending'
       }, user);
@@ -153,14 +160,13 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         id: `item-pharm-${newOrdId}-${idx}`,
         name: `Ordonnance : ${it.name}`,
         quantity: it.quantity || 1,
-        unitPrice: it.price || 1500,
-        totalPrice: (it.quantity || 1) * (it.price || 1500),
+        unitPrice: it.price || 0,
+        totalPrice: (it.quantity || 1) * (it.price || 0),
         practitionerId: doctorId,
         practitionerName: doctorName,
         practitionerRole: user?.role || 'MEDECIN'
       }));
       const totalAmount = invoiceItems.reduce((sum, item) => sum + item.totalPrice, 0);
-      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
       await setDoc(doc(db, 'payment_requests', invoiceId), stampTenantData({
         id: invoiceId,
         patientId: patient.id,
@@ -216,16 +222,19 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         posology: t.dosageScheme || t.posology || '1 comp x3/jour',
         duration: t.duration || 5,
         quantity: t.totalBoxes || t.quantity || 1,
-        price: t.price || 1500,
+        price: (t.price !== undefined && t.price !== null && !isNaN(Number(t.price))) ? Number(t.price) : 0,
         practitionerId: doctorId,
         practitionerName: doctorName
       }));
+
+      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
 
       // 1. Write to pending_prescriptions with tenant stamping
       await setDoc(docRef, stampTenantData({
         id: newOrd.id,
         firebaseId: docRef.id,
         patientId: patient.id,
+        dmeId: (patient as any).dmeId || patient.id,
         patient: `${patient.lastName} ${patient.firstName}`.trim(),
         doctor: doctorName,
         doctorName: doctorName,
@@ -237,8 +246,24 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         practitionerRole: user?.role || 'MEDECIN',
         date: dateStr,
         items: items,
+        paymentRequestId: invoiceId,
         createdAt: today.toISOString(),
         status: 'pending'
+      }, user));
+
+      // 1b. Write to permanent 'prescriptions' collection
+      await setDoc(doc(db, 'prescriptions', newOrd.id), stampTenantData({
+        id: newOrd.id,
+        patientId: patient.id,
+        dmeId: (patient as any).dmeId || patient.id,
+        patientName: `${patient.lastName} ${patient.firstName}`.trim(),
+        doctor: doctorName,
+        doctorId: doctorId,
+        date: dateStr,
+        items: items,
+        paymentRequestId: invoiceId,
+        status: 'pending',
+        createdAt: today.toISOString()
       }, user));
 
       // 2. Generate payment request for Caisse
@@ -246,14 +271,13 @@ const OrdonnanceTab: React.FC<OrdonnanceTabProps> = ({ patient, user }) => {
         id: `item-pharm-${newOrd.id}-${idx}`,
         name: `Ordonnance : ${it.name}`,
         quantity: it.quantity || 1,
-        unitPrice: it.price || 1500,
-        totalPrice: (it.quantity || 1) * (it.price || 1500),
+        unitPrice: it.price || 0,
+        totalPrice: (it.quantity || 1) * (it.price || 0),
         practitionerId: doctorId,
         practitionerName: doctorName,
         practitionerRole: user?.role || 'MEDECIN'
       }));
       const totalAmount = invoiceItems.reduce((sum, item) => sum + item.totalPrice, 0);
-      const invoiceId = `PR-${Math.floor(Math.random() * 1000000)}`;
       await setDoc(doc(db, 'payment_requests', invoiceId), stampTenantData({
         id: invoiceId,
         patientId: patient.id,

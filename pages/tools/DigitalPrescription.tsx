@@ -44,6 +44,37 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
   const [transmitToPharmacy, setTransmitToPharmacy] = useState(true);
   const [transmitToPlanner, setTransmitToPlanner] = useState(false);
 
+  // Custom Inline Prescription State
+  const [customName, setCustomName] = useState('');
+  const [customPosology, setCustomPosology] = useState('');
+  const [customDuration, setCustomDuration] = useState('5');
+  const [customPrice, setCustomPrice] = useState('');
+  const [customBoxes, setCustomBoxes] = useState('1');
+
+  const handleAddInlineCustom = () => {
+    const clean = customName.trim();
+    if (!clean) return;
+    setPrescriptions(prev => [...prev, {
+      id: `presc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      medicationId: `custom_${Date.now()}`,
+      medicationName: clean,
+      dosageScheme: customPosology.trim() || '1 comp x 3 / jour',
+      dosePerIntake: 1,
+      intakeUnit: 'comprimé(s)',
+      frequency: '3 fois par jour',
+      duration: parseInt(customDuration, 10) || 5,
+      totalBoxes: parseInt(customBoxes, 10) || 1,
+      price: parseFloat(customPrice) || 0,
+      status: 'VALIDATED',
+      createdAt: new Date().toISOString()
+    }]);
+    setCustomName('');
+    setCustomPosology('');
+    setCustomDuration('5');
+    setCustomPrice('');
+    setCustomBoxes('1');
+  };
+
   const handlePrint = () => {
     try {
       const doc = new jsPDF();
@@ -444,12 +475,12 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
             </div>
 
             {/* Treatments Selection */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-              <div className="flex justify-between items-center">
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <div className="flex flex-wrap justify-between items-center gap-2">
                 <h3 className="font-black text-slate-800 flex items-center gap-2">
-                  <Pill size={18} className="text-indigo-500" /> Traitements
+                  <Pill size={18} className="text-indigo-500" /> Traitements & Prescriptions
                 </h3>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <select 
                     onChange={(e) => {
                       if (e.target.value) {
@@ -457,37 +488,83 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
                         e.target.value = '';
                       }
                     }}
-                    className="p-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-sm font-bold outline-none"
+                    className="p-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-bold outline-none cursor-pointer"
                   >
                     <option value="">+ Protocole...</option>
                     <option value="PALUDISME">Protocole Paludisme</option>
                   </select>
-                  <select 
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        handleAddMedication(e.target.value);
-                        e.target.value = '';
-                      }
-                    }}
-                    className="p-2 bg-indigo-600 text-white rounded-xl text-sm font-bold outline-none cursor-pointer"
-                  >
-                    <option value="">+ Médicament du catalogue...</option>
-                    {medications.map(m => (
-                      <option key={m.id} value={m.id}>{m.name} ({m.form})</option>
-                    ))}
-                  </select>
+                  {medications.length > 0 && (
+                    <select 
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          handleAddMedication(e.target.value);
+                          e.target.value = '';
+                        }
+                      }}
+                      className="p-2 bg-indigo-600 text-white rounded-xl text-xs font-bold outline-none cursor-pointer"
+                    >
+                      <option value="">+ Catalogue ({medications.length})...</option>
+                      {medications.map(m => (
+                        <option key={m.id} value={m.id}>{m.name} ({m.dosage || m.forms?.[0] || 'Std'})</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* Saisie Rapide Médicament (Tolérance Zéro Catalogue Vide / Saisie Libre) */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider block">
+                  Ajout Rapide de Traitement Médicamenteux
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Nom du médicament (ex: Paracétamol 500mg)..."
+                    value={customName}
+                    onChange={(e) => setCustomName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddInlineCustom(); }}
+                    className="sm:col-span-4 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Posologie (ex: 1 cp x 3/jour)..."
+                    value={customPosology}
+                    onChange={(e) => setCustomPosology(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddInlineCustom(); }}
+                    className="sm:col-span-3 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Jours"
+                    value={customDuration}
+                    onChange={(e) => setCustomDuration(e.target.value)}
+                    className="sm:col-span-1 px-2 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    title="Durée en jours"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Boîtes"
+                    value={customBoxes}
+                    onChange={(e) => setCustomBoxes(e.target.value)}
+                    className="sm:col-span-1 px-2 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    title="Nombre de boîtes"
+                  />
+                  <input
+                    type="number"
+                    placeholder="Prix (FCFA)"
+                    value={customPrice}
+                    onChange={(e) => setCustomPrice(e.target.value)}
+                    className="sm:col-span-2 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium text-slate-800 text-right focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    title="Prix unitaire estimé"
+                  />
                   <button
                     type="button"
-                    onClick={() => {
-                      const name = window.prompt("Nom du médicament à prescrire (ex: Amoxicilline 500mg) :");
-                      if (name && name.trim()) {
-                        handleAddCustomMedication(name.trim());
-                      }
-                    }}
-                    className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-xl text-sm font-bold transition-all cursor-pointer"
-                    title="Ajouter un médicament hors catalogue"
+                    onClick={handleAddInlineCustom}
+                    disabled={!customName.trim()}
+                    className="sm:col-span-1 px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase transition-all shadow-sm flex items-center justify-center gap-1 cursor-pointer"
                   >
-                    + Saisie libre
+                    <Plus size={16} />
                   </button>
                 </div>
               </div>

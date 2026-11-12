@@ -275,10 +275,6 @@ export default function ConsultationActive({
   const [isPrescriptionTransmitted, setIsPrescriptionTransmitted] = useState(false);
   const [isExamsTransmitted, setIsExamsTransmitted] = useState(false);
 
-  // Lab Results & Review in Active Consultation
-  const [patientLabResults, setPatientLabResults] = useState<any[]>([]);
-  const [selectedLabResultForModal, setSelectedLabResultForModal] = useState<any | null>(null);
-
   // Debounce / Transaction lock refs to prevent duplicate trigger clicks
   const isSubmittingPrescrRef = useRef(false);
   const isSubmittingExamsRef = useRef(false);
@@ -500,49 +496,7 @@ export default function ConsultationActive({
     }
   }, [patient?.id]);
 
-  // Synchronize Lab Results for this patient in real-time
-  useEffect(() => {
-    if (!patient?.id && !(patient as any)?.dmeId) return;
-    try {
-      const tenantId = getActiveTenantId();
-      const matchPatientId = (pid?: string | number) => {
-        if (!pid) return false;
-        const pStr = String(pid);
-        return (
-          pStr === String(patient?.id) ||
-          pStr === String((patient as any)?.patientId) ||
-          pStr === String((patient as any)?.dmeId) ||
-          pStr === String((patient as any)?.docId) ||
-          ((patient as any)?.id && String((patient as any)?.id) === pStr)
-        );
-      };
 
-      const qLab = query(collection(db, 'lab_results'));
-      const unsub = onSnapshot(qLab, (snap) => {
-        const resMap = new Map<string, any>();
-        snap.docs.forEach((docSnap) => {
-          const data = { id: docSnap.id, ...docSnap.data() } as any;
-          if (!belongsToTenant(data, tenantId)) return;
-          const matches =
-            matchPatientId(data.patientId) ||
-            matchPatientId(data.dmeId) ||
-            (patient?.name && data.patientName && data.patientName.toLowerCase() === patient.name.toLowerCase());
-          if (matches) {
-            const key = data.id || docSnap.id;
-            resMap.set(key, data);
-          }
-        });
-        const list = Array.from(resMap.values());
-        list.sort((a, b) => new Date(b.dateValidation || b.dateSaisie || 0).getTime() - new Date(a.dateValidation || a.dateSaisie || 0).getTime());
-        setPatientLabResults(list);
-      }, (err) => {
-        console.warn("Could not load patient lab results:", err);
-      });
-      return () => unsub();
-    } catch (e) {
-      console.warn("Error setting up lab results listener:", e);
-    }
-  }, [patient?.id, (patient as any)?.dmeId, patient?.name]);
 
   // Restore Auto-Save Draft on Mount (if not closed)
   useEffect(() => {
@@ -910,7 +864,7 @@ export default function ConsultationActive({
     { id: 'systemes', label: 'Systèmes', icon: Activity },
     { id: 'examen', label: 'Examen', icon: Stethoscope },
     { id: 'raisonnement', label: 'Raisonnement', icon: ClipboardList },
-    { id: 'examens', label: `Examens ${patientLabResults.length > 0 ? `(${patientLabResults.length} dispo)` : ''}`, icon: Beaker },
+    { id: 'examens', label: 'Examens', icon: Beaker },
     { id: 'prise_en_charge', label: 'Prise en charge', icon: Pill },
     { id: 'observation', label: 'Observation', icon: FileText },
     { id: 'addenda', label: `Addenda (${addenda.length})`, icon: ShieldCheck }
@@ -2984,137 +2938,6 @@ Orientation: ${orientation}
                     </button>
                   </div>
 
-                  {/* Biological Results Direct Viewer for Consultation */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Beaker size={18} className="text-purple-600" />
-                        <h4 className="text-sm font-black text-slate-800 uppercase tracking-wider">
-                          Résultats d'Analyses Biologiques {patientLabResults.length > 0 ? `(${patientLabResults.length} Validé${patientLabResults.length > 1 ? 's' : ''})` : ''}
-                        </h4>
-                      </div>
-                      {patientLabResults.length > 0 && (
-                        <span className="text-[10px] font-black uppercase text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
-                          <CheckCircle2 size={12} /> Prêts pour consultation
-                        </span>
-                      )}
-                    </div>
-
-                    {patientLabResults.length > 0 ? (
-                      <div className="space-y-4">
-                        {patientLabResults.map((res: any) => {
-                          const lignes = (res.lignes || []) as any[];
-                          const dateStr = res.dateValidation || res.dateSaisie || res.date || '';
-                          const formattedDate = dateStr ? new Date(dateStr).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Date N/A';
-
-                          return (
-                            <div key={res.id} className="bg-white rounded-2xl border border-slate-200/90 overflow-hidden shadow-sm hover:shadow-md transition-all">
-                              <div className="bg-slate-50/90 px-4 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                                <div className="flex items-center gap-2.5">
-                                  <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xs">
-                                    LAB
-                                  </div>
-                                  <div>
-                                    <p className="text-xs font-black text-slate-900">Demande N° {res.demandeId || res.id}</p>
-                                    <p className="text-[10px] text-slate-500 font-medium">Validé le {formattedDate} • Par {res.validePar || res.technicianName || 'Biologiste'}</p>
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedLabResultForModal(res)}
-                                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
-                                  >
-                                    <Eye size={12} /> Voir rapport complet
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="p-4 space-y-4">
-                                {lignes.map((ligne: any, lIdx: number) => {
-                                  const isSensitive = ligne.isSensitive || ['vih', 'hiv', 'séro', 'génétique', 'spermogramme', 'syphilis', 'hcg'].some(k => (ligne.examName || '').toLowerCase().includes(k));
-                                  const userRole = (user?.role || '').toLowerCase();
-                                  const canViewSensitive = userRole.includes('medecin') || userRole.includes('doctor') || userRole.includes('biolog') || userRole.includes('admin') || user?.id === res.saisiPar;
-
-                                  return (
-                                    <div key={lIdx} className="space-y-2">
-                                      <div className="flex items-center justify-between">
-                                        <h5 className="text-xs font-black text-slate-900 flex items-center gap-1.5">
-                                          <span className="w-2 h-2 rounded-full bg-purple-600" />
-                                          {ligne.examName}
-                                        </h5>
-                                        {isSensitive && (
-                                          <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-50 text-amber-800 border border-amber-200">
-                                            🔒 Confidentiel
-                                          </span>
-                                        )}
-                                      </div>
-
-                                      <div className="bg-slate-50/60 rounded-xl border border-slate-200/70 overflow-hidden">
-                                        <table className="w-full text-left text-xs">
-                                          <thead>
-                                            <tr className="text-[9px] font-black uppercase text-slate-400 bg-slate-100/70 border-b border-slate-200">
-                                              <th className="px-3 py-2">Paramètre</th>
-                                              <th className="px-3 py-2 text-center">Valeur Mesurée</th>
-                                              <th className="px-3 py-2 text-center">Unité</th>
-                                              <th className="px-3 py-2 text-right">Référence</th>
-                                            </tr>
-                                          </thead>
-                                          <tbody className="divide-y divide-slate-100">
-                                            {isSensitive && !canViewSensitive ? (
-                                              <tr>
-                                                <td colSpan={4} className="px-3 py-3 text-center text-amber-800 italic text-[11px] font-bold bg-amber-50/60">
-                                                  🔒 Résultat confidentiel accessible uniquement au médecin traitant.
-                                                </td>
-                                              </tr>
-                                            ) : (
-                                              (ligne.parametres || []).map((p: any, pIdx: number) => (
-                                                <tr key={pIdx} className={p.isAnormal ? 'bg-rose-50/70 font-semibold' : 'hover:bg-slate-50'}>
-                                                  <td className="px-3 py-2 font-medium text-slate-800 flex items-center gap-1.5">
-                                                    <span className={`w-1.5 h-1.5 rounded-full ${p.isAnormal ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                                                    {p.nom}
-                                                  </td>
-                                                  <td className={`px-3 py-2 text-center font-mono font-bold ${p.isAnormal ? 'text-rose-600' : 'text-slate-900'}`}>
-                                                    <span className="inline-flex items-center gap-1">
-                                                      {p.valeur}
-                                                      {p.isAnormal && (
-                                                        <span className="text-[8px] font-black uppercase px-1 py-0.2 bg-rose-100 text-rose-700 rounded border border-rose-200">
-                                                          Anormal
-                                                        </span>
-                                                      )}
-                                                    </span>
-                                                  </td>
-                                                  <td className="px-3 py-2 text-center text-slate-500 font-mono text-[11px]">{p.unite || '-'}</td>
-                                                  <td className="px-3 py-2 text-right text-slate-400 font-mono text-[11px]">{p.valeurReference || 'N/A'}</td>
-                                                </tr>
-                                              ))
-                                            )}
-                                          </tbody>
-                                        </table>
-                                      </div>
-
-                                      {ligne.conclusion && (!isSensitive || canViewSensitive) && (
-                                        <div className="p-2.5 bg-purple-50/70 rounded-xl border border-purple-100 text-xs">
-                                          <span className="text-[9px] font-black uppercase text-purple-700 block mb-0.5">Interprétation biologique</span>
-                                          <p className="font-semibold text-purple-950 italic">« {ligne.conclusion} »</p>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl flex items-center gap-3 text-slate-500 text-xs font-medium">
-                        <AlertCircle size={18} className="text-slate-400 shrink-0" />
-                        <span>Aucun résultat d'analyse biologique validé pour l'instant. Les résultats validés par le laboratoire s'afficheront ici automatiquement en direct.</span>
-                      </div>
-                    )}
-                  </div>
-
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 border-t pt-4">
                     {/* Add individual exam */}
                     <div className="lg:col-span-2 space-y-4">
@@ -4574,130 +4397,6 @@ Orientation: ${orientation}
                     );
                   }
                 })()}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal - Visualisation & Impression Rapport Biologique */}
-      {selectedLabResultForModal && (
-        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-3xl border border-slate-200 max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
-            {/* Modal Header */}
-            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex justify-between items-center shrink-0">
-              <div className="flex items-center gap-2">
-                <Beaker className="text-purple-600" size={20} />
-                <span className="font-bold text-slate-800 text-sm">Rapport d'Analyses Biologiques</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <button 
-                  type="button"
-                  onClick={() => window.print()}
-                  className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-slate-800 transition-all shadow-md cursor-pointer"
-                >
-                  <Printer size={14} /> Imprimer
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => setSelectedLabResultForModal(null)}
-                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
-
-            {/* Printable Report Document */}
-            <div className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-50/50">
-              <div className="bg-white p-6 md:p-8 border border-slate-200 rounded-2xl shadow-sm max-w-3xl mx-auto space-y-6">
-                
-                {/* Header */}
-                <div className="flex justify-between items-start border-b-2 border-slate-900 pb-5">
-                  <div>
-                    <div className="flex items-center gap-2 text-purple-600 font-black tracking-tight text-xl">
-                      <Beaker size={24} />
-                      <span>SMART-HOSTO</span>
-                    </div>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider mt-1">Laboratoire d'Analyses Médicales</p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">Plateau Technique de Biologie Médicale</p>
-                  </div>
-                  <div className="text-right">
-                    <h2 className="text-sm font-black text-slate-900">BULLETIN DE RÉSULTATS</h2>
-                    <p className="text-xs font-mono font-bold text-purple-600 mt-1">Réf: {selectedLabResultForModal.demandeId || selectedLabResultForModal.id}</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">
-                      Date: {selectedLabResultForModal.dateValidation || selectedLabResultForModal.dateSaisie || new Date().toISOString().slice(0, 10)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Patient Information */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100 text-xs">
-                  <div>
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1.5">Patient</h4>
-                    <p className="font-bold text-slate-900 text-sm uppercase">{patient?.lastName} {patient?.firstName}</p>
-                    <p className="text-slate-600 mt-0.5">Âge: {patient?.age || 'N/A'} ans • Sexe: {patient?.gender || 'N/A'}</p>
-                    <p className="text-slate-500 font-mono text-[11px] mt-0.5">ID: {patient?.id || patient?.dmeId || 'N/A'}</p>
-                  </div>
-                  <div>
-                    <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-1.5">Validation</h4>
-                    <p className="font-bold text-slate-900">{selectedLabResultForModal.validePar || selectedLabResultForModal.technicianName || 'Biologiste Médical'}</p>
-                    <p className="text-slate-600 mt-0.5">Statut: Validé & Conforme</p>
-                  </div>
-                </div>
-
-                {/* Results Tables */}
-                <div className="space-y-6">
-                  {((selectedLabResultForModal.lignes || []) as any[]).map((ligne: any, idx: number) => (
-                    <div key={idx} className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                      <div className="bg-slate-100 px-4 py-2.5 flex justify-between items-center border-b border-slate-200">
-                        <h5 className="font-black text-slate-900 text-xs">{ligne.examName}</h5>
-                      </div>
-
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="bg-slate-50 border-b border-slate-200 text-[9px] uppercase font-bold text-slate-400">
-                            <th className="py-2 px-3">Paramètre</th>
-                            <th className="py-2 px-3 text-center">Résultat</th>
-                            <th className="py-2 px-3 text-center">Unité</th>
-                            <th className="py-2 px-3 text-right">Valeurs de Référence</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {(ligne.parametres || []).map((p: any, pIdx: number) => (
-                            <tr key={pIdx} className={p.isAnormal ? 'bg-rose-50/70 font-semibold' : ''}>
-                              <td className="py-2 px-3 text-slate-800">{p.nom}</td>
-                              <td className={`py-2 px-3 text-center font-bold ${p.isAnormal ? 'text-rose-600' : 'text-slate-900'}`}>
-                                {p.valeur}
-                                {p.isAnormal && <span className="text-[8px] font-black uppercase text-rose-600 ml-1.5 px-1 py-0.5 bg-rose-100 rounded">HORS RÉF</span>}
-                              </td>
-                              <td className="py-2 px-3 text-center text-slate-500 font-mono text-[11px]">{p.unite || '-'}</td>
-                              <td className="py-2 px-3 text-right text-slate-400 font-mono text-[11px]">{p.valeurReference || 'N/A'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-
-                      {ligne.conclusion && (
-                        <div className="p-3 bg-purple-50/50 border-t border-slate-200 text-xs">
-                          <span className="text-[9px] font-bold text-purple-700 uppercase tracking-wider block mb-0.5">Conclusion Biologique :</span>
-                          <p className="italic text-slate-700 font-medium">« {ligne.conclusion} »</p>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Footer Sign-off */}
-                <div className="flex justify-between items-end pt-6 border-t border-slate-200 text-xs">
-                  <p className="text-[10px] text-slate-400">Document généré électroniquement par SMART-HOSTO LIS.</p>
-                  <div className="text-right">
-                    <p className="text-[10px] text-slate-500 font-bold uppercase mb-4">Le Responsable du Laboratoire</p>
-                    <p className="font-bold text-slate-900">{selectedLabResultForModal.validePar || selectedLabResultForModal.technicianName || 'Dr. Biologiste'}</p>
-                    <p className="text-[10px] text-emerald-600 font-bold">✓ Signature & Validation Électronique</p>
-                  </div>
-                </div>
-
               </div>
             </div>
           </div>
