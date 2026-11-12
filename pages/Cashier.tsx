@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { CreditCard, DollarSign, ArrowUpRight, Printer, Search, Calendar, Landmark, CheckCircle2, Edit3, X, Calculator, Wallet, Clock, FileText, Home, Loader2, Check, ArrowLeft, Lock, Unlock, ShieldAlert, Award, AlertCircle, Smartphone, Banknote } from 'lucide-react';
+import { CreditCard, DollarSign, ArrowUpRight, Printer, Search, Calendar, Landmark, CheckCircle2, Edit3, X, Calculator, Wallet, Clock, FileText, Home, Loader2, Check, ArrowLeft, Lock, Unlock, ShieldAlert, Award, AlertCircle, Smartphone, Banknote, TestTube, Stethoscope, Syringe, Activity } from 'lucide-react';
 import { PaymentRequest, CashierTransaction, PaymentStatus, TransactionFacturation, AvoirPatient, DettePatient, ParametresCaisse, CashierSession, Patient } from '../types';
 import { formatPatientFullName } from '../src/patientUtils';
 import { db, sanitizeData } from '../src/firebase';
@@ -54,15 +54,25 @@ export const formatDateTime = (dateInput?: string | number | Date): string => {
 export const isPharmacyOrMedication = (pr: any): boolean => {
   const source = (pr.sourceModule || pr.requestingService || pr.source || '').trim().toLowerCase();
   const type = (pr.type || '').trim().toLowerCase();
+
+  // If the request contains lab exams or consultation fees, it belongs in Caisse, NOT exclusive pharmacy
+  const hasLabOrConsultOrSoin = (pr.items || []).some((it: any) => {
+    const n = (it.name || it.libelle || '').toLowerCase();
+    return n.includes('consultation') || n.includes('examen') || n.includes('lab') || n.includes('analyse') || n.includes('soin');
+  }) || type === 'laboratoire' || type === 'consultation' || type === 'soins';
+
+  if (hasLabOrConsultOrSoin) return false;
+
   if (source === 'pharmacie' || source === 'pharmacy' || source.includes('pharmaci')) return true;
-  if (type === 'ordonnance' || type === 'medication' || type === 'pharmacie' || type === 'medicament' || type === 'prescription') return true;
-  if (pr.items && Array.isArray(pr.items)) {
-    const hasMed = pr.items.some((it: any) => {
+  if (type === 'ordonnance' || type === 'medication' || type === 'pharmacie' || type === 'medicament' || type === 'prescription' || type === 'vente_directe') return true;
+
+  if (pr.items && Array.isArray(pr.items) && pr.items.length > 0) {
+    const allAreMeds = pr.items.every((it: any) => {
       const itSource = (it.source || '').toLowerCase();
       const itName = (it.name || it.libelle || '').toLowerCase();
-      return itSource === 'pharmacie' || itName.startsWith('ordonnance') || itName.includes('médicament');
+      return itSource === 'pharmacie' || itName.startsWith('ordonnance') || itName.includes('médicament') || itName.includes('medicament');
     });
-    if (hasMed) return true;
+    if (allAreMeds) return true;
   }
   return false;
 };
@@ -350,8 +360,33 @@ const Cashier: React.FC<CashierProps> = ({
 
   const pendingRequestsSorted = useMemo(() => {
     const prMap = new Map<string, PaymentRequest>();
+
+    // 1. Index all acts/items that have ALREADY been paid for each patient
+    const patientPaidItemNames = new Map<string, Set<string>>();
     paymentRequests.forEach(pr => {
-      // Strictly exclude any items where source === 'Pharmacie' or type === 'ordonnance' / 'medication'
+      const statusUpper = (pr.status || '').toUpperCase();
+      const isPaid = statusUpper === 'PAID' || statusUpper === 'SOLDE' || statusUpper === 'PAYE' || (pr as any).isPaid === true;
+      if (isPaid && pr.patientId) {
+        const pKey = String(pr.patientId).trim().toLowerCase();
+        if (!patientPaidItemNames.has(pKey)) {
+          patientPaidItemNames.set(pKey, new Set());
+        }
+        (pr.items || []).forEach((it: any) => {
+          if (it.name) {
+            const raw = it.name.trim().toLowerCase();
+            patientPaidItemNames.get(pKey)!.add(raw);
+            patientPaidItemNames.get(pKey)!.add(raw.replace(/^examen\s*(lab\s*)?:\s*/i, '').trim());
+            patientPaidItemNames.get(pKey)!.add(raw.replace(/^ordonnance\s*:\s*/i, '').trim());
+          }
+        });
+      }
+    });
+
+    // 2. Track seen pending item signatures to prevent duplicate pending rows
+    const seenPendingItemSignatures = new Set<string>();
+
+    paymentRequests.forEach(pr => {
+      // Strictly exclude any items where source === 'Pharmacie' or exclusive medications
       if (isPharmacyOrMedication(pr)) return;
       
       // STRICT FILTER: Strictly filter out paid, settled or cancelled invoices from active billing queue
@@ -382,6 +417,32 @@ const Cashier: React.FC<CashierProps> = ({
       const remaining = (pr.totalAmount || 0) - (pr.amountPaid || 0);
       if (remaining <= 0) return;
       if ((pr as any).resteAPayer !== undefined && Number((pr as any).resteAPayer) <= 0) return;
+
+      // If all items in this pending request were already paid in a previous transaction, ignore it!
+      const pKey = String(pr.patientId || '').trim().toLowerCase();
+      const paidItemsForPatient = patientPaidItemNames.get(pKey);
+      if (paidItemsForPatient && pr.items && pr.items.length > 0) {
+        const allItemsAlreadyPaid = pr.items.every((it: any) => {
+          const raw = (it.name || '').trim().toLowerCase();
+          const clean = raw.replace(/^examen\s*(lab\s*)?:\s*/i, '').replace(/^ordonnance\s*:\s*/i, '').trim();
+          return paidItemsForPatient.has(raw) || paidItemsForPatient.has(clean);
+        });
+        if (allItemsAlreadyPaid) {
+          return; // Skip: this request was already fully paid in another transaction!
+        }
+      }
+
+      // Deduplicate pending requests with identical patient, total, and items
+      const itemsSig = (pr.items || [])
+        .map((it: any) => (it.name || '').trim().toLowerCase())
+        .filter(Boolean)
+        .sort()
+        .join('__');
+      const sigKey = `${pKey}__${pr.totalAmount}__${itemsSig}`;
+      if (itemsSig && seenPendingItemSignatures.has(sigKey)) {
+        return; // Skip duplicate pending request
+      }
+      seenPendingItemSignatures.add(sigKey);
 
       if (!prMap.has(pr.id)) {
         prMap.set(pr.id, pr);
@@ -690,7 +751,7 @@ const Cashier: React.FC<CashierProps> = ({
         console.warn("Background payment batch sync warning:", err);
       });
 
-      // 6. Clear financial status in discharges_waiting & service_queues in background
+      // 6. Clear financial status across all modules (Discharges, Queues, Lab Requests, Prescriptions, Patients & Duplicate Invoices)
       if (newStatus === 'PAID' || newPaid > 0 || resteAPayer === 0) {
         const targetPatientIds = [
           selectedRequest.patientId,
@@ -702,7 +763,10 @@ const Cashier: React.FC<CashierProps> = ({
           try {
             const bgBatch = writeBatch(db);
             let hasUpdates = false;
+            const paidItemNames = (selectedRequest.items || []).map((it: any) => (it.name || '').trim().toLowerCase());
+
             for (const pid of targetPatientIds) {
+              // A. Clear discharges_waiting
               const q = query(collection(db, 'discharges_waiting'), where('patientId', '==', pid));
               const snaps = await getDocs(q);
               for (const dSnap of snaps.docs) {
@@ -710,20 +774,97 @@ const Cashier: React.FC<CashierProps> = ({
                 hasUpdates = true;
               }
 
+              // B. Clear service_queues
               const qSq = query(collection(db, 'service_queues'), where('patientId', '==', pid));
               const sqSnaps = await getDocs(qSq);
               for (const sqDoc of sqSnaps.docs) {
-                bgBatch.update(doc(db, 'service_queues', sqDoc.id), { paymentStatus: 'SOLDE' });
+                bgBatch.update(doc(db, 'service_queues', sqDoc.id), { paymentStatus: 'SOLDE', ticketStatut: 'PAYE' });
                 hasUpdates = true;
               }
 
               const qSqDme = query(collection(db, 'service_queues'), where('dmeId', '==', pid));
               const sqDmeSnaps = await getDocs(qSqDme);
               for (const sqDoc of sqDmeSnaps.docs) {
-                bgBatch.update(doc(db, 'service_queues', sqDoc.id), { paymentStatus: 'SOLDE' });
+                bgBatch.update(doc(db, 'service_queues', sqDoc.id), { paymentStatus: 'SOLDE', ticketStatut: 'PAYE' });
                 hasUpdates = true;
               }
+
+              // C. Clear lab_requests: mark as paid so laboratory knows fees are settled
+              const qLab = query(collection(db, 'lab_requests'), where('patientId', '==', pid));
+              const labSnaps = await getDocs(qLab);
+              for (const labDoc of labSnaps.docs) {
+                const labData = labDoc.data();
+                if (labData.status === 'en attente' || labData.billingStatus === 'pending' || !labData.isPaid) {
+                  bgBatch.update(doc(db, 'lab_requests', labDoc.id), { 
+                    status: 'payé', 
+                    billingStatus: 'paid', 
+                    isPaid: true, 
+                    paidAt: new Date().toISOString() 
+                  });
+                  hasUpdates = true;
+                }
+              }
+
+              // D. Clear pending_prescriptions payment status
+              const qPresc = query(collection(db, 'pending_prescriptions'), where('patientId', '==', pid));
+              const prescSnaps = await getDocs(qPresc);
+              for (const prescDoc of prescSnaps.docs) {
+                bgBatch.update(doc(db, 'pending_prescriptions', prescDoc.id), { 
+                  paymentStatus: 'PAID', 
+                  isPaid: true, 
+                  paidAt: new Date().toISOString() 
+                });
+                hasUpdates = true;
+              }
+
+              // E. Clear patient record in 'patients' collection
+              try {
+                const ptRef = doc(db, 'patients', pid);
+                bgBatch.update(ptRef, {
+                  paymentStatus: 'PAID',
+                  ticketStatut: 'PAYE',
+                  lastPaymentAt: new Date().toISOString()
+                });
+                hasUpdates = true;
+              } catch (_) {}
+
+              // F. Resolve and mark any duplicate/redundant pending payment requests for this patient with the same items
+              const qDup = query(collection(db, 'payment_requests'), where('patientId', '==', pid));
+              const dupSnaps = await getDocs(qDup);
+              const duplicatePrIdsToClear: string[] = [];
+
+              for (const dupDoc of dupSnaps.docs) {
+                if (dupDoc.id === selectedRequest.id) continue;
+                const dData = dupDoc.data();
+                const dStatus = (dData.status || '').toUpperCase();
+                if (dStatus === 'PENDING' || dStatus === 'PARTIAL') {
+                  const dItems = (dData.items || []).map((it: any) => (it.name || '').trim().toLowerCase());
+                  const isSubsetOrEqual = dItems.length > 0 && dItems.every((name: string) => 
+                    paidItemNames.includes(name) || paidItemNames.some(pName => pName.includes(name) || name.includes(pName))
+                  );
+                  if (isSubsetOrEqual) {
+                    bgBatch.update(doc(db, 'payment_requests', dupDoc.id), {
+                      status: 'PAID',
+                      amountPaid: dData.totalAmount || 0,
+                      isPaid: true,
+                      isDuplicateResolved: true,
+                      updatedAt: new Date().toISOString()
+                    });
+                    hasUpdates = true;
+                    duplicatePrIdsToClear.push(dupDoc.id);
+                  }
+                }
+              }
+
+              if (duplicatePrIdsToClear.length > 0) {
+                setPaymentRequests(prev => prev.map(pr => 
+                  duplicatePrIdsToClear.includes(pr.id) 
+                    ? { ...pr, status: 'PAID', amountPaid: pr.totalAmount || 0 }
+                    : pr
+                ));
+              }
             }
+
             if (hasUpdates) {
               await bgBatch.commit();
             }
@@ -1247,19 +1388,20 @@ const Cashier: React.FC<CashierProps> = ({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-[11px] uppercase tracking-[0.15em] text-slate-500 font-black border-b border-slate-200/60">
-                  <th className="px-6 py-4">Date & Heure</th>
-                  <th className="px-6 py-4">Réf. Demande</th>
-                  <th className="px-6 py-4">Patient</th>
-                  <th className="px-6 py-4">Service Demandeur</th>
-                  <th className="px-6 py-4 text-right">Total à Payer</th>
-                  <th className="px-6 py-4 text-right">Reste</th>
-                  <th className="px-6 py-4 text-center">Action</th>
+                  <th className="px-5 py-4">Date & Heure</th>
+                  <th className="px-5 py-4">Réf. Demande</th>
+                  <th className="px-5 py-4">Patient</th>
+                  <th className="px-5 py-4">Service & Nature</th>
+                  <th className="px-5 py-4">Détail des Actes / Examens</th>
+                  <th className="px-5 py-4 text-right">Total à Payer</th>
+                  <th className="px-5 py-4 text-right">Reste</th>
+                  <th className="px-5 py-4 text-center">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {pendingRequestsSorted.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-20 text-center">
+                    <td colSpan={8} className="p-20 text-center">
                       <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
                         <Check size={32} className="text-emerald-500" />
                       </div>
@@ -1274,9 +1416,22 @@ const Cashier: React.FC<CashierProps> = ({
                     const resolvedFullName = formatPatientFullName(patientObj, pr.patientName);
                     const prIsBlocked = patientObj ? (patientObj.creditBlocked === true || patientObj.allowCredit === false) : false;
 
+                    const isLab = pr.type === 'LABORATOIRE' || 
+                      (pr.sourceModule || '').toLowerCase().includes('lab') || 
+                      (pr.requestingService || '').toLowerCase().includes('lab') || 
+                      (pr.items || []).some((it: any) => (it.name || '').toLowerCase().includes('examen') || (it.name || '').toLowerCase().includes('analyse') || (it.name || '').toLowerCase().includes('lab'));
+                    
+                    const isConsult = pr.type === 'CONSULTATION' || 
+                      (pr.sourceModule || '').toLowerCase().includes('consult') || 
+                      (pr.requestingService || '').toLowerCase().includes('consult');
+
+                    const isSoin = (pr.sourceModule || '').toLowerCase().includes('soin') || 
+                      (pr.requestingService || '').toLowerCase().includes('soin') || 
+                      (pr.items || []).some((it: any) => (it.name || '').toLowerCase().includes('soin') || (it.name || '').toLowerCase().includes('pansement') || (it.name || '').toLowerCase().includes('injection'));
+
                     return (
                       <tr key={pr.id} className="hover:bg-slate-50/80 transition-colors group">
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-5 py-4 whitespace-nowrap">
                           <div className="flex items-center gap-2">
                             <Calendar size={14} className="text-blue-600 shrink-0" />
                             <span className="font-mono text-xs font-bold text-slate-800 bg-blue-50/80 border border-blue-100 px-2.5 py-1 rounded-lg">
@@ -1284,12 +1439,12 @@ const Cashier: React.FC<CashierProps> = ({
                             </span>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
+                        <td className="px-5 py-4 whitespace-nowrap">
                           <span className="font-mono text-xs font-bold text-slate-600 px-2 py-1 bg-slate-100 rounded-md uppercase">
                             {pr.id}
                           </span>
                         </td>
-                        <td className="px-6 py-4">
+                        <td className="px-5 py-4">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-black text-sm text-slate-900">{resolvedFullName}</span>
                             {prIsBlocked && (
@@ -1302,17 +1457,64 @@ const Cashier: React.FC<CashierProps> = ({
                             <div className="text-[10px] font-medium text-slate-400 font-mono">ID: {pr.patientId}</div>
                           )}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <span className="px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-100 rounded-md text-xs font-bold uppercase tracking-wider">
-                            {pr.sourceModule || pr.requestingService || 'Consultation'}
-                          </span>
+                        <td className="px-5 py-4 whitespace-nowrap">
+                          {isLab ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold uppercase tracking-wider">
+                              <TestTube size={13} className="text-purple-600" />
+                              Laboratoire
+                            </span>
+                          ) : isConsult ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold uppercase tracking-wider">
+                              <Stethoscope size={13} className="text-blue-600" />
+                              Consultation
+                            </span>
+                          ) : isSoin ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold uppercase tracking-wider">
+                              <Syringe size={13} className="text-amber-600" />
+                              Soins Infirmiers
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold uppercase tracking-wider">
+                              <Activity size={13} />
+                              {pr.sourceModule || pr.requestingService || 'Prestation'}
+                            </span>
+                          )}
                         </td>
-                        <td className="px-6 py-4 text-right whitespace-nowrap">
+                        <td className="px-5 py-4 max-w-xs">
+                          {pr.items && pr.items.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              <div className="flex flex-wrap gap-1.5">
+                                {pr.items.map((it: any, idx: number) => (
+                                  <span
+                                    key={idx}
+                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold ${
+                                      isLab 
+                                        ? 'bg-purple-50 text-purple-900 border border-purple-200/80' 
+                                        : 'bg-slate-100 text-slate-800 border border-slate-200/80'
+                                    }`}
+                                  >
+                                    {isLab && <TestTube size={10} className="text-purple-600 shrink-0" />}
+                                    {it.name || 'Acte'}
+                                    {it.quantity > 1 && <span className="text-slate-500 font-mono text-[10px]">×{it.quantity}</span>}
+                                  </span>
+                                ))}
+                              </div>
+                              {(pr.practitionerName || pr.requestedBy) && (
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  Prescrit par: <span className="font-semibold text-slate-600">{pr.practitionerName || pr.requestedBy}</span>
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400 italic">Détails non spécifiés</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-4 text-right whitespace-nowrap">
                           <span className="font-black text-sm text-slate-900">
                             {(pr.totalAmount || 0).toLocaleString()} {establishment.currency}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-right whitespace-nowrap">
+                        <td className="px-5 py-4 text-right whitespace-nowrap">
                           {remaining > 0 ? (
                             <span className="font-black text-sm text-rose-600">
                               {remaining.toLocaleString()} {establishment.currency}
@@ -1321,7 +1523,7 @@ const Cashier: React.FC<CashierProps> = ({
                             <span className="text-xs font-bold text-emerald-600">Soldé</span>
                           )}
                         </td>
-                        <td className="px-6 py-4 text-center whitespace-nowrap">
+                        <td className="px-5 py-4 text-center whitespace-nowrap">
                           <button 
                             onClick={() => handleOpenPayment(pr)}
                             disabled={isProcessing}
@@ -1556,6 +1758,46 @@ const Cashier: React.FC<CashierProps> = ({
                   </span>
                 </div>
               </div>
+
+              {/* Détail des Actes & Examens Facturés */}
+              {selectedRequest.items && selectedRequest.items.length > 0 && (
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                      <FileText size={13} className="text-slate-600" />
+                      Détail des Actes & Examens Facturés ({selectedRequest.items.length})
+                    </p>
+                    {(selectedRequest.practitionerName || selectedRequest.requestedBy) && (
+                      <span className="text-[10px] font-bold text-slate-500">
+                        Prescripteur: <span className="text-slate-800 font-black">{selectedRequest.practitionerName || selectedRequest.requestedBy}</span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="divide-y divide-slate-200/60 bg-white rounded-xl border border-slate-200/80 overflow-hidden shadow-2xs">
+                    {selectedRequest.items.map((it: any, idx: number) => {
+                      const itemTotal = it.totalPrice || ((it.unitPrice || 0) * (it.quantity || 1)) || 0;
+                      return (
+                        <div key={idx} className="px-3 py-2 flex items-center justify-between text-xs hover:bg-slate-50/60 transition-colors">
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                            <div className="min-w-0">
+                              <p className="font-bold text-slate-900 truncate">{it.name || 'Acte sans libellé'}</p>
+                              {it.quantity > 1 && (
+                                <p className="text-[10px] text-slate-400 font-mono">
+                                  Qté: {it.quantity} × {(it.unitPrice || 0).toLocaleString()} {establishment.currency}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0 font-mono font-black text-slate-900">
+                            {itemTotal.toLocaleString()} <span className="text-[10px] font-bold text-slate-400">{establishment.currency}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Amount Breakdown Cards */}
               <div className="grid grid-cols-2 gap-2.5">

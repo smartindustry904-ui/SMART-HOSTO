@@ -150,7 +150,7 @@ const Pharmacy: React.FC<PharmacyProps> = ({
       setDettesPatient(dts);
     });
 
-    // 6. Listen to Pending Prescriptions
+    // 6. Listen to Pending Prescriptions with Multi-Level Anti-Duplicate Engine
     let unsubPresc = () => {};
     try {
       const q = query(collection(db, 'pending_prescriptions'), orderBy('createdAt', 'desc'));
@@ -160,16 +160,65 @@ const Pharmacy: React.FC<PharmacyProps> = ({
           ...docSnap.data()
         })).filter(docData => belongsToTenant(docData, activeTenantId));
 
-        const mapped = list.map((item: any) => ({
-          id: item.id || item.firebaseId,
-          firebaseId: item.firebaseId,
-          patient: item.patient || 'Patient',
-          patientId: item.patientId || 'DME-9999',
-          doctor: item.doctor || 'Dr. Sarr',
-          date: item.date || 'Aujourd\'hui',
-          items: item.items || []
-        }));
+        // Strict deduplication map: key = patientId + normalized medication names
+        const uniquePrescriptionMap = new Map<string, any>();
 
+        list.forEach((item: any) => {
+          // Strictly ignore prescriptions that have already been served or delivered
+          const statusLower = (item.status || '').toLowerCase().trim();
+          if (
+            statusLower === 'served' || 
+            statusLower === 'delivered' || 
+            statusLower === 'dispensed' || 
+            statusLower === 'traité' ||
+            statusLower === 'traite' ||
+            statusLower === 'paid_delivered' ||
+            item.isDelivered === true ||
+            item.isServed === true
+          ) {
+            return;
+          }
+
+          const rawPatientId = String(item.patientId || '').trim().toLowerCase();
+          const rawItems = item.items || [];
+          const normalizedMedNames = rawItems
+            .map((it: any) => (typeof it === 'string' ? it : (it.name || '')).trim().toLowerCase())
+            .filter(Boolean)
+            .sort()
+            .join('__');
+
+          const datePart = (item.date || item.createdAt || '').slice(0, 10);
+          // Semantic key groups duplicates for the same patient and same medications prescribed around the same time
+          const semanticKey = normalizedMedNames 
+            ? `${rawPatientId}__${datePart}__${normalizedMedNames}`
+            : `${rawPatientId}__${item.id || item.firebaseId}`;
+
+          if (uniquePrescriptionMap.has(semanticKey)) {
+            const existing = uniquePrescriptionMap.get(semanticKey);
+            if (!existing.allFirebaseIds.includes(item.firebaseId)) {
+              existing.allFirebaseIds.push(item.firebaseId);
+            }
+            // Keep the one with richer items or more recent timestamp
+            if ((item.items || []).length > (existing.items || []).length) {
+              existing.items = item.items;
+            }
+          } else {
+            uniquePrescriptionMap.set(semanticKey, {
+              id: item.id || item.firebaseId,
+              firebaseId: item.firebaseId,
+              allFirebaseIds: [item.firebaseId],
+              patient: item.patient || item.patientName || 'Patient',
+              patientId: item.patientId || 'DME-9999',
+              doctor: item.doctor || item.doctorName || 'Dr. Sarr',
+              date: item.date || 'Aujourd\'hui',
+              items: item.items || [],
+              status: item.status || 'pending',
+              createdAt: item.createdAt || new Date().toISOString()
+            });
+          }
+        });
+
+        const mapped = Array.from(uniquePrescriptionMap.values());
         setPendingPrescriptions(mapped);
       }, (error) => {
         console.warn("Firestore subscription warn: ", error);
@@ -466,9 +515,15 @@ const Pharmacy: React.FC<PharmacyProps> = ({
         }
       });
 
-      // 6. Remove from pending prescriptions queue if applicable
-      if (presc && presc.firebaseId) {
-        batch.delete(doc(db, 'pending_prescriptions', presc.firebaseId));
+      // 6. Remove from pending prescriptions queue if applicable (including all duplicate IDs)
+      if (presc) {
+        if (Array.isArray(presc.allFirebaseIds) && presc.allFirebaseIds.length > 0) {
+          presc.allFirebaseIds.forEach((fId: string) => {
+            batch.delete(doc(db, 'pending_prescriptions', fId));
+          });
+        } else if (presc.firebaseId) {
+          batch.delete(doc(db, 'pending_prescriptions', presc.firebaseId));
+        }
       }
 
       // Commit atomic batch

@@ -1113,11 +1113,13 @@ const Consultation: React.FC<ConsultationProps> = ({
         updatedAt: today.toISOString()
       }, user)));
 
-      // 2. Create the Pharmacy Request document in 'pending_prescriptions'
-      if (compilationData.prescriptions && compilationData.prescriptions.length > 0) {
-        const pharmDocRef = doc(collection(db, 'pending_prescriptions'));
+      // 2. Create the Pharmacy Request document in 'pending_prescriptions' ONLY for untransmitted prescriptions
+      const untransmittedPrescriptions = (compilationData.prescriptions || []).filter((p: any) => !p.isTransmitted);
+      if (untransmittedPrescriptions.length > 0) {
+        const prescId = compilationData.prescriptionId || `ORD-${activePatient.id}-${consultationId}`;
+        const pharmDocRef = doc(db, 'pending_prescriptions', prescId);
         batch.set(pharmDocRef, sanitizeData(stampTenantData({
-          id: `ORD-${Math.floor(Math.random() * 1000000)}`,
+          id: prescId,
           patientId: activePatient.id,
           patient: `${activePatient.lastName} ${activePatient.firstName}`,
           doctor: practitionerName,
@@ -1129,7 +1131,7 @@ const Consultation: React.FC<ConsultationProps> = ({
           practitionerName: practitionerName,
           practitionerRole: user?.role || 'MEDECIN',
           date: dateStr,
-          items: compilationData.prescriptions.map((p: any) => ({
+          items: untransmittedPrescriptions.map((p: any) => ({
             name: p.name,
             posology: p.posologie,
             price: p.price || 1500,
@@ -1138,14 +1140,16 @@ const Consultation: React.FC<ConsultationProps> = ({
           })),
           createdAt: today.toISOString(),
           status: 'pending'
-        }, user)));
+        }, user)), { merge: true });
       }
 
-      // 3. Create the Laboratory Exam Request document in 'lab_requests'
-      if (compilationData.examensDemandes && compilationData.examensDemandes.length > 0) {
-        const labDocRef = doc(collection(db, 'lab_requests'));
+      // 3. Create the Laboratory Exam Request document in 'lab_requests' ONLY for untransmitted exams
+      const untransmittedExams = (compilationData.examensDemandes || []).filter((e: any) => !e.isTransmitted);
+      if (untransmittedExams.length > 0) {
+        const labId = compilationData.labRequestId || `LAB-${activePatient.id}-${consultationId}`;
+        const labDocRef = doc(db, 'lab_requests', labId);
         batch.set(labDocRef, sanitizeData(stampTenantData({
-          id: `LAB-${Math.floor(Math.random() * 1000000)}`,
+          id: labId,
           patientId: activePatient.id,
           patientName: `${activePatient.lastName} ${activePatient.firstName}`,
           date: dateStr,
@@ -1158,15 +1162,15 @@ const Consultation: React.FC<ConsultationProps> = ({
           practitionerId: practitionerId,
           practitionerName: practitionerName,
           practitionerRole: user?.role || 'MEDECIN',
-          status: 'pending',
-          exams: compilationData.examensDemandes.map((e: any) => ({
+          status: 'en attente',
+          exams: untransmittedExams.map((e: any) => ({
             name: e.name,
             urgent: e.urgent || false,
             practitionerId: practitionerId,
             practitionerName: practitionerName
           })),
           createdAt: today.toISOString()
-        }, user)));
+        }, user)), { merge: true });
       }
 
       // 4. Update appointment status to COMPLETED asynchronously (offline-first, non-blocking)
@@ -1195,12 +1199,41 @@ const Consultation: React.FC<ConsultationProps> = ({
       
       // Check if consultation fee was already paid (e.g. at Reception / Accueil ticket)
       const todayStr = today.toISOString().split('T')[0];
-      const ticketAlreadyPaidAtAccueil = activePatient.ticketStatut === 'PAYE' || activePatient.ticketStatut === 'PAYÉ' || activePatient.ticketStatut === 'VALIDE';
-      const hasPaidConsultationInDB = paymentRequests?.some(pr => 
-        pr.patientId === activePatient.id && 
-        pr.status === 'PAID' && 
-        pr.createdAt?.startsWith(todayStr) &&
-        (pr.items?.some(item => (item.name || '').toLowerCase().includes('consultation') || (item.name || '').toLowerCase().includes('frais d\'orientation') || (item.name || '').toLowerCase().includes('ticket')))
+      const patientIdVariants = [
+        activePatient.id,
+        activePatient.patientId,
+        (activePatient as any).docId,
+        (activePatient as any).dmeId
+      ].filter(Boolean);
+
+      const isPatientMatch = (targetId?: string) => {
+        if (!targetId) return false;
+        return patientIdVariants.some(pid => String(pid).toLowerCase() === String(targetId).toLowerCase());
+      };
+
+      const ticketAlreadyPaidAtAccueil = Boolean(
+        activePatient.paymentStatus === 'SOLDE' || 
+        activePatient.paymentStatus === 'PAID' || 
+        activePatient.paymentStatus === 'payé' || 
+        activePatient.status === 'SOLDE' || 
+        activePatient.paid === true || 
+        activePatient.isPaid === true || 
+        activePatient.ticketStatut === 'PAYE' || 
+        activePatient.ticketStatut === 'PAYÉ' || 
+        activePatient.ticketStatut === 'VALIDE' ||
+        activePatient.admissionFeePaid === true
+      );
+
+      const hasPaidConsultationInDB = (paymentRequests || []).some(pr => 
+        isPatientMatch(pr.patientId) && 
+        (pr.status === 'PAID' || pr.status === 'SOLDE' || (pr as any).isPaid === true) && 
+        (
+          pr.type === 'CONSULTATION' || 
+          pr.type === 'ACCUEIL' || 
+          pr.sourceModule === 'Accueil' || 
+          pr.requestingService === 'Accueil' || 
+          (pr.items || []).some((item: any) => /consultation|orientation|dossier|ticket|accueil|frais/i.test(item.name || ''))
+        )
       );
 
       const isConsultationPaid = ticketAlreadyPaidAtAccueil || hasPaidConsultationInDB;
@@ -1209,14 +1242,17 @@ const Consultation: React.FC<ConsultationProps> = ({
         invoiceItems.push({ id: 'item-consult', name: 'Consultation Médicale Clinique', quantity: 1, unitPrice: 10000, totalPrice: 10000, status: 'PENDING' });
       }
       
-      // Check existing payment requests for this patient today to avoid double billing transmitted prescriptions and exams
+      // Check existing payment requests for this patient to avoid double billing transmitted prescriptions and exams
       const existingPendingOrPaidItems = new Set<string>();
       (paymentRequests || [])
-        .filter(pr => pr.patientId === activePatient.id && pr.createdAt?.startsWith(todayStr))
+        .filter(pr => isPatientMatch(pr.patientId))
         .forEach(pr => {
           pr.items?.forEach(it => {
             if (it.name) {
-              existingPendingOrPaidItems.add(it.name.toLowerCase().trim());
+              const clean = it.name.toLowerCase().trim();
+              existingPendingOrPaidItems.add(clean);
+              existingPendingOrPaidItems.add(clean.replace(/^examen\s*(lab\s*)?:\s*/i, '').trim());
+              existingPendingOrPaidItems.add(clean.replace(/^ordonnance\s*:\s*/i, '').trim());
             }
           });
         });
@@ -1226,13 +1262,14 @@ const Consultation: React.FC<ConsultationProps> = ({
       
       if (compilationData.prescriptions) {
         compilationData.prescriptions.forEach((p: any) => {
-          if (p.status === 'PAID' || p.isPaid) return; // Strict filter on paid prescriptions
+          if (p.isTransmitted || p.status === 'PAID' || p.isPaid) return; // Strict filter on transmitted / paid prescriptions
           const cleanName = (p.name || '').trim();
           if (!cleanName) return;
           const invoiceItemName = `Ordonnance : ${cleanName}`;
           const normalizedKey = invoiceItemName.toLowerCase();
+          const bareKey = cleanName.toLowerCase();
           
-          if (seenItemNamesInThisInvoice.has(normalizedKey) || existingPendingOrPaidItems.has(normalizedKey) || existingPendingOrPaidItems.has(cleanName.toLowerCase())) {
+          if (seenItemNamesInThisInvoice.has(normalizedKey) || existingPendingOrPaidItems.has(normalizedKey) || existingPendingOrPaidItems.has(bareKey)) {
             return; // Already added or already requested via transmit
           }
           seenItemNamesInThisInvoice.add(normalizedKey);
@@ -1251,13 +1288,14 @@ const Consultation: React.FC<ConsultationProps> = ({
       
       if (compilationData.examensDemandes) {
         compilationData.examensDemandes.forEach((e: any) => {
-          if (e.status === 'PAID' || e.isPaid) return; // Strict filter on paid exams
+          if (e.isTransmitted || e.status === 'PAID' || e.status === 'payé' || e.isPaid) return; // Strict filter on transmitted / paid exams
           const cleanName = (e.name || '').trim();
           if (!cleanName) return;
           const invoiceItemName = `Examen Lab : ${cleanName}`;
           const normalizedKey = invoiceItemName.toLowerCase();
+          const bareKey = cleanName.toLowerCase();
 
-          if (seenItemNamesInThisInvoice.has(normalizedKey) || existingPendingOrPaidItems.has(normalizedKey) || existingPendingOrPaidItems.has(cleanName.toLowerCase())) {
+          if (seenItemNamesInThisInvoice.has(normalizedKey) || existingPendingOrPaidItems.has(normalizedKey) || existingPendingOrPaidItems.has(bareKey)) {
             return; // Already added or already requested via transmit
           }
           seenItemNamesInThisInvoice.add(normalizedKey);
@@ -2886,36 +2924,141 @@ const Consultation: React.FC<ConsultationProps> = ({
               </div>
 
               {/* Check 4: Invoice breakdown */}
-              <div className="p-5 bg-blue-50/50 border border-blue-100 rounded-2xl">
-                <h4 className="text-xs font-black text-blue-900 uppercase mb-3 tracking-wider">4. Ventilation de paiement générée</h4>
-                <div className="text-xs font-bold space-y-2 divide-y divide-blue-100/50">
-                  <div className="flex justify-between text-slate-600 pt-1">
-                    <span>Acte de Consultation</span>
-                    <span>10 000 FCFA</span>
-                  </div>
-                  {compilationData.prescriptions && compilationData.prescriptions.map((p: any, idx: number) => (
-                    <div key={idx} className="flex justify-between text-slate-600 pt-2 font-medium">
-                      <span className="truncate max-w-[200px]">{p.name}</span>
-                      <span>{p.price || 1500} FCFA</span>
+              {(() => {
+                const patientIdVariants = [
+                  activePatient.id,
+                  activePatient.patientId,
+                  (activePatient as any).docId,
+                  (activePatient as any).dmeId
+                ].filter(Boolean);
+
+                const isPatientMatch = (targetId?: string) => {
+                  if (!targetId) return false;
+                  return patientIdVariants.some(pid => String(pid).toLowerCase() === String(targetId).toLowerCase());
+                };
+
+                const isConsultationPaid = Boolean(
+                  activePatient.paymentStatus === 'SOLDE' || 
+                  activePatient.paymentStatus === 'PAID' || 
+                  activePatient.paymentStatus === 'payé' || 
+                  activePatient.status === 'SOLDE' || 
+                  activePatient.paid === true || 
+                  activePatient.isPaid === true || 
+                  activePatient.ticketStatut === 'PAYE' || 
+                  activePatient.ticketStatut === 'PAYÉ' || 
+                  activePatient.ticketStatut === 'VALIDE' ||
+                  activePatient.admissionFeePaid === true ||
+                  (paymentRequests || []).some(pr => 
+                    isPatientMatch(pr.patientId) && 
+                    (pr.status === 'PAID' || pr.status === 'SOLDE' || (pr as any).isPaid === true) && 
+                    (
+                      pr.type === 'CONSULTATION' || 
+                      pr.type === 'ACCUEIL' || 
+                      pr.sourceModule === 'Accueil' || 
+                      pr.requestingService === 'Accueil' || 
+                      (pr.items || []).some((item: any) => /consultation|orientation|dossier|ticket|accueil|frais/i.test(item.name || ''))
+                    )
+                  )
+                );
+
+                const consultFee = isConsultationPaid ? 0 : 10000;
+                
+                // Track unpaid prescriptions
+                const unpaidPrescriptions = (compilationData.prescriptions || []).filter((p: any) => {
+                  if (p.isTransmitted) return false; // Already sent/invoiced
+                  const isPaid = p.isPaid || p.status === 'PAID' || (paymentRequests || []).some(pr => 
+                    isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
+                    (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((p.name || '').toLowerCase()))
+                  );
+                  return !isPaid;
+                });
+
+                // Track unpaid exams
+                const unpaidExams = (compilationData.examensDemandes || []).filter((e: any) => {
+                  if (e.isTransmitted) return false; // Already sent/invoiced
+                  const isPaid = e.isPaid || e.status === 'payé' || e.status === 'PAID' || (paymentRequests || []).some(pr => 
+                    isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
+                    (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((e.name || '').toLowerCase()))
+                  );
+                  return !isPaid;
+                });
+
+                const prescrTotal = unpaidPrescriptions.reduce((sum: number, p: any) => sum + (p.price || 1500), 0);
+                const examsTotal = unpaidExams.reduce((sum: number, e: any) => sum + (e.price || 2500), 0);
+                const totalToInvoice = consultFee + prescrTotal + examsTotal;
+
+                return (
+                  <div className="p-5 bg-blue-50/50 border border-blue-100 rounded-2xl">
+                    <h4 className="text-xs font-black text-blue-900 uppercase mb-3 tracking-wider">4. Ventilation de paiement générée</h4>
+                    <div className="text-xs font-bold space-y-2 divide-y divide-blue-100/50">
+                      <div className="flex justify-between items-center text-slate-700 pt-1">
+                        <span className="flex items-center gap-1.5">
+                          Acte de Consultation
+                          {isConsultationPaid && (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase">
+                              ✓ Déjà Réglé
+                            </span>
+                          )}
+                        </span>
+                        <span className={isConsultationPaid ? "text-emerald-700 font-black" : "text-slate-900 font-bold"}>
+                          {isConsultationPaid ? "0 FCFA (Soldé)" : "10 000 FCFA"}
+                        </span>
+                      </div>
+
+                      {compilationData.prescriptions && compilationData.prescriptions.map((p: any, idx: number) => {
+                        const isAlreadyPaidOrSent = p.isTransmitted || p.isPaid || p.status === 'PAID' || (paymentRequests || []).some(pr => 
+                          isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
+                          (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((p.name || '').toLowerCase()))
+                        );
+                        return (
+                          <div key={idx} className="flex justify-between items-center text-slate-600 pt-2 font-medium">
+                            <span className="truncate max-w-[200px] flex items-center gap-1.5">
+                              💊 {p.name}
+                              {isAlreadyPaidOrSent && (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[8.5px] font-black">
+                                  ✓ Transmis / Réglé
+                                </span>
+                              )}
+                            </span>
+                            <span className={isAlreadyPaidOrSent ? "text-emerald-600 font-bold" : ""}>
+                              {isAlreadyPaidOrSent ? "0 FCFA" : `${(p.price || 1500).toLocaleString()} FCFA`}
+                            </span>
+                          </div>
+                        );
+                      })}
+
+                      {compilationData.examensDemandes && compilationData.examensDemandes.map((e: any, idx: number) => {
+                        const isAlreadyPaidOrSent = e.isTransmitted || e.isPaid || e.status === 'payé' || (paymentRequests || []).some(pr => 
+                          isPatientMatch(pr.patientId) && (pr.status === 'PAID' || pr.status === 'SOLDE') &&
+                          (pr.items || []).some((it: any) => it.name && it.name.toLowerCase().includes((e.name || '').toLowerCase()))
+                        );
+                        return (
+                          <div key={idx} className="flex justify-between items-center text-slate-600 pt-2 font-medium">
+                            <span className="truncate max-w-[200px] flex items-center gap-1.5">
+                              🔬 Ex: {e.name}
+                              {isAlreadyPaidOrSent && (
+                                <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[8.5px] font-black">
+                                  ✓ Transmis / Réglé
+                                </span>
+                              )}
+                            </span>
+                            <span className={isAlreadyPaidOrSent ? "text-emerald-600 font-bold" : ""}>
+                              {isAlreadyPaidOrSent ? "0 FCFA" : `${(e.price || 2500).toLocaleString()} FCFA`}
+                            </span>
+                          </div>
+                        );
+                      })}
+
+                      <div className="flex justify-between items-center text-blue-900 pt-3 font-black text-sm">
+                        <span>Reste net à facturer</span>
+                        <span className={totalToInvoice === 0 ? "text-emerald-600 font-black" : "text-blue-900"}>
+                          {totalToInvoice === 0 ? "0 FCFA (Tout est soldé)" : `${totalToInvoice.toLocaleString()} FCFA`}
+                        </span>
+                      </div>
                     </div>
-                  ))}
-                  {compilationData.examensDemandes && compilationData.examensDemandes.map((e: any, idx: number) => (
-                    <div key={idx} className="flex justify-between text-slate-600 pt-2 font-medium">
-                      <span className="truncate max-w-[200px]">Ex: {e.name}</span>
-                      <span>{e.price || 2500} FCFA</span>
-                    </div>
-                  ))}
-                  <div className="flex justify-between text-blue-900 pt-3 font-black text-sm">
-                    <span>Total facturé</span>
-                    <span>
-                      {10000 + 
-                       (compilationData.prescriptions?.reduce((sum: number, p: any) => sum + (p.price || 1500), 0) || 0) + 
-                       (compilationData.examensDemandes?.reduce((sum: number, e: any) => sum + (e.price || 2500), 0) || 0)
-                      } FCFA
-                    </span>
                   </div>
-                </div>
-              </div>
+                );
+              })()}
             </div>
 
             <div className="flex gap-4">
