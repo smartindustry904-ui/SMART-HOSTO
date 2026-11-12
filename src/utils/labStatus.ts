@@ -37,5 +37,5 @@ export const isStatusPrelevementFait = (status?: string | null, statut?: string 
 export const isStatusEnAttente = (status?: string | null, statut?: string | null): boolean => {
   if (isStatusTermine(status, statut) || isStatusPrelevementFait(status, statut)) return false;
   const s = (status || statut || '').toLowerCase().trim().replace(/_/g, ' ');
-  return s === 'en attente' || s === 'pending' || s === '';
+  return s === 'en attente' || s === 'pending' || s === 'payé' || s === 'paye' || s === 'paid' || s === '';
 };

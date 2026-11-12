@@ -794,11 +794,12 @@ const Cashier: React.FC<CashierProps> = ({
               const labSnaps = await getDocs(qLab);
               for (const labDoc of labSnaps.docs) {
                 const labData = labDoc.data();
-                if (labData.status === 'en attente' || labData.billingStatus === 'pending' || !labData.isPaid) {
+                if (labData.status === 'en attente' || labData.status === 'payé' || labData.billingStatus === 'pending' || !labData.isPaid) {
                   bgBatch.update(doc(db, 'lab_requests', labDoc.id), { 
-                    status: 'payé', 
+                    status: (labData.status === 'prélèvement fait' || labData.status === 'terminé' || labData.status === 'validé') ? labData.status : 'en attente', 
                     billingStatus: 'paid', 
                     isPaid: true, 
+                    paymentStatus: 'PAID',
                     paidAt: new Date().toISOString() 
                   });
                   hasUpdates = true;

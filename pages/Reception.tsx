@@ -1798,7 +1798,18 @@ const Reception: React.FC<ReceptionProps> = ({
           patientId: patientId,
           patientDme: dmeId,
           patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
-          exams: [examLabel],
+          exams: [{
+            actId: `ACT-LAB-${Date.now()}`,
+            name: examLabel,
+            price: totalToPay || 2500,
+            category: 'Analyses Générales',
+            sampleType: 'Tube standard'
+          }],
+          clinicalContext: {
+            motif: examLabel,
+            diagnostic: 'Bilan direct laboratoire',
+            note: 'Admission directe accueil'
+          },
           status: 'en attente',
           billingStatus: 'pending',
           paymentRequestId: createdRequest?.id || '',

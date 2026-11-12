@@ -22,12 +22,24 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
   // Synchronize Lab Requests from Firestore in real-time
   useEffect(() => {
     try {
+      const matchPatientId = (pid?: string | number) => {
+        if (!pid) return false;
+        const pStr = String(pid);
+        return (
+          pStr === String(patient.id) ||
+          pStr === String((patient as any).patientId) ||
+          pStr === String((patient as any).dmeId) ||
+          pStr === String((patient as any).docId) ||
+          ((patient as any).id && String((patient as any).id) === pStr)
+        );
+      };
+
       const q = query(collection(db, 'lab_requests'), orderBy('date', 'desc'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const reqMap = new Map<string, LabExamRequest>();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data() as LabExamRequest;
-          if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
+          if (matchPatientId(data.patientId) || matchPatientId((data as any).dmeId)) {
             const key = data.id || docSnap.id;
             if (!reqMap.has(key)) {
               // Deduplicate exams within request
@@ -61,11 +73,23 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
   // Synchronize Lab Results from Firestore in real-time
   useEffect(() => {
     try {
+      const matchPatientId = (pid?: string | number) => {
+        if (!pid) return false;
+        const pStr = String(pid);
+        return (
+          pStr === String(patient.id) ||
+          pStr === String((patient as any).patientId) ||
+          pStr === String((patient as any).dmeId) ||
+          pStr === String((patient as any).docId) ||
+          ((patient as any).id && String((patient as any).id) === pStr)
+        );
+      };
+
       const unsubscribe = onSnapshot(collection(db, 'lab_results'), (snapshot) => {
         const resMap = new Map<string, ResultatLaboratoire>();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data() as ResultatLaboratoire;
-          if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
+          if (matchPatientId(data.patientId) || matchPatientId((data as any).dmeId)) {
             const key = data.id || docSnap.id;
             if (!resMap.has(key)) {
               resMap.set(key, {
@@ -285,72 +309,83 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
             <CheckCircle2 size={18} /> Résultats disponibles
           </h4>
           <div className="space-y-6">
-            {results.filter(r => r.statut === 'validé').length > 0 ? (
-              results.filter(r => r.statut === 'validé').map(res => (
-                <div key={res.id} className="bg-white rounded-[40px] border border-slate-200 overflow-hidden shadow-sm">
-                  <div className="bg-slate-50 p-6 border-b border-slate-200 flex justify-between items-center">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-2xl flex items-center justify-center">
-                        <Beaker size={24} />
+            {(() => {
+              const validResults = results.filter(r => r.statut === 'validé' || (r as any).status === 'validé' || (r as any).status === 'terminé');
+              return validResults.length > 0 ? (
+                validResults.map(res => (
+                <div key={res.id} className="bg-white rounded-[32px] border border-slate-200 overflow-hidden shadow-sm">
+                  <div className="bg-slate-50 p-5 border-b border-slate-200 flex justify-between items-center">
+                    <div className="flex items-center gap-3.5">
+                      <div className="w-10 h-10 bg-purple-100 text-purple-600 rounded-xl flex items-center justify-center">
+                        <Beaker size={22} />
                       </div>
                       <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Rapport d'examen</p>
-                        <p className="font-black text-slate-900">Demande {res.demandeId}</p>
+                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Rapport Biologique Validé</p>
+                        <p className="font-black text-slate-900 text-sm">Réf. Demande {res.demandeId || res.id}</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Validé le</p>
-                      <p className="font-bold text-slate-700">{formatDate(res.dateValidation)}</p>
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        <CheckCircle2 size={12} /> Validé le {formatDate(res.dateValidation || (res as any).dateSaisie)}
+                      </span>
                     </div>
                   </div>
-                  <div className="p-8">
-                    <div className="space-y-8">
+                  <div className="p-6">
+                    <div className="space-y-6">
                       {res.lignes.map((ligne, idx) => {
                         const isSensitive = ligne.isSensitive || ['vih', 'hiv', 'séro', 'génétique', 'spermogramme', 'syphilis', 'hcg'].some(k => (ligne.examName || '').toLowerCase().includes(k));
                         const userRole = (user?.role || '').toLowerCase();
                         const canViewSensitive = userRole.includes('medecin') || userRole.includes('doctor') || userRole.includes('biolog') || userRole.includes('admin') || user?.id === res.saisiPar;
 
                         return (
-                        <div key={idx} className="space-y-4">
+                        <div key={idx} className="space-y-3">
                           <div className="flex items-center justify-between">
-                            <h6 className="font-black text-slate-900 flex items-center gap-2">
-                              <ChevronRight size={16} className="text-purple-600" /> {ligne.examName}
+                            <h6 className="font-black text-slate-900 flex items-center gap-2 text-sm">
+                              <span className="w-2 h-2 rounded-full bg-purple-600" />
+                              {ligne.examName}
                               {isSensitive && (
-                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
+                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
                                   🔒 Confidentiel
                                 </span>
                               )}
                             </h6>
-                            <button className="text-[10px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-2 hover:underline">
-                              <TrendingUp size={14} /> Analyser tendance
-                            </button>
                           </div>
-                          <div className="bg-slate-50 rounded-3xl border border-slate-100 overflow-hidden">
+                          <div className="bg-slate-50/80 rounded-2xl border border-slate-200/80 overflow-hidden shadow-2xs">
                             <table className="w-full">
                               <thead>
-                                <tr className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200">
-                                  <th className="px-6 py-3 text-left">Paramètre</th>
-                                  <th className="px-6 py-3 text-center">Valeur</th>
-                                  <th className="px-6 py-3 text-center">Unité</th>
-                                  <th className="px-6 py-3 text-right">Référence</th>
+                                <tr className="text-[9px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 bg-slate-100/60">
+                                  <th className="px-5 py-2.5 text-left">Paramètre</th>
+                                  <th className="px-5 py-2.5 text-center">Valeur Mesurée</th>
+                                  <th className="px-5 py-2.5 text-center">Unité</th>
+                                  <th className="px-5 py-2.5 text-right">Intervalle de Référence</th>
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-100">
                                 {isSensitive && !canViewSensitive ? (
                                   <tr>
-                                    <td colSpan={4} className="px-6 py-6 text-center text-amber-800 font-bold bg-amber-50/70 italic text-xs">
+                                    <td colSpan={4} className="px-6 py-4 text-center text-amber-800 font-bold bg-amber-50/70 italic text-xs">
                                       🔒 Résultat Confidentiel : Accès restreint au médecin prescripteur et au biologiste.
                                     </td>
                                   </tr>
                                 ) : (
                                   ligne.parametres.map((p, pIdx) => (
-                                    <tr key={pIdx} className="text-sm">
-                                      <td className="px-6 py-4 font-bold text-slate-700">{p.nom}</td>
-                                      <td className={`px-6 py-4 text-center font-black ${p.isAnormal ? 'text-rose-600' : 'text-slate-900'}`}>
-                                        {p.valeur} {p.isAnormal && <AlertTriangle size={12} className="inline ml-1" />}
+                                    <tr key={pIdx} className={`text-xs transition-colors ${p.isAnormal ? 'bg-rose-50/80' : 'hover:bg-slate-50'}`}>
+                                      <td className="px-5 py-3 font-bold text-slate-800 flex items-center gap-2">
+                                        <span className={`w-1.5 h-1.5 rounded-full ${p.isAnormal ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                                        {p.nom}
                                       </td>
-                                      <td className="px-6 py-4 text-center text-slate-500 font-medium">{p.unite}</td>
-                                      <td className="px-6 py-4 text-right text-slate-400 font-mono text-xs">{p.valeurReference}</td>
+                                      <td className={`px-5 py-3 text-center font-mono font-black ${p.isAnormal ? 'text-rose-600' : 'text-slate-900'}`}>
+                                        <div className="inline-flex items-center gap-1.5">
+                                          <span>{p.valeur}</span>
+                                          {p.isAnormal && (
+                                            <span className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase px-1.5 py-0.5 rounded-md bg-rose-100 text-rose-700 border border-rose-200">
+                                              <AlertTriangle size={10} /> Hors Réf.
+                                            </span>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td className="px-5 py-3 text-center text-slate-500 font-medium font-mono text-xs">{p.unite || '-'}</td>
+                                      <td className="px-5 py-3 text-right text-slate-400 font-mono text-xs font-semibold">{p.valeurReference || 'N/A'}</td>
                                     </tr>
                                   ))
                                 )}
@@ -358,9 +393,9 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
                             </table>
                           </div>
                           {ligne.conclusion && (
-                            <div className="p-4 bg-purple-50 rounded-2xl border border-purple-100">
-                              <p className="text-[10px] font-black text-purple-400 uppercase tracking-widest mb-1">Conclusion</p>
-                              <p className="text-sm font-bold text-purple-900 italic">
+                            <div className="p-3.5 bg-purple-50/80 rounded-xl border border-purple-100">
+                              <p className="text-[9px] font-black text-purple-700 uppercase tracking-widest mb-0.5">Conclusion / Interprétation Biologique</p>
+                              <p className="text-xs font-bold text-purple-950 italic">
                                 {isSensitive && !canViewSensitive ? "🔒 [Masqué pour des raisons de confidentialité]" : `"${ligne.conclusion}"`}
                               </p>
                             </div>
@@ -369,30 +404,33 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
                       );
                     })}
                     </div>
-                    <div className="mt-8 flex justify-between items-center pt-8 border-t border-slate-100">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
-                          <FileText size={16} />
+                    <div className="mt-6 flex justify-between items-center pt-5 border-t border-slate-100">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 bg-slate-100 rounded-full flex items-center justify-center text-slate-500">
+                          <FileText size={14} />
                         </div>
-                        <p className="text-xs font-medium text-slate-500">Signé par {res.validePar}</p>
+                        <p className="text-xs font-medium text-slate-600">
+                          Validé par : <strong className="text-slate-800">{res.validePar || (res as any).technicianName || 'Biologiste'}</strong>
+                        </p>
                       </div>
                       <button 
                         onClick={() => setSelectedReportForModal(res)}
-                        className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all"
+                        className="flex items-center gap-2 px-5 py-2.5 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-all shadow-sm cursor-pointer"
                       >
-                        <Eye size={14} /> Voir rapport complet
+                        <Eye size={14} /> Voir / Imprimer Bulletin Complet
                       </button>
                     </div>
                   </div>
                 </div>
               ))
             ) : (
-              <div className="bg-white rounded-[40px] border border-slate-200 p-10 text-center text-slate-405 flex flex-col items-center justify-center">
+              <div className="bg-white rounded-[32px] border border-slate-200 p-10 text-center text-slate-400 flex flex-col items-center justify-center">
                 <FileText size={48} className="mb-4 text-slate-300 opacity-60" />
                 <p className="font-bold text-slate-700">Aucun rapport validé disponible</p>
                 <p className="text-xs text-slate-400 mt-1">Les résultats validés par le laboratoire s'afficheront ici en temps réel.</p>
               </div>
-            )}
+            );
+          })()}
           </div>
         </div>
       </div>

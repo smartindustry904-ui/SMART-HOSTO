@@ -118,9 +118,15 @@ const ResultatsTab: React.FC<ResultatsTabProps> = ({ requests, updateRequests, r
         setCurrentResultat(existingResult);
       } else {
         // Initialize new result directly with ready-to-type parameters
-        const newLignes: LigneResultat[] = (selectedRequest.exams || []).map(exam => {
-          const act = medicalActs.find(a => a.id === exam.actId);
-          const params: ParametreResultat[] = act?.labParameters?.map(p => ({
+        const newLignes: LigneResultat[] = (selectedRequest.exams || []).map((exam: any, idx: number) => {
+          const examActId = typeof exam === 'string' ? `ACT-${idx}` : (exam.actId || `ACT-${idx}`);
+          const examName = typeof exam === 'string' ? exam : (exam.name || 'Examen');
+          const act = medicalActs.find(a => 
+            a.id === examActId || 
+            a.code === examActId || 
+            (a.nom && examName && a.nom.toLowerCase() === examName.toLowerCase())
+          );
+          const params: ParametreResultat[] = act?.labParameters?.map((p: any) => ({
             nom: p.nom,
             unite: p.unite,
             valeurReference: p.valeurReferenceTexte || (p.valeurReferenceMin !== undefined && p.valeurReferenceMax !== undefined ? `${p.valeurReferenceMin} - ${p.valeurReferenceMax}` : ''),
@@ -135,8 +141,8 @@ const ResultatsTab: React.FC<ResultatsTabProps> = ({ requests, updateRequests, r
           }];
 
           return {
-            examId: exam.actId,
-            examName: exam.name,
+            examId: examActId,
+            examName: examName,
             parametres: params,
             conclusion: ''
           };

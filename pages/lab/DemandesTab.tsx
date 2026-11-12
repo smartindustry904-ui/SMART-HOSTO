@@ -154,8 +154,8 @@ const DemandesTab: React.FC<DemandesTabProps> = ({ requests, updateRequests, pay
 
           const consumableQtyMap: Record<string, number> = {};
 
-          for (const exam of requestToUpdate.exams) {
-            const consNames = exam.consommables || [];
+          for (const exam of (requestToUpdate.exams || [])) {
+            const consNames = typeof exam === 'string' ? [] : (exam.consommables || []);
             for (const cName of consNames) {
               if (!cName) continue;
               const lower = cName.toLowerCase();
@@ -250,26 +250,48 @@ const DemandesTab: React.FC<DemandesTabProps> = ({ requests, updateRequests, pay
     }
   };
 
-  const getActualBillingStatus = (req: LabExamRequest) => {
-    if (req.billingStatus === 'paid' || req.billingStatus === 'exonéré') {
-      return req.billingStatus;
+  const getActualBillingStatus = (req: LabExamRequest): 'pending' | 'partial' | 'paid' | 'exonéré' => {
+    if (
+      req.billingStatus === 'paid' || 
+      (req as any).isPaid === true || 
+      (req as any).paymentStatus === 'PAID' || 
+      (req as any).status === 'payé'
+    ) {
+      return 'paid';
+    }
+    if (req.billingStatus === 'exonéré') {
+      return 'exonéré';
     }
     
     // Find a corresponding payment request
-    // Match by patientId, type LABORATOIRE, and created within 5 minutes of the lab request
-    const reqDate = new Date(req.date).getTime();
-    const matchingPayment = paymentRequests.find(pr => {
-      if (pr.patientId !== req.patientId || pr.type !== 'LABORATOIRE') return false;
-      const prDate = new Date(pr.createdAt).getTime();
-      const diffMinutes = Math.abs(prDate - reqDate) / (1000 * 60);
-      return diffMinutes <= 5;
+    const matchingPayment = (paymentRequests || []).find(pr => {
+      // Direct paymentRequestId link
+      if ((req as any).paymentRequestId && pr.id === (req as any).paymentRequestId) {
+        return pr.status === 'PAID';
+      }
+
+      // Match by patient ID
+      if (pr.patientId !== req.patientId) return false;
+
+      // Check if payment contains lab items or is of type LABORATOIRE
+      const isLabPR = pr.type === 'LABORATOIRE' || 
+        (pr.sourceModule || '').toLowerCase().includes('lab') ||
+        (pr.requestingService || '').toLowerCase().includes('lab') ||
+        (pr.items || []).some((it: any) => {
+          const n = (it.name || '').toLowerCase();
+          return n.includes('examen') || n.includes('analyse') || n.includes('lab');
+        });
+
+      if (!isLabPR) return false;
+
+      return pr.status === 'PAID';
     });
 
-    if (matchingPayment && matchingPayment.status === 'PAID') {
+    if (matchingPayment) {
       return 'paid';
     }
     
-    return req.billingStatus;
+    return req.billingStatus || 'pending';
   };
 
   const stage1TotalCount = requests.filter(r => isStatusEnAttente(r.status, (r as any).statut)).length;
@@ -405,23 +427,28 @@ const DemandesTab: React.FC<DemandesTabProps> = ({ requests, updateRequests, pay
 
             <div className="flex-1 overflow-y-auto p-4 sm:p-5 custom-scrollbar bg-slate-50/30">
               <h3 className="font-black text-slate-900 uppercase tracking-tight mb-4 flex items-center gap-2">
-                <FlaskConical size={18} className="text-blue-500" /> Examens prescrits ({selectedRequest.exams.length})
+                <FlaskConical size={18} className="text-blue-500" /> Examens prescrits ({(selectedRequest.exams || []).length})
               </h3>
               <div className="space-y-2">
-                {selectedRequest.exams.map((exam, idx) => (
-                  <div key={idx} className="px-5 py-3.5 border border-slate-150 rounded-2xl flex items-center justify-between bg-white shadow-sm hover:border-blue-400 hover:bg-blue-50/10 transition-all group">
-                    <div className="flex items-center gap-3">
-                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0 animate-pulse" />
-                      <p className="font-extrabold text-slate-900 text-xs">{exam.name}</p>
+                {(selectedRequest.exams || []).map((rawExam: any, idx: number) => {
+                  const examName = typeof rawExam === 'string' ? rawExam : (rawExam.name || 'Examen sans libellé');
+                  const examCategory = typeof rawExam === 'string' ? 'Analyses' : (rawExam.category || 'Analyses Générales');
+                  const examSampleType = typeof rawExam === 'string' ? null : rawExam.sampleType;
+                  return (
+                    <div key={idx} className="px-5 py-3.5 border border-slate-150 rounded-2xl flex items-center justify-between bg-white shadow-sm hover:border-blue-400 hover:bg-blue-50/10 transition-all group">
+                      <div className="flex items-center gap-3">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0 animate-pulse" />
+                        <p className="font-extrabold text-slate-900 text-xs">{examName}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="px-2.5 py-1 bg-blue-50 text-blue-600 text-[9px] font-black uppercase tracking-wider rounded-lg">{examCategory}</span>
+                        {examSampleType && (
+                          <span className="text-[9px] text-slate-400 font-bold bg-slate-100 px-2 py-1 rounded-lg">Tube: {examSampleType.split(' ')[0]}</span>
+                        )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="px-2.5 py-1 bg-blue-50 text-blue-600 text-[9px] font-black uppercase tracking-wider rounded-lg">{exam.category}</span>
-                      {exam.sampleType && (
-                        <span className="text-[9px] text-slate-400 font-bold bg-slate-100 px-2 py-1 rounded-lg">Tube: {exam.sampleType.split(' ')[0]}</span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
