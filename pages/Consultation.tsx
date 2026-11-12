@@ -1253,9 +1253,21 @@ const Consultation: React.FC<ConsultationProps> = ({
         )
       );
 
+      const hasPendingConsultationInDB = (paymentRequests || []).some(pr => 
+        isPatientMatch(pr.patientId) && 
+        (pr.status === 'PENDING' || pr.status === 'PARTIAL') && 
+        (
+          pr.type === 'CONSULTATION' || 
+          pr.type === 'ACCUEIL' || 
+          pr.sourceModule === 'Accueil' || 
+          pr.requestingService === 'Accueil' || 
+          (pr.items || []).some((item: any) => /consultation|orientation|dossier|ticket|accueil|frais/i.test(item.name || ''))
+        )
+      );
+
       const isConsultationPaid = ticketAlreadyPaidAtAccueil || hasPaidConsultationInDB;
 
-      if (!isConsultationPaid) {
+      if (!isConsultationPaid && !hasPendingConsultationInDB) {
         invoiceItems.push({ id: 'item-consult', name: 'Consultation Médicale Clinique', quantity: 1, unitPrice: 10000, totalPrice: 10000, status: 'PENDING' });
       }
       
@@ -3015,6 +3027,18 @@ const Consultation: React.FC<ConsultationProps> = ({
                   )
                 );
 
+                const isConsultationPendingInDB = !isConsultationPaid && (paymentRequests || []).some(pr => 
+                  isPatientMatch(pr.patientId) && 
+                  (pr.status === 'PENDING' || pr.status === 'PARTIAL') && 
+                  (
+                    pr.type === 'CONSULTATION' || 
+                    pr.type === 'ACCUEIL' || 
+                    pr.sourceModule === 'Accueil' || 
+                    pr.requestingService === 'Accueil' || 
+                    (pr.items || []).some((item: any) => /consultation|orientation|dossier|ticket|accueil|frais/i.test(item.name || ''))
+                  )
+                );
+
                 const consultFee = isConsultationPaid ? 0 : 10000;
 
                 const checkItemIsPaid = (item: any) => {
@@ -3054,6 +3078,7 @@ const Consultation: React.FC<ConsultationProps> = ({
                 const totalPatientDue = consultFee + prescrDue + examsDue;
 
                 const transmittedPendingDue = 
+                  (isConsultationPendingInDB ? consultFee : 0) +
                   unpaidPrescriptions.filter((p: any) => checkItemIsTransmitted(p)).reduce((sum: number, p: any) => sum + (Number(p.price) || 0), 0) +
                   unpaidExams.filter((e: any) => checkItemIsTransmitted(e)).reduce((sum: number, e: any) => sum + (Number(e.price) || 0), 0);
 
@@ -3064,11 +3089,16 @@ const Consultation: React.FC<ConsultationProps> = ({
                       <div className="flex justify-between items-center text-slate-700 pt-1">
                         <span className="flex items-center gap-1.5">
                           Acte de Consultation
-                          {isConsultationPaid && (
+                          {isConsultationPaid ? (
                             <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[9px] font-black uppercase">
                               ✓ Soldé
                             </span>
-                          )}
+                          ) : isConsultationPendingInDB ? (
+                            <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[8.5px] font-black uppercase flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                              Transmis en Caisse
+                            </span>
+                          ) : null}
                         </span>
                         <span className={isConsultationPaid ? "text-emerald-700 font-black font-mono" : "text-slate-900 font-bold font-mono"}>
                           {isConsultationPaid ? "0 FCFA (Soldé)" : "10 000 FCFA"}
