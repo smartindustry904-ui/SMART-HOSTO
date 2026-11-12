@@ -1750,6 +1750,66 @@ const Reception: React.FC<ReceptionProps> = ({
         }, user, establishment)));
       }
 
+      let p9 = Promise.resolve();
+      const isSoinRecourse = 
+        visitMotif === 'SOIN_INFIRMIER' || 
+        selectedMotif?.category === 'SOINS' || 
+        selectedMotif?.serviceId === 'SRV-INFIRMIER' || 
+        (targetService || '').toLowerCase().includes('soin');
+
+      if (isSoinRecourse) {
+        const actDocRef = doc(collection(db, 'nursing_acts'));
+        const actLabel = selectedMotif?.label || 'Soin Infirmier / Pansement Ambulatoire';
+        p9 = setDoc(actDocRef, sanitizeData(stampTenantData({
+          id: actDocRef.id,
+          patientId: patientId,
+          patientDme: dmeId,
+          patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
+          careName: actLabel,
+          actName: actLabel,
+          name: actLabel,
+          actType: actLabel,
+          motif: actLabel,
+          source: 'ACCUEIL',
+          origin: 'ACCUEIL',
+          status: 'EN ATTENTE',
+          priority: computedPriorityAndAlerts.priority === 'normal' ? 'NORMAL' : (computedPriorityAndAlerts.priority === 'urgent' ? 'HIGH' : 'CRITICAL'),
+          paymentStatus: 'AWAITING_PAYMENT',
+          paymentRequestId: createdRequest?.id || '',
+          createdAt: new Date().toISOString(),
+          requestedBy: user?.name || user?.username || 'Agent Accueil',
+          requestedById: user?.id || '',
+          admittedAt: todayStr
+        }, user, establishment)));
+      }
+
+      let p10 = Promise.resolve();
+      const isLabRecourse = 
+        visitMotif === 'LABORATOIRE' || 
+        selectedMotif?.category === 'LABORATOIRE' || 
+        selectedMotif?.serviceId === 'SRV-LABO' || 
+        (targetService || '').toLowerCase().includes('labo');
+
+      if (isLabRecourse) {
+        const labDocRef = doc(collection(db, 'lab_requests'));
+        const examLabel = selectedMotif?.label || 'Analyse de Laboratoire Demandée';
+        p10 = setDoc(labDocRef, sanitizeData(stampTenantData({
+          id: labDocRef.id,
+          patientId: patientId,
+          patientDme: dmeId,
+          patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
+          exams: [examLabel],
+          status: 'en attente',
+          billingStatus: 'pending',
+          paymentRequestId: createdRequest?.id || '',
+          createdAt: new Date().toISOString(),
+          requestedBy: user?.name || user?.username || 'Agent Accueil',
+          doctor: user?.name || user?.username || 'Agent Accueil',
+          priority: computedPriorityAndAlerts.priority === 'normal' ? 'Normal' : 'Urgent',
+          origin: 'ACCUEIL'
+        }, user, establishment)));
+      }
+
       // Optimistically update local states immediately (0ms delay)
       setPatients(prev => [finalPatient, ...prev.filter(p => p.id !== finalPatient.id)]);
       if (createdRequest && setPaymentRequests) {
@@ -1768,6 +1828,10 @@ const Reception: React.FC<ReceptionProps> = ({
       // Live trigger notifications toast immediately
       const toastMsg = isMaternityService
         ? `Admission enregistrée pour ${finalPatient.lastName} ${finalPatient.firstName} -> Transférée directement en Maternité (Triage sage-femme)`
+        : isSoinRecourse
+        ? `Admission enregistrée pour ${finalPatient.lastName} ${finalPatient.firstName} -> Transféré(e) en Soins Infirmiers (Ambulatoire)`
+        : isLabRecourse
+        ? `Admission enregistrée pour ${finalPatient.lastName} ${finalPatient.firstName} -> Orienté(e) vers le Laboratoire`
         : effectiveSendToNurseTriage
         ? `Admission enregistrée pour ${finalPatient.lastName} ${finalPatient.firstName} -> Transféré(e) en File de Triage Infirmier`
         : `Admission et orientation effectuées pour ${finalPatient.lastName} ${finalPatient.firstName}`;
@@ -1775,7 +1839,7 @@ const Reception: React.FC<ReceptionProps> = ({
       window.dispatchEvent(new CustomEvent('app-notification', { detail: toastMsg }));
 
       // Persist all writes and audit logs asynchronously via IndexedDB local cache + background sync
-      Promise.all([p1, p2, p3, p4, p5, p6, p7, p8]).catch(err => {
+      Promise.all([p1, p2, p3, p4, p5, p6, p7, p8, p9, p10]).catch(err => {
         console.warn("Background admission sync warning:", err);
       });
 

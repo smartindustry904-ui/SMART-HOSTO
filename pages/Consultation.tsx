@@ -1991,9 +1991,25 @@ const Consultation: React.FC<ConsultationProps> = ({
     const s = (p.service || '').toLowerCase();
     const m = (p.motif || '').toLowerCase();
     const spec = (p.speciality || '').toLowerCase();
+    const sid = (p.serviceId || '').toLowerCase();
+    const ml = (p.motifLabel || '').toLowerCase();
     
+    // Explicitly exclude nursing care patients (must never appear in doctor consultation queue)
+    const isSoinInfirmier = 
+      s.includes('soin') || 
+      s.includes('infirm') || 
+      m.includes('soin') || 
+      spec.includes('soin') || 
+      sid.includes('infirmier') ||
+      ml.includes('soin') ||
+      ml.includes('pansement') ||
+      ml.includes('injection');
+    if (isSoinInfirmier) {
+      return false;
+    }
+
     // Explicitly exclude technical/support services
-    if (['urgences', 'emergency', 'laboratoire', 'pharmacie', 'soins infirmiers', 'vaccination'].includes(s)) {
+    if (['urgences', 'emergency', 'laboratoire', 'pharmacie', 'vaccination'].some(ex => s.includes(ex) || sid.includes(ex))) {
       return false;
     }
     
@@ -2048,9 +2064,26 @@ const Consultation: React.FC<ConsultationProps> = ({
   const rawInProgress = (waitingQueue || []).filter(p => {
     const s = (p.service || '').toLowerCase();
     const m = (p.motif || '').toLowerCase();
+    const spec = (p.speciality || '').toLowerCase();
+    const sid = (p.serviceId || '').toLowerCase();
+    const ml = (p.motifLabel || '').toLowerCase();
     
+    // Explicitly exclude nursing care patients
+    const isSoinInfirmier = 
+      s.includes('soin') || 
+      s.includes('infirm') || 
+      m.includes('soin') || 
+      spec.includes('soin') || 
+      sid.includes('infirmier') ||
+      ml.includes('soin') ||
+      ml.includes('pansement') ||
+      ml.includes('injection');
+    if (isSoinInfirmier) {
+      return false;
+    }
+
     // Explicitly exclude other services
-    if (['maternité', 'maternity', 'urgences', 'emergency', 'laboratoire', 'pharmacie', 'soins infirmiers', 'vaccination'].includes(s)) {
+    if (['maternité', 'maternity', 'urgences', 'emergency', 'laboratoire', 'pharmacie', 'vaccination'].some(ex => s.includes(ex) || sid.includes(ex))) {
       return false;
     }
     

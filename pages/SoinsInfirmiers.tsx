@@ -71,7 +71,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
   const [isExecutingAct, setIsExecutingAct] = useState(false);
   const [soinSearchQuery, setSoinSearchQuery] = useState('');
   const [soinStatusFilter, setSoinStatusFilter] = useState<'ALL' | 'PENDING' | 'DONE'>('PENDING');
-  const [soinOriginFilter, setSoinOriginFilter] = useState<'ALL' | 'URGENCES' | 'CONSULTATION'>('ALL');
+  const [soinOriginFilter, setSoinOriginFilter] = useState<'ALL' | 'URGENCES' | 'CONSULTATION' | 'ACCUEIL'>('ALL');
 
   // Listen to triage history from Firestore
   useEffect(() => {
@@ -113,9 +113,17 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
     }
   }, [activeTenantId]);
 
-  // Filter only patients waiting for triage
+  // Filter patients waiting for triage or direct nursing care
   const waitingTriageList = useMemo(() => {
-    return (globalWaitingQueue || []).filter(q => q.status === 'waiting_triage');
+    return (globalWaitingQueue || []).filter(q => {
+      if (q.status === 'waiting_triage') return true;
+      const s = (q.service || '').toLowerCase();
+      const m = (q.motif || '').toLowerCase();
+      const ml = (q.motifLabel || '').toLowerCase();
+      const sid = (q.serviceId || '');
+      const isSoin = s.includes('soin') || s.includes('infirm') || m.includes('soin') || ml.includes('soin') || ml.includes('pansement') || ml.includes('injection') || sid.includes('INFIRMIER');
+      return isSoin && (q.status === 'waiting' || q.status === 'waiting_triage');
+    });
   }, [globalWaitingQueue]);
 
   // Patients triaged today
@@ -142,8 +150,12 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
     return nursingActs.filter(a => (a.source === 'URGENCES' || a.priority === 'HIGH') && a.status !== 'FAIT').length;
   }, [nursingActs]);
 
+  const accueilPendingCount = useMemo(() => {
+    return nursingActs.filter(a => (a.source === 'ACCUEIL' || a.origin === 'ACCUEIL') && a.status !== 'FAIT').length;
+  }, [nursingActs]);
+
   const consultPendingCount = useMemo(() => {
-    return nursingActs.filter(a => a.source !== 'URGENCES' && a.priority !== 'HIGH' && a.status !== 'FAIT').length;
+    return nursingActs.filter(a => a.source !== 'URGENCES' && a.source !== 'ACCUEIL' && a.origin !== 'ACCUEIL' && a.priority !== 'HIGH' && a.status !== 'FAIT').length;
   }, [nursingActs]);
 
   const doneActsCount = useMemo(() => {
@@ -401,6 +413,115 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
       }).catch(() => {});
     } catch (err: any) {
       console.error("Error finalizing nurse triage:", err);
+      setIsSubmitting(false);
+    }
+  };
+
+  // Action for patients who came purely for nursing care (pansement, injection, etc.)
+  const handleCompleteNursingCareDirectly = async () => {
+    if (!activePatient) return;
+    setIsSubmitting(true);
+    try {
+      const today = new Date();
+      const nurseName = user?.name || user?.username || 'Infirmier(ère)';
+      const nurseId = user?.id || '';
+
+      const finalVitalsData = {
+        bpSys: vitals.bpSys,
+        bpDia: vitals.bpDia,
+        bp: `${vitals.bpSys}/${vitals.bpDia}`,
+        heartRate: vitals.heartRate,
+        pulse: vitals.pulse,
+        respRate: vitals.respRate,
+        spo2: vitals.spo2,
+        temp: vitals.temp,
+        height: vitals.height,
+        weight: vitals.weight,
+        waistCirc: vitals.waistCirc,
+        bmi: computedBMI,
+        bloodGlucose: vitals.bloodGlucose,
+        painScore: vitals.painScore,
+        glasgowScore: vitals.glasgowScore,
+        clinicalNotes: vitals.clinicalNotes
+      };
+
+      const pId = activePatient.patientId || activePatient.dmeId || activePatient.id;
+      const directQueueDocId = activePatient.queueDocId || activePatient.docId;
+
+      const queuePayload = {
+        status: 'completed',
+        isClotured: true,
+        cloturedAt: today.toISOString(),
+        cloturedBy: nurseName,
+        vitals: finalVitalsData,
+        triagedAt: today.toISOString(),
+        triagedBy: nurseName,
+        triagedById: nurseId
+      };
+
+      // 1. Optimistic Offline-First UI Update (0ms delay)
+      if (setGlobalWaitingQueue) {
+        setGlobalWaitingQueue((prev: any[]) => prev.filter(p =>
+          !(p.id === pId || p.patientId === pId || p.queueDocId === directQueueDocId)
+        ));
+      }
+      setActivePatient(null);
+      setIsSubmitting(false);
+
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: `✓ Soin infirmier ambulatoire validé & clôturé pour ${activePatient.lastName} ${activePatient.firstName} (Sans transfert en consultation).`
+      }));
+
+      // 2. Persist queue update
+      if (directQueueDocId) {
+        setDoc(doc(db, 'service_queues', directQueueDocId), sanitizeData(stampTenantData(queuePayload, user, establishment)), { merge: true }).catch(() => {});
+      }
+
+      // 3. Mark or create act in nursing_acts as FAIT
+      const actDocRef = doc(collection(db, 'nursing_acts'));
+      const actLabel = activePatient.motifLabel || activePatient.motif || 'Soin Infirmier Ambulatoire';
+      setDoc(actDocRef, sanitizeData(stampTenantData({
+        id: actDocRef.id,
+        patientId: pId,
+        patientDme: activePatient.dmeId || pId,
+        patientName: `${activePatient.lastName} ${activePatient.firstName}`,
+        careName: actLabel,
+        actName: actLabel,
+        name: actLabel,
+        actType: actLabel,
+        motif: actLabel,
+        source: 'ACCUEIL',
+        origin: 'ACCUEIL',
+        status: 'FAIT',
+        priority: 'NORMAL',
+        executedBy: nurseName,
+        executedById: nurseId,
+        executedAt: today.toISOString(),
+        createdAt: today.toISOString()
+      }, user, establishment)), { merge: true }).catch(() => {});
+
+      // 4. Record triage record
+      const triageDocRef = doc(collection(db, 'triage_records'));
+      setDoc(triageDocRef, sanitizeData(stampTenantData({
+        id: triageDocRef.id,
+        patientId: pId,
+        patientName: `${activePatient.lastName} ${activePatient.firstName}`,
+        queueId: directQueueDocId || '',
+        vitals: finalVitalsData,
+        priority: assessPriority.priority,
+        priorityAlerts: assessPriority.alerts,
+        nurseName: nurseName,
+        nurseId: nurseId,
+        practitionerId: nurseId,
+        practitionerName: nurseName,
+        practitionerRole: user?.role || 'INFIRMIER',
+        isClotured: true,
+        cloturedAt: today.toISOString(),
+        createdAt: today.toISOString()
+      }, user, establishment))).catch(() => {});
+
+    } catch (err: any) {
+      console.error("Error completing nursing care:", err);
       setIsSubmitting(false);
     }
   };
@@ -972,22 +1093,68 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                     />
                   </div>
 
-                  {/* THE TRANSFER BUTTON */}
-                  <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div className="text-xs text-slate-500">
-                      <p>✅ En cliquant sur <strong>« Transférer au Médecin »</strong>, le dossier est instantanément envoyé dans la file de consultation du médecin.</p>
-                    </div>
+                  {/* THE TRANSFER / CLOTURE ACTIONS */}
+                  {(() => {
+                    const isSoinOnly = activePatient && (
+                      activePatient.motif === 'SOIN_INFIRMIER' ||
+                      (activePatient.service || '').toLowerCase().includes('soin') ||
+                      (activePatient.motifLabel || '').toLowerCase().includes('soin') ||
+                      (activePatient.motifLabel || '').toLowerCase().includes('pansement') ||
+                      (activePatient.motifLabel || '').toLowerCase().includes('injection') ||
+                      (activePatient.serviceId || '').includes('INFIRMIER')
+                    );
 
-                    <button
-                      disabled={isSubmitting}
-                      onClick={handleTransferToDoctor}
-                      className="w-full sm:w-auto px-8 py-4 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg hover:shadow-teal-600/30 flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
-                    >
-                      <CheckCircle size={18} />
-                      <span>{isSubmitting ? 'Transfert en cours...' : 'Transférer au Médecin'}</span>
-                      <ChevronRight size={18} />
-                    </button>
-                  </div>
+                    return isSoinOnly ? (
+                      <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="text-xs text-slate-500">
+                          <p className="text-amber-700 font-bold flex items-center gap-1.5">
+                            <Syringe size={14} className="text-amber-600" />
+                            Patient admis pour Soin Ambulatoire uniquement (Sans consultation médicale).
+                          </p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            Enregistrez les constantes et validez le soin pour clôturer sa prise en charge sans encombrer la file du médecin.
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-3 w-full sm:w-auto">
+                          <button
+                            disabled={isSubmitting}
+                            onClick={handleCompleteNursingCareDirectly}
+                            className="w-full sm:w-auto px-6 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg hover:shadow-emerald-600/30 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                          >
+                            <Check size={18} />
+                            <span>{isSubmitting ? 'Clôture en cours...' : 'Valider & Clôturer le Soin'}</span>
+                          </button>
+
+                          <button
+                            disabled={isSubmitting}
+                            onClick={handleTransferToDoctor}
+                            title="Orienter exceptionnellement vers le médecin si l'état du patient nécessite un avis médical"
+                            className="px-4 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <span>Avis Médecin</span>
+                            <ChevronRight size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="text-xs text-slate-500">
+                          <p>✅ En cliquant sur <strong>« Transférer au Médecin »</strong>, le dossier est instantanément envoyé dans la file de consultation du médecin avec ses constantes.</p>
+                        </div>
+
+                        <button
+                          disabled={isSubmitting}
+                          onClick={handleTransferToDoctor}
+                          className="w-full sm:w-auto px-8 py-4 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg hover:shadow-teal-600/30 flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
+                        >
+                          <CheckCircle size={18} />
+                          <span>{isSubmitting ? 'Transfert en cours...' : 'Transférer au Médecin'}</span>
+                          <ChevronRight size={18} />
+                        </button>
+                      </div>
+                    );
+                  })()}
 
                 </div>
               ) : (
@@ -1035,7 +1202,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
             </div>
 
             {/* Harmonized KPI Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 self-stretch lg:self-auto">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 self-stretch lg:self-auto">
               <div 
                 onClick={() => { setSoinStatusFilter('PENDING'); setSoinOriginFilter('ALL'); }}
                 className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer ${
@@ -1045,7 +1212,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                 }`}
               >
                 <span className="block text-2xl font-black text-amber-600 dark:text-amber-400">{pendingActsCount}</span>
-                <span className="block text-[9px] font-black uppercase tracking-wider text-slate-500">En Attente</span>
+                <span className="block text-[9px] font-black uppercase tracking-wider text-slate-500">Total En Attente</span>
               </div>
 
               <div 
@@ -1076,6 +1243,20 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                 <span className="block text-2xl font-black text-blue-600 dark:text-blue-400">{consultPendingCount}</span>
                 <span className="block text-[9px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">
                   🩺 Consultation
+                </span>
+              </div>
+
+              <div 
+                onClick={() => { setSoinStatusFilter('PENDING'); setSoinOriginFilter('ACCUEIL'); }}
+                className={`p-3.5 rounded-2xl border text-center transition-all cursor-pointer ${
+                  soinOriginFilter === 'ACCUEIL'
+                    ? 'bg-purple-500/15 border-purple-500 ring-2 ring-purple-500/20'
+                    : 'bg-purple-50 dark:bg-purple-950/20 border-purple-200 dark:border-purple-900/40 hover:bg-purple-100/50'
+                }`}
+              >
+                <span className="block text-2xl font-black text-purple-600 dark:text-purple-400">{accueilPendingCount}</span>
+                <span className="block text-[9px] font-black uppercase tracking-wider text-purple-700 dark:text-purple-300">
+                  🏥 Ambulatoire / Accueil
                 </span>
               </div>
 
@@ -1152,6 +1333,17 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                   <Stethoscope size={11} />
                   <span>Consultation ({consultPendingCount})</span>
                 </button>
+                <button
+                  onClick={() => setSoinOriginFilter('ACCUEIL')}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black uppercase transition-all flex items-center gap-1 cursor-pointer ${
+                    soinOriginFilter === 'ACCUEIL'
+                      ? 'bg-purple-600 text-white shadow-xs'
+                      : 'text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950/30'
+                  }`}
+                >
+                  <Syringe size={11} />
+                  <span>Ambulatoire / Accueil ({accueilPendingCount})</span>
+                </button>
               </div>
             </div>
 
@@ -1178,8 +1370,12 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
 
                 // Provenance filter
                 const isUrgence = act.source === 'URGENCES' || act.priority === 'HIGH';
+                const isAccueil = act.source === 'ACCUEIL' || act.origin === 'ACCUEIL';
+                const isConsult = !isUrgence && !isAccueil;
+
                 if (soinOriginFilter === 'URGENCES' && !isUrgence) return false;
-                if (soinOriginFilter === 'CONSULTATION' && isUrgence) return false;
+                if (soinOriginFilter === 'CONSULTATION' && !isConsult) return false;
+                if (soinOriginFilter === 'ACCUEIL' && !isAccueil) return false;
 
                 // Search query
                 if (!soinSearchQuery.trim()) return true;
