@@ -1293,6 +1293,52 @@ const Reception: React.FC<ReceptionProps> = ({
     }
   }, [visitMotif]);
 
+  const handleQuickLambdaAdmission = async () => {
+    if (!permissions.canWrite) {
+      alert("Action non autorisée : votre rôle dispose d'un accès en lecture seule.");
+      return;
+    }
+    const ids = await getNextSequentialIdsAndAssign();
+    const now = new Date();
+    const timeCode = `${now.getHours().toString().padStart(2, '0')}${now.getMinutes().toString().padStart(2, '0')}`;
+    
+    const lambdaPatient: Patient = {
+      id: ids.dmeId,
+      patientId: ids.patientId,
+      lastName: 'LAMBDA',
+      firstName: `Patient Anonyme #${timeCode}`,
+      gender: 'M',
+      maritalStatus: 'CELIBATAIRE',
+      birthDate: '1990-01-01',
+      phone: '',
+      residence: 'Ambulatoire / Soin Express',
+      emergencyContact: '',
+      emergencyPhone: '',
+      isLambda: true,
+      isAnonymous: true,
+      admissionMode: 'PROMPT_SERVICE',
+      vitals: {
+        bpSys: 120,
+        bpDia: 80,
+        heartRate: 75,
+        respRate: 18,
+        pulse: 75,
+        spo2: 98,
+        temp: 37,
+        height: 170,
+        weight: 70,
+        bmi: 24.2,
+        waistCirc: 85
+      }
+    };
+    setCurrentPatient(lambdaPatient);
+    setVisitMotif('SOIN_INFIRMIER');
+    setStep('triage');
+    window.dispatchEvent(new CustomEvent('app-notification', {
+      detail: `⚡ Admission Patient Lambda initialisée pour Soin Express / Soins Infirmiers.`
+    }));
+  };
+
   const handleSelectPatient = (p: Patient) => {
     setCurrentPatient(p);
     if (!permissions.canWrite) {
@@ -1605,6 +1651,9 @@ const Reception: React.FC<ReceptionProps> = ({
           dmeId: dmeId,
           firstName: finalPatient.firstName,
           lastName: finalPatient.lastName,
+          isLambda: finalPatient.isLambda || false,
+          isAnonymous: finalPatient.isAnonymous || false,
+          admissionMode: finalPatient.admissionMode || 'STANDARD',
           age: calculateAge(finalPatient.birthDate),
           gender: finalPatient.gender,
           time: timeStr,
@@ -1928,7 +1977,7 @@ const Reception: React.FC<ReceptionProps> = ({
               { id: 'dashboard', label: 'Dashboard' },
               { id: 'triage', label: `Admissions (${globalWaitingQueue.filter(q => q.status === 'waiting' || q.status === 'waiting_triage').length})` },
               { id: 'sorties', label: `Sorties (${patientsToDischarge.length})` },
-              { id: 'historique', label: 'Historique' }
+              { id: 'historique', label: 'Archives & Historique' }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -2078,17 +2127,28 @@ const Reception: React.FC<ReceptionProps> = ({
                         <span>Lecture Seule</span>
                       </div>
                     ) : (
-                      <button 
-                        onClick={async () => { 
-                          const ids = await getNextSequentialIdsAndAssign(); 
-                          setCurrentPatient({ id: ids.dmeId, patientId: ids.patientId, gender: 'M', maritalStatus: 'CELIBATAIRE', vitals: { bpSys: 120, bpDia: 80, heartRate: 75, respRate: 18, pulse: 75, spo2: 98, temp: 37, height: 170, weight: 70, bmi: 24.2, waistCirc: 85 } }); 
-                          setStep('register'); 
-                        }} 
-                        className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer shrink-0"
-                      >
-                        <UserPlus size={15} />
-                        <span>Nouveau Dossier DME</span>
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <button 
+                          type="button"
+                          onClick={handleQuickLambdaAdmission}
+                          className="px-3.5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                          title="Admission directe d'un patient anonyme / lambda pour soins infirmiers ou urgences promptes"
+                        >
+                          <Sparkles size={15} />
+                          <span>Patient Lambda (Anonyme)</span>
+                        </button>
+                        <button 
+                          onClick={async () => { 
+                            const ids = await getNextSequentialIdsAndAssign(); 
+                            setCurrentPatient({ id: ids.dmeId, patientId: ids.patientId, gender: 'M', maritalStatus: 'CELIBATAIRE', vitals: { bpSys: 120, bpDia: 80, heartRate: 75, respRate: 18, pulse: 75, spo2: 98, temp: 37, height: 170, weight: 70, bmi: 24.2, waistCirc: 85 } }); 
+                            setStep('register'); 
+                          }} 
+                          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+                        >
+                          <UserPlus size={15} />
+                          <span>Nouveau Dossier DME</span>
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -2216,6 +2276,21 @@ const Reception: React.FC<ReceptionProps> = ({
                     className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/70 rounded-lg font-bold text-xs transition-all cursor-pointer"
                   >
                     ← Retour
+                  </button>
+                </div>
+
+                {/* Quick Lambda Shortcut Banner */}
+                <div className="mb-4 p-3 bg-amber-50/90 border border-amber-300 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-center gap-2 text-amber-950 text-xs font-bold">
+                    <Sparkles size={16} className="text-amber-600 shrink-0" />
+                    <span>Patient sans identité complète ou soin infirmier express ?</span>
+                  </div>
+                  <button 
+                    type="button" 
+                    onClick={handleQuickLambdaAdmission}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-black uppercase tracking-wider transition-all cursor-pointer shrink-0"
+                  >
+                    ⚡ Basculer en Patient Lambda (Anonyme)
                   </button>
                 </div>
 

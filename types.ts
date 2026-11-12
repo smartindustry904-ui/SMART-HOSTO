@@ -1092,7 +1092,16 @@ export interface Patient {
   createdAt?: string;
   creditBlocked?: boolean; // When true: debt generation strictly disabled (Credit Lock)
   allowCredit?: boolean; // When false: debt generation strictly disabled
+  isLambda?: boolean;
+  isAnonymous?: boolean;
+  admissionMode?: string;
   patientId?: string;
+  docId?: string;
+  dmeId?: string;
+  antecedents?: any[];
+  motif?: string;
+  name?: string;
+  notes?: string;
   age?: number;
   hospitalizationStatus?: string;
   admittedBedId?: string | null;

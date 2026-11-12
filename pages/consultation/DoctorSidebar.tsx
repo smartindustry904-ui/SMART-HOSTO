@@ -1,11 +1,11 @@
 
 import React from 'react';
-import { Users, ClipboardList, Activity, History, Calendar, LogOut, Settings, ChevronRight } from 'lucide-react';
+import { Users, ClipboardList, Activity, History, Calendar, LogOut, Settings, ChevronRight, FolderOpen } from 'lucide-react';
 import { Avatar } from '../../components/common/Avatar';
 
 interface DoctorSidebarProps {
-  activeMenu: 'WAITING_ROOM' | 'CONSULTATION' | 'HISTORY' | 'APPOINTMENTS';
-  setActiveMenu: (menu: 'WAITING_ROOM' | 'CONSULTATION' | 'HISTORY' | 'APPOINTMENTS') => void;
+  activeMenu: 'WAITING_ROOM' | 'CONSULTATION' | 'HISTORY' | 'APPOINTMENTS' | 'PATIENT_DIRECTORY' | 'dashboard';
+  setActiveMenu: (menu: 'WAITING_ROOM' | 'CONSULTATION' | 'HISTORY' | 'APPOINTMENTS' | 'PATIENT_DIRECTORY' | 'dashboard') => void;
   waitingCount: number;
   doctorName: string;
 }
@@ -13,8 +13,9 @@ interface DoctorSidebarProps {
 const DoctorSidebar: React.FC<DoctorSidebarProps> = ({ activeMenu, setActiveMenu, waitingCount, doctorName }) => {
   const menuItems = [
     { id: 'WAITING_ROOM', label: 'Salle d\'attente', icon: Users, color: 'emerald', badge: waitingCount },
+    { id: 'PATIENT_DIRECTORY', label: 'Annuaire Patients', icon: FolderOpen, color: 'indigo' },
     { id: 'CONSULTATION', label: 'Consultation', icon: ClipboardList, color: 'blue' },
-    { id: 'HISTORY', label: 'Historique', icon: History, color: 'purple' },
+    { id: 'HISTORY', label: 'Archives & Historique', icon: History, color: 'purple' },
     { id: 'APPOINTMENTS', label: 'Rendez-vous', icon: Calendar, color: 'orange' },
   ];
 
@@ -23,6 +24,7 @@ const DoctorSidebar: React.FC<DoctorSidebarProps> = ({ activeMenu, setActiveMenu
       switch (color) {
         case 'emerald': return 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20';
         case 'blue': return 'bg-blue-600 text-white shadow-lg shadow-blue-600/20';
+        case 'indigo': return 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20';
         case 'amber': return 'bg-amber-500 text-white shadow-lg shadow-amber-500/20';
         case 'purple': return 'bg-purple-600 text-white shadow-lg shadow-purple-600/20';
         case 'orange': return 'bg-orange-500 text-white shadow-lg shadow-orange-500/20';

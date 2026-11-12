@@ -136,7 +136,7 @@ const Consultation: React.FC<ConsultationProps> = ({
 
   // Listen to activePatient's actual record from Firestore in real-time
   useEffect(() => {
-    const targetPatientId = activePatient?.patientId || activePatient?.id;
+    const targetPatientId = activePatient?.docId || activePatient?.id || activePatient?.patientId;
     if (!targetPatientId) return;
     
     try {
@@ -144,11 +144,15 @@ const Consultation: React.FC<ConsultationProps> = ({
         if (docSnap.exists()) {
           const data = docSnap.data();
           setActivePatient(prev => {
-            if (!prev) return data;
+            if (!prev) return { id: docSnap.id, docId: docSnap.id, ...data };
             return {
               ...prev,
               ...data,
-              vitals: { ...(data.vitals || {}), ...(prev.vitals || {}) }
+              id: prev.id || docSnap.id,
+              docId: docSnap.id,
+              vitals: { ...(data.vitals || {}), ...(prev.vitals || {}) },
+              allergies: Array.isArray(data.allergies) && data.allergies.length > 0 ? data.allergies : prev.allergies,
+              antecedents: data.antecedents || prev.antecedents
             };
           });
         }
@@ -157,7 +161,7 @@ const Consultation: React.FC<ConsultationProps> = ({
     } catch (e) {
       console.error("Error listening to active patient:", e);
     }
-  }, [activePatient?.id, activePatient?.patientId]);
+  }, [activePatient?.id, activePatient?.patientId, activePatient?.docId]);
 
   // Synchronize activePatient in real-time with waitingQueue updates (from nurse triage, reception, cashier)
   useEffect(() => {
@@ -2039,7 +2043,8 @@ const Consultation: React.FC<ConsultationProps> = ({
             label: activeMenu === 'dashboard' ? 'Tableau de Bord' :
                    activeMenu === 'WAITING_ROOM' ? 'Salle d\'Attente' : 
                    activeMenu === 'CONSULTATION' ? (activePatient ? `${activePatient.firstName || ''} ${activePatient.lastName || ''}`.trim() : 'Consultation') :
-                   activeMenu === 'HISTORY' ? 'Historique' :
+                   activeMenu === 'HISTORY' ? 'Archives & Historique' :
+                   activeMenu === 'PATIENT_DIRECTORY' ? 'Annuaire Patients' :
                    activeMenu === 'APPOINTMENTS' ? 'Rendez-vous' : 'Répertoire',
             active: true
           }
@@ -2089,8 +2094,9 @@ const Consultation: React.FC<ConsultationProps> = ({
               {[
                 { id: 'dashboard', label: 'Dashboard' },
                 { id: 'WAITING_ROOM', label: `Attente (${consultationWaitingQueue.length})` },
+                { id: 'PATIENT_DIRECTORY', label: 'Annuaire Patients' },
                 { id: 'APPOINTMENTS', label: `RDV (${appointments.filter(a => a.date === new Date().toISOString().split('T')[0]).length})` },
-                { id: 'HISTORY', label: 'Historique' }
+                { id: 'HISTORY', label: 'Archives & Historique' }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -2150,7 +2156,19 @@ const Consultation: React.FC<ConsultationProps> = ({
             <PatientDirectory 
               user={user}
               onSelectPatient={(p) => {
-                setActivePatient(p);
+                const targetPatientId = p.id || p.patientId || p.docId;
+                setActivePatient({
+                  ...p,
+                  id: targetPatientId,
+                  patientId: p.patientId || targetPatientId,
+                  docId: p.docId || targetPatientId,
+                  dmeId: p.dmeId || targetPatientId,
+                  vitals: p.vitals || {},
+                  antecedents: p.antecedents || [],
+                  allergies: p.allergies || [],
+                  motif: p.motif || 'Consultation Dossier Patient',
+                  time: p.time || new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                });
                 setConsultationTab('GENERAL');
                 setActiveMenu('CONSULTATION');
               }}

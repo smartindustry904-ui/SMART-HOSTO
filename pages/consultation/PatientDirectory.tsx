@@ -23,6 +23,9 @@ import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface Patient {
   id: string;
+  docId?: string;
+  patientId?: string;
+  dmeId?: string;
   firstName: string;
   lastName: string;
   birthDate: string;
@@ -34,11 +37,18 @@ interface Patient {
   emergencyPhone?: string;
   bloodGroup?: string;
   allergies?: string[];
+  antecedents?: any[];
+  vitals?: any;
+  motif?: string;
   lastVisit?: string;
   createdAt?: string;
   status?: string;
   structureName?: string;
   clinicId?: string;
+  isLambda?: boolean;
+  isAnonymous?: boolean;
+  admissionMode?: string;
+  [key: string]: any;
 }
 
 interface PatientDirectoryProps {
@@ -66,7 +76,11 @@ export default function PatientDirectory({ onSelectPatient, user }: PatientDirec
           return;
         }
         list.push({
+          ...data,
           id: data.id || docSnap.id,
+          docId: docSnap.id,
+          patientId: data.patientId || data.id || docSnap.id,
+          dmeId: data.dmeId || data.id || docSnap.id,
           firstName: data.firstName || '',
           lastName: data.lastName || '',
           birthDate: data.birthDate || '',
@@ -78,11 +92,17 @@ export default function PatientDirectory({ onSelectPatient, user }: PatientDirec
           emergencyPhone: data.emergencyPhone,
           bloodGroup: data.bloodGroup,
           allergies: Array.isArray(data.allergies) ? data.allergies : (data.allergies ? [data.allergies] : []),
+          antecedents: Array.isArray(data.antecedents) ? data.antecedents : (data.antecedents ? [data.antecedents] : []),
+          vitals: data.vitals || {},
+          motif: data.motif || data.currentMotif || '',
           lastVisit: data.lastVisit || data.updatedAt || data.createdAt,
           createdAt: data.createdAt,
           status: data.status,
           structureName: data.structureName || activeHospitalName,
           clinicId: data.clinicId || data.hospital_id || activeTenantId,
+          isLambda: !!data.isLambda,
+          isAnonymous: !!data.isAnonymous,
+          admissionMode: data.admissionMode || '',
         });
       });
 
@@ -211,6 +231,11 @@ export default function PatientDirectory({ onSelectPatient, user }: PatientDirec
                           }`}>
                             {p.gender === 'F' ? 'Femme' : 'Homme'}
                           </span>
+                          {(p.isLambda || p.isAnonymous) && (
+                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-300">
+                              ⚡ Soin Express (Lambda)
+                            </span>
+                          )}
                         </div>
                         <h3 className="text-base font-black text-slate-900 group-hover:text-blue-600 transition-colors leading-snug truncate" title={`${p.lastName} ${p.firstName}`}>
                           {p.lastName.toUpperCase()} {p.firstName}
@@ -283,8 +308,15 @@ export default function PatientDirectory({ onSelectPatient, user }: PatientDirec
                   <button
                     onClick={() => onSelectPatient({
                       ...p,
+                      id: p.id || p.patientId || p.docId,
+                      patientId: p.patientId || p.id,
+                      docId: p.docId || p.id,
+                      dmeId: p.dmeId || p.id,
+                      vitals: p.vitals || {},
+                      antecedents: p.antecedents || [],
+                      allergies: p.allergies || [],
                       age: ageVal,
-                      name: `${p.lastName} ${p.firstName}`
+                      name: `${p.lastName} ${p.firstName}`.trim()
                     })}
                     className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-wider py-3.5 px-4 rounded-2xl shadow-md shadow-blue-600/20 hover:shadow-lg hover:shadow-blue-600/30 transition-all cursor-pointer group-hover:scale-[1.01]"
                   >

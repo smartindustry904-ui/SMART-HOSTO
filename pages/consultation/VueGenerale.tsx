@@ -32,13 +32,13 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
   // Sync vitals from prop when modal opens or patient changes
   useEffect(() => {
     if (patient?.vitals) {
-      setTemp(patient.vitals.temp || '37.0');
-      setBp(patient.vitals.bp || '120/80');
-      setPulse(patient.vitals.pulse || '72');
-      setSpo2(patient.vitals.spo2 || '98');
-      setRespRate(patient.vitals.respRate || '16');
-      setWeight(patient.vitals.weight || '70');
-      setHeight(patient.vitals.height || '170');
+      setTemp(patient.vitals.temp ? String(patient.vitals.temp) : '37.0');
+      setBp(patient.vitals.bp || (patient.vitals.bpSys ? `${patient.vitals.bpSys}/${patient.vitals.bpDia}` : '120/80'));
+      setPulse(patient.vitals.pulse ? String(patient.vitals.pulse) : (patient.vitals.heartRate ? String(patient.vitals.heartRate) : '72'));
+      setSpo2(patient.vitals.spo2 ? String(patient.vitals.spo2) : '98');
+      setRespRate(patient.vitals.respRate ? String(patient.vitals.respRate) : '16');
+      setWeight(patient.vitals.weight ? String(patient.vitals.weight) : '70');
+      setHeight(patient.vitals.height ? String(patient.vitals.height) : '170');
     }
   }, [patient]);
 
@@ -51,7 +51,12 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
         const treatMap = new Map<string, any>();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
-          if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
+          const pId = String(data.patientId || '');
+          const matches = pId === String(patient.id) || 
+                          (patient.patientId && pId === String(patient.patientId)) ||
+                          (patient.dmeId && pId === String(patient.dmeId)) ||
+                          (patient.docId && pId === String(patient.docId));
+          if (matches) {
             (data.items || []).forEach((it: any, idx: number) => {
               const cleanName = (it.name || '').trim();
               const uniqueKey = cleanName.toLowerCase();
@@ -72,7 +77,7 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
     } catch (err) {
       console.error("Error listening to pending prescriptions:", err);
     }
-  }, [patient?.id]);
+  }, [patient?.id, patient?.patientId, patient?.dmeId]);
 
   // Subscribe to actual requested exams from lab_requests (Strict Deduplication)
   useEffect(() => {
@@ -83,7 +88,12 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
         const examMap = new Map<string, any>();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
-          if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
+          const pId = String(data.patientId || '');
+          const matches = pId === String(patient.id) || 
+                          (patient.patientId && pId === String(patient.patientId)) ||
+                          (patient.dmeId && pId === String(patient.dmeId)) ||
+                          (patient.docId && pId === String(patient.docId));
+          if (matches) {
             (data.exams || []).forEach((ex: any, idx: number) => {
               const examName = typeof ex === 'string' ? ex : (ex.name || '');
               const cleanName = examName.trim();
@@ -104,7 +114,7 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
     } catch (err) {
       console.error("Error listening to lab requests:", err);
     }
-  }, [patient?.id]);
+  }, [patient?.id, patient?.patientId, patient?.dmeId]);
 
   // Subscribe to actual diagnostics from consultations
   useEffect(() => {
@@ -115,7 +125,12 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
         const diagMap = new Map<string, any>();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data();
-          if (data.patientId === patient.id || String(data.patientId) === String(patient.id)) {
+          const pId = String(data.patientId || '');
+          const matches = pId === String(patient.id) || 
+                          (patient.patientId && pId === String(patient.patientId)) ||
+                          (patient.dmeId && pId === String(patient.dmeId)) ||
+                          (patient.docId && pId === String(patient.docId));
+          if (matches) {
             if (!diagMap.has(docSnap.id)) {
               diagMap.set(docSnap.id, {
                 id: docSnap.id,
@@ -141,15 +156,16 @@ const VueGenerale: React.FC<VueGeneraleProps> = ({ patient, onAction }) => {
     } catch (err) {
       console.error("Error listening to consultations:", err);
     }
-  }, [patient?.id]);
+  }, [patient?.id, patient?.patientId, patient?.dmeId]);
 
   // Handle vitals save to Firestore
   const handleSaveVitals = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!patient?.id) return;
+    const targetPatientId = patient?.docId || patient?.id;
+    if (!targetPatientId) return;
     setIsSavingVitals(true);
     try {
-      const patientRef = doc(db, 'patients', patient.id);
+      const patientRef = doc(db, 'patients', targetPatientId);
       const updatedVitals = {
         temp: String(temp),
         bp: String(bp),

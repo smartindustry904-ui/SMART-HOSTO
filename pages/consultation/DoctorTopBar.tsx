@@ -53,14 +53,14 @@ const DoctorTopBar: React.FC<DoctorTopBarProps> = ({ activePatient, doctorName }
               <div className="flex flex-col items-center">
                 <div className="flex items-center gap-1 text-slate-900">
                   <Activity size={12} className="text-blue-600" />
-                  <span className="text-xs font-black">{activePatient.vitals?.bp || '--'}</span>
+                  <span className="text-xs font-black">{activePatient.vitals?.bp || (activePatient.vitals?.bpSys ? `${activePatient.vitals.bpSys}/${activePatient.vitals.bpDia}` : '--')}</span>
                 </div>
                 <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-wider">TA</span>
               </div>
               <div className="flex flex-col items-center">
                 <div className="flex items-center gap-1 text-emerald-600">
                   <Heart size={12} />
-                  <span className="text-xs font-black">{activePatient.vitals?.pulse || '--'}</span>
+                  <span className="text-xs font-black">{activePatient.vitals?.pulse || activePatient.vitals?.heartRate || '--'}</span>
                 </div>
                 <span className="text-[7.5px] font-black text-slate-400 uppercase tracking-wider">Pouls</span>
               </div>

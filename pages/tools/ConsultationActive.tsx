@@ -181,12 +181,59 @@ export default function ConsultationActive({
     amaigrissement: false
   });
   const [constantes, setConstantes] = useState({
-    ta: patient?.vitals?.bp || '',
-    fc: patient?.vitals?.pulse?.toString() || '',
-    fr: '',
+    ta: patient?.vitals?.bp || (patient?.vitals?.bpSys ? `${patient.vitals.bpSys}/${patient.vitals.bpDia}` : ''),
+    fc: patient?.vitals?.pulse?.toString() || patient?.vitals?.heartRate?.toString() || '',
+    fr: patient?.vitals?.respRate?.toString() || '',
     temp: patient?.vitals?.temp?.toString() || '',
     sat: patient?.vitals?.spo2?.toString() || ''
   });
+
+  // Sync vitals dynamically from patient record
+  useEffect(() => {
+    if (patient?.vitals) {
+      setConstantes(prev => ({
+        ta: patient.vitals.bp || (patient.vitals.bpSys ? `${patient.vitals.bpSys}/${patient.vitals.bpDia}` : prev.ta),
+        fc: patient.vitals.pulse?.toString() || patient.vitals.heartRate?.toString() || prev.fc,
+        fr: patient.vitals.respRate?.toString() || prev.fr,
+        temp: patient.vitals.temp?.toString() || prev.temp,
+        sat: patient.vitals.spo2?.toString() || prev.sat
+      }));
+    }
+  }, [patient?.vitals]);
+
+  // Sync motif dynamically from patient record
+  useEffect(() => {
+    if (patient?.motif && !motif) {
+      setMotif(patient.motif);
+    }
+  }, [patient?.motif]);
+
+  // Sync antecedents and allergies dynamically from patient record
+  useEffect(() => {
+    if (patient) {
+      if (patient.antecedents) {
+        if (typeof patient.antecedents === 'object') {
+          setAntecedents(prev => ({
+            ...prev,
+            ...patient.antecedents,
+            personnels: {
+              ...prev.personnels,
+              ...(patient.antecedents.personnels || {}),
+              immunoAllergiques: patient.antecedents.personnels?.immunoAllergiques || (Array.isArray(patient.allergies) ? patient.allergies.join(', ') : prev.personnels.immunoAllergiques)
+            }
+          }));
+        }
+      } else if (Array.isArray(patient.allergies) && patient.allergies.length > 0) {
+        setAntecedents(prev => ({
+          ...prev,
+          personnels: {
+            ...prev.personnels,
+            immunoAllergiques: prev.personnels.immunoAllergiques || patient.allergies.join(', ')
+          }
+        }));
+      }
+    }
+  }, [patient?.id, patient?.antecedents, patient?.allergies]);
   const [etatGeneral, setEtatGeneral] = useState('');
   const [examenAppareils, setExamenAppareils] = useState<Record<string, string>>({});
   

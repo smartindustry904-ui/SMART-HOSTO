@@ -3,7 +3,7 @@ import {
   History, Search, Filter, Calendar, Stethoscope, BedDouble, 
   Beaker, Baby, ShieldAlert, User, Clock, ArrowRight, ShieldCheck, 
   Lock, Eye, RefreshCw, X, ChevronRight, FileText, CheckCircle2,
-  CalendarRange, AlertCircle, Activity, UserCheck, Layers, Sparkles, LogOut
+  CalendarRange, AlertCircle, Activity, UserCheck, Layers, Sparkles, LogOut, Syringe, Printer, Download
 } from 'lucide-react';
 import { Patient, User as UserType } from '../../types';
 import { db } from '../../src/firebase';
@@ -16,7 +16,7 @@ export interface PatientHistoryEvent {
   patientId: string;
   patientName: string;
   dmeId?: string;
-  type: 'CONSULTATION' | 'HOSPITALISATION' | 'LABORATOIRE' | 'IMAGERIE' | 'MATERNITE' | 'URGENCE' | 'ORIENTATION' | 'SORTIE';
+  type: 'CONSULTATION' | 'HOSPITALISATION' | 'LABORATOIRE' | 'IMAGERIE' | 'MATERNITE' | 'URGENCE' | 'ORIENTATION' | 'SORTIE' | 'SOINS';
   date: string;
   time?: string;
   timestamp: number;
@@ -66,7 +66,7 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
 
   // Filters
   const [selectedServiceType, setSelectedServiceType] = useState<string>('ALL');
-  const [dateRangePreset, setDateRangePreset] = useState<'ALL' | '30D' | '6M' | '1Y' | 'CUSTOM'>('ALL');
+  const [dateRangePreset, setDateRangePreset] = useState<'ALL' | 'TODAY' | '7D' | '30D' | '6M' | '1Y' | 'CUSTOM'>('ALL');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [selectedDoctor, setSelectedDoctor] = useState<string>('ALL');
@@ -107,6 +107,7 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
     let emergencyEvents: PatientHistoryEvent[] = [];
     let serviceQueues: PatientHistoryEvent[] = [];
     let maternityAdmissions: PatientHistoryEvent[] = [];
+    let nursingActs: PatientHistoryEvent[] = [];
 
     const compileAll = () => {
       const merged = [
@@ -117,7 +118,8 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
         ...labRequests,
         ...emergencyEvents,
         ...serviceQueues,
-        ...maternityAdmissions
+        ...maternityAdmissions,
+        ...nursingActs
       ];
       // Deduplicate by ID
       const map = new Map<string, PatientHistoryEvent>();
@@ -355,6 +357,34 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
       compileAll();
     }, () => compileAll());
 
+    // G. Nursing Acts (Soins Infirmiers & Soins Ambulatoires / Lambda)
+    const unsubNursing = onSnapshot(collection(db, 'nursing_acts'), (snap) => {
+      nursingActs = snap.docs
+        .filter(docSnap => belongsToTenant(docSnap.data(), activeTenantId))
+        .map(docSnap => {
+          const d = docSnap.data();
+          const dateStr = d.date || (d.createdAt ? d.createdAt.split('T')[0] : 'N/A');
+          const ts = d.createdAt ? new Date(d.createdAt).getTime() : Date.now();
+          const isFait = d.status === 'FAIT' || d.status === 'DONE';
+          return {
+            id: `care-${docSnap.id}`,
+            patientId: d.patientId || '',
+            patientName: d.patientName || 'Patient',
+            dmeId: d.dmeId || d.patientId || '',
+            type: 'SOINS' as const,
+            date: dateStr,
+            time: d.time || (d.createdAt ? new Date(d.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : undefined),
+            timestamp: isNaN(ts) ? Date.now() : ts,
+            service: 'Soins Infirmiers',
+            doctorName: d.prescribedBy || d.prescriberName || d.executedBy || 'Soignant',
+            motif: d.actType || d.instructions || 'Soin infirmier administré',
+            mainDiagnosis: d.instructions || d.actType || 'Soin infirmier',
+            status: isFait ? 'Exécuté' : 'En attente'
+          };
+        });
+      compileAll();
+    }, () => compileAll());
+
     return () => {
       unsubConsultations();
       unsubPatientHistory();
@@ -364,6 +394,7 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
       unsubEmergency();
       unsubQueues();
       unsubMaternity();
+      unsubNursing();
     };
   }, [activeTenantId]);
 
@@ -421,13 +452,21 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
         if (selectedServiceType === 'MATERNITE' && event.type !== 'MATERNITE') return false;
         if (selectedServiceType === 'URGENCE' && event.type !== 'URGENCE') return false;
         if (selectedServiceType === 'SORTIE' && event.type !== 'SORTIE') return false;
+        if (selectedServiceType === 'SOINS' && event.type !== 'SOINS') return false;
       }
 
       // 3. Date Range Filter
       const eventDate = new Date(event.timestamp);
       const now = new Date();
 
-      if (dateRangePreset === '30D') {
+      if (dateRangePreset === 'TODAY') {
+        const todayStr = new Date().toISOString().split('T')[0];
+        if (event.date !== todayStr) return false;
+      } else if (dateRangePreset === '7D') {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(now.getDate() - 7);
+        if (eventDate < sevenDaysAgo) return false;
+      } else if (dateRangePreset === '30D') {
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(now.getDate() - 30);
         if (eventDate < thirtyDaysAgo) return false;
@@ -478,9 +517,41 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
     const emergencyCount = filteredEvents.filter(e => e.type === 'URGENCE').length;
     const maternityCount = filteredEvents.filter(e => e.type === 'MATERNITE').length;
     const sortiesCount = filteredEvents.filter(e => e.type === 'SORTIE').length;
+    const soinsCount = filteredEvents.filter(e => e.type === 'SOINS').length;
 
-    return { total, consultationsCount, hospitalizationsCount, labCount, emergencyCount, maternityCount, sortiesCount };
+    return { total, consultationsCount, hospitalizationsCount, labCount, emergencyCount, maternityCount, sortiesCount, soinsCount };
   }, [filteredEvents]);
+
+  const handlePrintArchive = () => {
+    window.print();
+  };
+
+  const handleExportCSV = () => {
+    if (filteredEvents.length === 0) {
+      alert("Aucune donnée à exporter.");
+      return;
+    }
+    const headers = ['Date', 'Heure', 'Type', 'Patient', 'ID DME', 'Service', 'Praticien', 'Motif / Diagnostic', 'Statut'];
+    const rows = filteredEvents.map(e => [
+      `"${e.date || ''}"`,
+      `"${e.time || ''}"`,
+      `"${e.type || ''}"`,
+      `"${(e.patientName || '').replace(/"/g, '""')}"`,
+      `"${e.dmeId || e.patientId || ''}"`,
+      `"${(e.service || '').replace(/"/g, '""')}"`,
+      `"${(e.doctorName || '').replace(/"/g, '""')}"`,
+      `"${(e.motif || e.mainDiagnosis || '').replace(/"/g, '""')}"`,
+      `"${e.status || ''}"`
+    ]);
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `archives_patients_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const resetFilters = () => {
     setSelectedServiceType('ALL');
@@ -541,6 +612,13 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
           label: 'Urgences',
           color: 'bg-rose-50 text-rose-700 border-rose-200',
           dot: 'bg-rose-600'
+        };
+      case 'SOINS':
+        return {
+          icon: Syringe,
+          label: 'Soin Infirmier',
+          color: 'bg-teal-50 text-teal-700 border-teal-200',
+          dot: 'bg-teal-600'
         };
       default:
         return {
@@ -733,8 +811,26 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
             </div>
 
             <button
+              onClick={handlePrintArchive}
+              title="Imprimer la sélection d'archives"
+              className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Printer size={13} />
+              <span className="hidden sm:inline">Imprimer</span>
+            </button>
+
+            <button
+              onClick={handleExportCSV}
+              title="Exporter les archives en fichier CSV"
+              className="px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Download size={13} />
+              <span className="hidden sm:inline">Exporter CSV</span>
+            </button>
+
+            <button
               onClick={resetFilters}
-              className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+              className="px-3 py-1.5 text-xs font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
             >
               Réinitialiser
             </button>
@@ -772,11 +868,13 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
             >
               <option value="ALL">Tous les types d'actes</option>
               <option value="CONSULTATION">Consultations Médicales</option>
+              <option value="SOINS">Soins Infirmiers & Soins Express</option>
               <option value="HOSPITALISATION">Hospitalisations & Séjours</option>
               <option value="LABORATOIRE">Examens de Laboratoire</option>
               <option value="IMAGERIE">Imagerie Médicale (Radio/Écho)</option>
               <option value="MATERNITE">Maternité & CPN</option>
               <option value="URGENCE">Urgences & Gardes</option>
+              <option value="SORTIE">Sorties Administratives</option>
             </select>
           </div>
 
@@ -791,6 +889,8 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none focus:border-blue-500 focus:bg-white"
             >
               <option value="ALL">Toute la période (Historique complet)</option>
+              <option value="TODAY">Aujourd'hui</option>
+              <option value="7D">Derniers 7 jours</option>
               <option value="30D">Derniers 30 jours (1 mois)</option>
               <option value="6M">Derniers 6 mois</option>
               <option value="1Y">Dernière année (12 mois)</option>
@@ -875,6 +975,18 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
             className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1 ${selectedServiceType === 'MATERNITE' ? 'bg-pink-600 text-white' : 'bg-pink-50 text-pink-700 hover:bg-pink-100'}`}
           >
             <Baby size={12} /> Maternité ({stats.maternityCount})
+          </button>
+          <button 
+            onClick={() => setSelectedServiceType('SOINS')}
+            className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1 ${selectedServiceType === 'SOINS' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+          >
+            <Syringe size={12} /> Soins Infirmiers ({stats.soinsCount})
+          </button>
+          <button 
+            onClick={() => setSelectedServiceType('SORTIE')}
+            className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase transition-all flex items-center gap-1 ${selectedServiceType === 'SORTIE' ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+          >
+            <LogOut size={12} /> Sorties ({stats.sortiesCount})
           </button>
         </div>
       </div>
