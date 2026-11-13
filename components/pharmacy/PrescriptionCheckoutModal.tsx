@@ -20,6 +20,7 @@ import {
   Lock
 } from 'lucide-react';
 import { Patient, AvoirPatient, DettePatient } from '../../types';
+import { LambdaConversionModal } from '../common/LambdaConversionModal';
 
 interface PrescriptionCheckoutModalProps {
   prescription: any;
@@ -73,9 +74,12 @@ export const PrescriptionCheckoutModal: React.FC<PrescriptionCheckoutModalProps>
   const [useAvoir, setUseAvoir] = useState(false);
   const [sendToDebt, setSendToDebt] = useState(false);
   const [convertChangeToAvance, setConvertChangeToAvance] = useState(false);
+  const [convertedPatientOverride, setConvertedPatientOverride] = useState<Patient | null>(null);
+  const [showLambdaModal, setShowLambdaModal] = useState(false);
 
   // Match patient in central directory
   const matchedPatient = useMemo(() => {
+    if (convertedPatientOverride) return convertedPatientOverride;
     if (!prescription) return null;
     return patients.find(p => 
       p.id === prescription.patientId || 
@@ -92,9 +96,17 @@ export const PrescriptionCheckoutModal: React.FC<PrescriptionCheckoutModalProps>
       emergencyPhone: '',
       maritalStatus: 'CELIBATAIRE' as const
     } : null);
-  }, [prescription, patients]);
+  }, [prescription, patients, convertedPatientOverride]);
 
-  const isAnonymous = !matchedPatient || matchedPatient.id === 'PATIENT-COMPTANT';
+  const isAnonymous = Boolean(
+    !matchedPatient ||
+    matchedPatient.id === 'PATIENT-COMPTANT' ||
+    matchedPatient.isLambda === true ||
+    (matchedPatient as any).isAnonymous === true ||
+    (matchedPatient as any).patientStatus === 'LAMBDA' ||
+    (matchedPatient.lastName || '').toUpperCase() === 'LAMBDA' ||
+    (prescription?.patient || '').toUpperCase().includes('LAMBDA')
+  );
 
   // Compute live wallet
   const patientAvoirs = useMemo(() => {
@@ -465,9 +477,20 @@ export const PrescriptionCheckoutModal: React.FC<PrescriptionCheckoutModalProps>
                           </button>
                         )
                       ) : (
-                        <div className="p-2 bg-rose-100/60 rounded-lg text-[10px] text-rose-800 font-bold">
-                          ⚠️ Client comptant anonyme : Paiement intégral en espèces obligatoire.
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowLambdaModal(true)}
+                          className="w-full p-2.5 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-xl text-left flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                          title="Cliquez pour convertir en Patient Enregistré"
+                        >
+                          <span className="text-[10px] text-rose-800 font-bold flex items-center gap-1.5">
+                            <Lock size={13} className="text-rose-600 shrink-0" />
+                            Mettre en Dette (Verrouillé — Patient Lambda)
+                          </span>
+                          <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">
+                            Convertir
+                          </span>
+                        </button>
                       )}
                     </div>
                   )}
@@ -496,6 +519,18 @@ export const PrescriptionCheckoutModal: React.FC<PrescriptionCheckoutModalProps>
         </div>
 
       </div>
+
+      <LambdaConversionModal
+        isOpen={showLambdaModal}
+        onClose={() => setShowLambdaModal(false)}
+        patient={matchedPatient}
+        patientId={prescription?.patientId}
+        patientName={prescription?.patient || 'Patient Lambda'}
+        onConverted={(updatedPatient) => {
+          setConvertedPatientOverride(updatedPatient);
+          setSendToDebt(true);
+        }}
+      />
     </div>
   );
 };

@@ -410,6 +410,9 @@ export interface PaymentRequest {
   deliveredAt?: string;
   deliveredBy?: string;
   deliveredById?: string;
+  prescriberName?: string;
+  prescriberLicense?: string;
+  requiresPrescription?: boolean;
 }
 
 export interface CashierTransaction {
@@ -849,6 +852,8 @@ export interface MedicalAct {
   genereHospitalisation?: boolean;
   necessiteSurveillance?: boolean;
   necessiteConsentement?: boolean;
+  requiresPrescription?: boolean;
+  soumisOrdonnance?: boolean;
   
   modeTarification?: string;
   factureA?: string;
@@ -892,6 +897,8 @@ export interface Medication {
   quantityPerBox?: number;
   contraindications?: string[];
   alerts?: string[];
+  requiresPrescription?: boolean;
+  soumisOrdonnance?: boolean;
   
   // New fields from AddMedicationForm
   codeInterne?: string;

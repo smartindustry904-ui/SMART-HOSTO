@@ -18,6 +18,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { Patient, AvoirPatient, DettePatient } from '../../types';
+import { LambdaConversionModal } from '../common/LambdaConversionModal';
 
 interface PharmacyCheckoutPanelProps {
   cart: any[];
@@ -29,6 +30,8 @@ interface PharmacyCheckoutPanelProps {
   directAmountReceived: string;
   isProcessing: boolean;
   currency?: string;
+  user?: any;
+  establishment?: any;
   onRemoveFromCart: (id: string) => void;
   onSelectPatient: (patient: Patient | null) => void;
   onSetPaymentMethod: (method: any) => void;
@@ -41,6 +44,8 @@ interface PharmacyCheckoutPanelProps {
     debtAmount: number;
     cashRemis: number;
     changeToAvanceAmount?: number;
+    prescriberName?: string;
+    prescriberLicense?: string;
   }) => void;
 }
 
@@ -54,6 +59,8 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
   directAmountReceived,
   isProcessing,
   currency = 'FCFA',
+  user,
+  establishment,
   onRemoveFromCart,
   onSelectPatient,
   onSetPaymentMethod,
@@ -65,6 +72,9 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
   const [useAvoir, setUseAvoir] = useState(false);
   const [sendToDebt, setSendToDebt] = useState(false);
   const [convertChangeToAvance, setConvertChangeToAvance] = useState(false);
+  const [prescriberName, setPrescriberName] = useState('');
+  const [prescriberLicense, setPrescriberLicense] = useState('');
+  const [showLambdaModal, setShowLambdaModal] = useState(false);
 
   // Filter patients for linking
   const matchingPatients = useMemo(() => {
@@ -109,10 +119,26 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
   const rawChange = receivedNum > netToPay ? receivedNum - netToPay : 0;
   const rawShortage = receivedNum < netToPay ? netToPay - receivedNum : 0;
 
-  const changeConvertedToAvance = (convertChangeToAvance && linkedPatient) ? rawChange : 0;
-  const cashChangeToReturn = convertChangeToAvance ? 0 : rawChange;
+  const hasPrescriptionItem = useMemo(() => {
+    return cart.some(item => Boolean(item.requiresPrescription || item.soumisOrdonnance));
+  }, [cart]);
 
-  const createdDebt = (linkedPatient && sendToDebt) 
+  const isPrescriberValid = !hasPrescriptionItem || prescriberName.trim() !== '' || prescriberLicense.trim() !== '';
+
+  const isLambdaPatient = useMemo(() => {
+    if (!linkedPatient) return true;
+    return Boolean(
+      linkedPatient.isLambda === true ||
+      (linkedPatient as any).isAnonymous === true ||
+      (linkedPatient as any).patientStatus === 'LAMBDA' ||
+      (linkedPatient.lastName || '').toUpperCase() === 'LAMBDA'
+    );
+  }, [linkedPatient]);
+
+  const changeConvertedToAvance = (convertChangeToAvance && linkedPatient && !isLambdaPatient) ? rawChange : 0;
+  const cashChangeToReturn = convertChangeToAvance && !isLambdaPatient ? 0 : rawChange;
+
+  const createdDebt = (linkedPatient && !isLambdaPatient && sendToDebt) 
     ? (paymentMethod === 'CASH' ? rawShortage : 0)
     : 0;
 
@@ -120,9 +146,10 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
 
   const isPaymentValid = useMemo(() => {
     if (cart.length === 0) return false;
+    if (!isPrescriberValid) return false;
     if (netToPay === 0) return true; // Fully covered by Avoir!
-    if (!linkedPatient) {
-      // Anonymous Walk-in: STRICT FULL PAYMENT REQUIRED
+    if (!linkedPatient || isLambdaPatient) {
+      // Anonymous Walk-in or Lambda: STRICT FULL PAYMENT REQUIRED
       if (paymentMethod === 'CASH') return receivedNum >= netToPay;
       return true;
     }
@@ -134,12 +161,22 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
     if (sendToDebt) return true;
     if (paymentMethod === 'CASH') return receivedNum >= netToPay;
     return true; // Mobile/Card
-  }, [cart.length, netToPay, linkedPatient, isCreditBlocked, sendToDebt, paymentMethod, receivedNum]);
+  }, [cart.length, isPrescriberValid, netToPay, linkedPatient, isLambdaPatient, isCreditBlocked, sendToDebt, paymentMethod, receivedNum]);
 
   const handleLinkPatient = (patient: Patient) => {
     onSelectPatient(patient);
     setPatientSearch('');
     setShowSearchDropdown(false);
+    const isLamb = Boolean(
+      patient.isLambda === true ||
+      (patient as any).isAnonymous === true ||
+      (patient as any).patientStatus === 'LAMBDA' ||
+      (patient.lastName || '').toUpperCase() === 'LAMBDA'
+    );
+    if (isLamb) {
+      setSendToDebt(false);
+      setConvertChangeToAvance(false);
+    }
   };
 
   const handleUnlinkPatient = () => {
@@ -151,14 +188,20 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
 
   const handlePayClick = () => {
     onSubmitPayment({
-      useAvoir: linkedPatient ? useAvoir : false,
-      sendToDebt: linkedPatient ? sendToDebt : false,
-      convertChangeToAvance: linkedPatient && convertChangeToAvance && rawChange > 0,
+      useAvoir: linkedPatient && !isLambdaPatient ? useAvoir : false,
+      sendToDebt: linkedPatient && !isLambdaPatient ? sendToDebt : false,
+      convertChangeToAvance: linkedPatient && !isLambdaPatient && convertChangeToAvance && rawChange > 0,
       avoirAmount: appliedAvoir,
       debtAmount: createdDebt,
       cashRemis: receivedNum || (netToPay - createdDebt),
-      changeToAvanceAmount: changeConvertedToAvance
+      changeToAvanceAmount: changeConvertedToAvance,
+      prescriberName: prescriberName.trim() || undefined,
+      prescriberLicense: prescriberLicense.trim() || undefined
     });
+    if (hasPrescriptionItem) {
+      setPrescriberName('');
+      setPrescriberLicense('');
+    }
   };
 
   const quickPresets = [
@@ -440,8 +483,8 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
                   </span>
                 </div>
 
-                {/* CONVERT TO AVANCE BUTTON (IF PATIENT LINKED) */}
-                {linkedPatient && (
+                {/* CONVERT TO AVANCE BUTTON (DISABLED IF LAMBDA/ANONYMOUS) */}
+                {linkedPatient && !isLambdaPatient ? (
                   <button
                     type="button"
                     onClick={() => setConvertChangeToAvance(!convertChangeToAvance)}
@@ -461,6 +504,12 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
                       +{rawChange.toLocaleString()} F
                     </span>
                   </button>
+                ) : (
+                  <div className="w-full p-2 rounded-xl border border-white/10 bg-white/5 opacity-60 flex items-center justify-between gap-2 cursor-not-allowed">
+                    <span className="text-[10px] font-bold text-slate-400 flex items-center gap-1.5">
+                      <Lock size={12} className="text-amber-400" /> Avance désactivée (Patient Lambda)
+                    </span>
+                  </div>
                 )}
               </div>
             )}
@@ -477,8 +526,8 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
                   </span>
                 </div>
 
-                {/* TRANSFER SHORTAGE TO DEBT (IF PATIENT LINKED) */}
-                {linkedPatient ? (
+                {/* TRANSFER SHORTAGE TO DEBT */}
+                {linkedPatient && !isLambdaPatient ? (
                   isCreditBlocked ? (
                     <div className="p-2.5 bg-rose-950/80 border border-rose-500/50 rounded-xl flex items-center gap-2 text-rose-200 text-[10px] font-bold">
                       <Lock size={14} className="text-rose-400 shrink-0" />
@@ -506,11 +555,55 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
                     </button>
                   )
                 ) : (
-                  <div className="p-2 bg-rose-950/60 border border-rose-500/30 rounded-lg text-[9px] text-rose-300 font-bold">
-                    ⚠️ Client anonyme : Le paiement doit être versé en intégralité.
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowLambdaModal(true)}
+                    className="w-full p-2.5 bg-rose-950/60 hover:bg-rose-950/90 border border-rose-500/40 rounded-xl text-left flex items-center justify-between gap-2 transition-colors cursor-pointer"
+                    title="Cliquez pour convertir en Patient Enregistré"
+                  >
+                    <div className="flex items-center gap-1.5 text-[10px] text-rose-200 font-bold">
+                      <Lock size={13} className="text-rose-400 shrink-0" />
+                      <span>Mettre en Dette (Verrouillé — Patient Lambda)</span>
+                    </div>
+                    <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      Convertir
+                    </span>
+                  </button>
                 )}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* POS GUARD: SOUMIS À ORDONNANCE */}
+        {hasPrescriptionItem && (
+          <div className="p-3.5 bg-rose-950/60 border border-rose-500/50 rounded-2xl space-y-2.5 animate-in fade-in">
+            <div className="flex items-center gap-2 text-rose-300">
+              <AlertTriangle size={15} className="shrink-0 text-rose-400" />
+              <span className="text-[10px] font-black uppercase tracking-wider">
+                Produit(s) Soumis à Ordonnance — Prescripteur Requis
+              </span>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              <input
+                type="text"
+                placeholder="Nom du Prescripteur (ex: Dr. Mbarga)..."
+                value={prescriberName}
+                onChange={(e) => setPrescriberName(e.target.value)}
+                className="w-full px-3 py-2 bg-white/10 border border-white/15 rounded-xl text-xs font-bold text-white placeholder:text-slate-400 focus:outline-none focus:border-rose-400"
+              />
+              <input
+                type="text"
+                placeholder="OU Numéro d'Ordre (ex: ONMC-4521)..."
+                value={prescriberLicense}
+                onChange={(e) => setPrescriberLicense(e.target.value)}
+                className="w-full px-3 py-2 bg-white/10 border border-white/15 rounded-xl text-xs font-bold font-mono text-white placeholder:text-slate-400 focus:outline-none focus:border-rose-400"
+              />
+            </div>
+            {!isPrescriberValid && (
+              <p className="text-[10px] font-bold text-amber-300">
+                ⚠️ Saisissez le Nom du Prescripteur ou le Numéro d'Ordre pour débloquer l'encaissement.
+              </p>
             )}
           </div>
         )}
@@ -523,11 +616,27 @@ export const PharmacyCheckoutPanel: React.FC<PharmacyCheckoutPanelProps> = ({
         >
           {isProcessing ? (
             <><Loader2 size={15} className="animate-spin" /> Traitement Caisse...</>
+          ) : !isPrescriberValid ? (
+            <><Lock size={15} /> Ordonnance / Prescripteur Requis</>
           ) : (
             <><CheckCircle size={15} /> Payer & Délivrer Médicaments</>
           )}
         </button>
       </div>
+
+      <LambdaConversionModal
+        isOpen={showLambdaModal}
+        onClose={() => setShowLambdaModal(false)}
+        patient={linkedPatient}
+        patientId={linkedPatient?.id}
+        patientName={linkedPatient ? `${linkedPatient.firstName} ${linkedPatient.lastName}` : 'Client Comptant (Lambda)'}
+        user={user}
+        establishment={establishment}
+        onConverted={(updatedPatient) => {
+          onSelectPatient(updatedPatient);
+          setSendToDebt(true);
+        }}
+      />
     </div>
   );
 };

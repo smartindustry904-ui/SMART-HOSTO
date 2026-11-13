@@ -260,6 +260,22 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
 
   const handleSelectPatientForTriage = (patient: any) => {
     setActivePatient(patient);
+    // Auto-clear from Accueil waiting room immediately on "Prendre en charge"
+    (async () => {
+      try {
+        const pids = [patient.patientId, patient.id, patient.dmeId].filter(Boolean);
+        for (const pid of pids) {
+          const snap = await getDocs(query(collection(db, 'service_queues'), where('patientId', '==', pid)));
+          snap.docs.forEach(d => {
+            updateDoc(doc(db, 'service_queues', d.id), {
+              takenInCharge: true,
+              attente_module: 'EN_COURS',
+              calledAt: new Date().toISOString()
+            }).catch(() => {});
+          });
+        }
+      } catch {}
+    })();
     if (patient.vitals) {
       setVitals(prev => ({
         ...prev,
@@ -1563,9 +1579,28 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                               ) : (
                                 <button
                                   type="button"
-                                  onClick={() => {
+                                  onClick={async () => {
                                     setSelectedActForExecution(act);
                                     setExecutionNotes(act.instructions ? `Soin réalisé selon consignes médicales.` : '');
+                                    // Auto-clear from Accueil Salle d'Attente upon nurse taking charge
+                                    try {
+                                      const pid = act.patientId || act.patientDme;
+                                      if (pid) {
+                                        const qSnap = await getDocs(query(collection(db, 'service_queues'), where('patientId', '==', pid)));
+                                        qSnap.docs.forEach(d => {
+                                          const qData = d.data();
+                                          if (belongsToTenant(qData, activeTenantId) && (qData.status === 'waiting' || qData.status === 'waiting_triage')) {
+                                            updateDoc(d.ref, {
+                                              takenInCharge: true,
+                                              attente_module: 'EN_COURS',
+                                              calledAt: new Date().toISOString()
+                                            }).catch(() => {});
+                                          }
+                                        });
+                                      }
+                                    } catch (e) {
+                                      console.error('Error clearing queue on act execution:', e);
+                                    }
                                   }}
                                   className={`px-4 py-2 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all inline-flex items-center gap-1.5 shadow-sm cursor-pointer ${
                                     isUrg

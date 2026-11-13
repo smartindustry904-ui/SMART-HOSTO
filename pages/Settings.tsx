@@ -92,6 +92,7 @@ const PRIMARY_ROLES = [
 const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBackToDashboard, theme = 'light', toggleTheme }) => {
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
   const [showAddMedication, setShowAddMedication] = useState(false);
+  const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
   const [showAddMedicalAct, setShowAddMedicalAct] = useState(false);
   const [editingMedicalAct, setEditingMedicalAct] = useState<MedicalAct | null>(null);
   const [showAddConsumable, setShowAddConsumable] = useState(false);
@@ -2145,7 +2146,14 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                           .map(a => (
                             <tr key={a.id} className="hover:bg-slate-50/70 transition-colors">
                               <td className="px-4 py-3.5">
-                                <div className="font-extrabold text-sm text-slate-900">{a.name || a.nom}</div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-extrabold text-sm text-slate-900">{a.name || a.nom}</span>
+                                  {(a.requiresPrescription || a.soumisOrdonnance) && (
+                                    <span className="text-[9px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 rounded-full">
+                                      🔒 Ordonnance
+                                    </span>
+                                  )}
+                                </div>
                                 {a.codeInterne && (
                                   <span className="inline-block mt-0.5 text-[9px] font-mono font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
                                     {a.codeInterne}
@@ -2301,11 +2309,16 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                             <div key={m.id} className="p-4 bg-white rounded-2xl border border-slate-200/80 hover:border-blue-200 transition-all shadow-sm flex flex-col justify-between gap-3">
                               <div className="flex items-start justify-between gap-2">
                                 <div>
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
                                     <h4 className="font-extrabold text-slate-900 text-sm">{m.name}</h4>
                                     <span className="text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md">
                                       {m.family || m.classeTherapeutique || 'Général'}
                                     </span>
+                                    {(m.requiresPrescription || m.soumisOrdonnance) && (
+                                      <span className="text-[9px] font-black uppercase tracking-wider bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 rounded-full">
+                                        🔒 Ordonnance
+                                      </span>
+                                    )}
                                   </div>
                                   <p className="text-xs text-slate-500 font-medium mt-0.5">
                                     Conditionnement: <span className="font-bold text-slate-700">{m.unit || m.typeConditionnement || 'Boîte'}</span>
@@ -2339,6 +2352,16 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                                 </div>
 
                                 <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setEditingMedication(m);
+                                      setShowAddMedication(true);
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                                    title="Modifier le médicament"
+                                  >
+                                    <Edit2 size={15} />
+                                  </button>
                                   <button
                                     onClick={() => setSelectedMedForRestock(m)}
                                     className="px-3 py-1.5 rounded-xl font-bold text-xs bg-emerald-600 text-white hover:bg-emerald-700 transition-colors flex items-center gap-1 shadow-sm"
@@ -2807,11 +2830,15 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
 
       {showAddMedication && (
         <AddMedicationForm 
-          onClose={() => setShowAddMedication(false)}
+          initialData={editingMedication}
+          onClose={() => {
+            setShowAddMedication(false);
+            setEditingMedication(null);
+          }}
           onSave={async (med) => {
             try {
-              const medId = `MED-${Date.now()}`;
-              const newMed = {
+              const medId = editingMedication?.id || `MED-${Date.now()}`;
+              const payload: any = {
                 id: medId,
                 name: med.name,
                 family: med.family,
@@ -2821,14 +2848,19 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 price: med.price,
                 prixVente: med.price,
                 seuilAlerte: med.seuilAlerte,
-                stock: 0, // Initial stock is 0
-                reservedStock: 0,
-                createdAt: new Date().toISOString(),
+                requiresPrescription: Boolean(med.requiresPrescription),
+                soumisOrdonnance: Boolean(med.requiresPrescription),
                 updatedAt: new Date().toISOString()
               };
-              await setDoc(doc(db, 'pharmacy_inventory', medId), sanitizeData(stampTenantData(newMed, user, establishment)));
+              if (!editingMedication) {
+                payload.stock = 0;
+                payload.reservedStock = 0;
+                payload.createdAt = new Date().toISOString();
+              }
+              await setDoc(doc(db, 'pharmacy_inventory', medId), sanitizeData(stampTenantData(payload, user, establishment)), { merge: true });
               setShowAddMedication(false);
-              showMessage('success', `Médicament "${med.name}" ajouté avec succès`);
+              setEditingMedication(null);
+              showMessage('success', editingMedication ? `Médicament "${med.name}" mis à jour avec succès` : `Médicament "${med.name}" ajouté avec succès`);
             } catch (error) {
               console.error("Error saving medication:", error);
               showMessage('error', 'Erreur lors de l\'enregistrement');

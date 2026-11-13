@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Save, Pill, AlertCircle } from 'lucide-react';
 
 interface AddMedicationFormProps {
+  initialData?: any;
   onClose: () => void;
   onSave: (medication: {
     name: string;
@@ -9,6 +10,7 @@ interface AddMedicationFormProps {
     unit: string;
     price: number;
     seuilAlerte: number;
+    requiresPrescription: boolean;
   }) => void;
 }
 
@@ -38,15 +40,21 @@ const UNIT_OPTIONS = [
   'Unité'
 ];
 
-const AddMedicationForm: React.FC<AddMedicationFormProps> = ({ onClose, onSave }) => {
+const AddMedicationForm: React.FC<AddMedicationFormProps> = ({ initialData, onClose, onSave }) => {
+  const initialFam = initialData?.family || initialData?.classeTherapeutique || 'Antalgiques & Anti-pyrétiques';
+  const isCustomFam = initialFam && !CATEGORY_OPTIONS.includes(initialFam);
+  const initialUnitVal = initialData?.unit || initialData?.typeConditionnement || 'Boîte';
+  const isCustomUnitVal = initialUnitVal && !UNIT_OPTIONS.includes(initialUnitVal);
+
   const [formData, setFormData] = useState({
-    name: '',
-    family: 'Antalgiques & Anti-pyrétiques',
-    customFamily: '',
-    unit: 'Boîte',
-    customUnit: '',
-    price: '',
-    seuilAlerte: '10'
+    name: initialData?.name || initialData?.nomCommercial || initialData?.nom || '',
+    family: isCustomFam ? 'Autre' : (initialFam || 'Antalgiques & Anti-pyrétiques'),
+    customFamily: isCustomFam ? initialFam : '',
+    unit: isCustomUnitVal ? 'Autre' : (initialUnitVal || 'Boîte'),
+    customUnit: isCustomUnitVal ? initialUnitVal : '',
+    price: (initialData?.price ?? initialData?.prixVente ?? '').toString(),
+    seuilAlerte: (initialData?.seuilAlerte ?? '10').toString(),
+    requiresPrescription: Boolean(initialData?.requiresPrescription || initialData?.soumisOrdonnance)
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -92,24 +100,29 @@ const AddMedicationForm: React.FC<AddMedicationFormProps> = ({ onClose, onSave }
         family: finalFamily,
         unit: finalUnit,
         price: parseFloat(formData.price),
-        seuilAlerte: parseInt(formData.seuilAlerte, 10)
+        seuilAlerte: parseInt(formData.seuilAlerte, 10),
+        requiresPrescription: formData.requiresPrescription
       });
     }
   };
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
+      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
         
         {/* Header */}
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20">
               <Pill size={22} />
             </div>
             <div>
-              <h2 className="text-lg font-black text-slate-900">Nouveau Médicament</h2>
-              <p className="text-xs text-slate-500 font-medium">Ajout d'une référence au catalogue</p>
+              <h2 className="text-lg font-black text-slate-900">
+                {initialData ? 'Modifier le Médicament' : 'Nouveau Médicament'}
+              </h2>
+              <p className="text-xs text-slate-500 font-medium">
+                {initialData ? 'Mise à jour de la référence catalogue' : 'Ajout d\'une référence au catalogue'}
+              </p>
             </div>
           </div>
           <button 
@@ -121,7 +134,7 @@ const AddMedicationForm: React.FC<AddMedicationFormProps> = ({ onClose, onSave }
         </div>
 
         {/* Form Body */}
-        <form id="med-form" onSubmit={handleSubmit} className="p-6 space-y-5">
+        <form id="med-form" onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
           
           {/* 1. Name */}
           <div>
@@ -243,18 +256,42 @@ const AddMedicationForm: React.FC<AddMedicationFormProps> = ({ onClose, onSave }
             </div>
           </div>
 
+          {/* 5. Medical Compliance: Soumis à ordonnance */}
+          <label className={`flex items-start gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all ${
+            formData.requiresPrescription
+              ? 'bg-rose-50/70 border-rose-300'
+              : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+          }`}>
+            <input
+              type="checkbox"
+              checked={formData.requiresPrescription}
+              onChange={(e) => setFormData(prev => ({ ...prev, requiresPrescription: e.target.checked }))}
+              className="mt-0.5 w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+            />
+            <div>
+              <span className="text-xs font-black uppercase tracking-wider text-slate-900 block">
+                Soumis à ordonnance (Prescription obligatoire)
+              </span>
+              <span className="text-[11px] font-medium text-slate-500 block mt-0.5">
+                Bloque la vente libre en Pharmacie sans Nom du Prescripteur ou Numéro d'Ordre.
+              </span>
+            </div>
+          </label>
+
           {/* Informational note */}
-          <div className="p-3.5 bg-blue-50/60 border border-blue-100 rounded-2xl flex items-start gap-2.5">
-            <AlertCircle size={18} className="text-blue-600 shrink-0 mt-0.5" />
-            <p className="text-xs font-semibold text-blue-900 leading-relaxed">
-              Le médicament sera créé avec un stock de <strong>0 unité</strong>. Vous pourrez réaliser un réapprovisionnement ultérieur pour spécifier le numéro de lot, la date de péremption et la quantité initiale.
-            </p>
-          </div>
+          {!initialData && (
+            <div className="p-3.5 bg-blue-50/60 border border-blue-100 rounded-2xl flex items-start gap-2.5">
+              <AlertCircle size={18} className="text-blue-600 shrink-0 mt-0.5" />
+              <p className="text-xs font-semibold text-blue-900 leading-relaxed">
+                Le médicament sera créé avec un stock de <strong>0 unité</strong>. Vous pourrez réaliser un réapprovisionnement ultérieur pour spécifier le numéro de lot, la date de péremption et la quantité initiale.
+              </p>
+            </div>
+          )}
 
         </form>
 
         {/* Footer */}
-        <div className="p-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
+        <div className="p-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3 shrink-0">
           <button 
             type="button"
             onClick={onClose}
@@ -267,7 +304,7 @@ const AddMedicationForm: React.FC<AddMedicationFormProps> = ({ onClose, onSave }
             form="med-form"
             className="px-6 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/20"
           >
-            <Save size={16} /> Créer la référence
+            <Save size={16} /> {initialData ? 'Enregistrer les modifications' : 'Créer la référence'}
           </button>
         </div>
 

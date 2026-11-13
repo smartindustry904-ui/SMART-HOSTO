@@ -89,6 +89,8 @@ const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, 
     genereHospitalisation: initialData?.genereHospitalisation || false,
     necessiteSurveillance: initialData?.necessiteSurveillance || false,
     necessiteConsentement: initialData?.necessiteConsentement || false,
+    requiresPrescription: Boolean(initialData?.requiresPrescription || initialData?.soumisOrdonnance),
+    soumisOrdonnance: Boolean(initialData?.requiresPrescription || initialData?.soumisOrdonnance),
 
     // Facturation
     prixBase: initialData?.price?.toString() || initialData?.prixBase?.toString() || '',
@@ -542,6 +544,35 @@ const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, 
                       placeholder="Description détaillée de la prestation, indications et contre-indications..."
                     />
                   </div>
+
+                  {/* Conformité Médicale : Soumis à ordonnance */}
+                  <label className={`flex items-start gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all ${
+                    formData.requiresPrescription
+                      ? 'bg-rose-50/70 border-rose-300'
+                      : 'bg-slate-50 border-slate-200 hover:border-slate-300'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(formData.requiresPrescription)}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setFormData(prev => ({
+                          ...prev,
+                          requiresPrescription: checked,
+                          soumisOrdonnance: checked
+                        }));
+                      }}
+                      className="mt-0.5 w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                    />
+                    <div>
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-900 block">
+                        Soumis à ordonnance (Prescription médicale obligatoire)
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-500 block mt-0.5">
+                        Oblige l'Accueil à saisir le Nom du Prescripteur ou Numéro d'Ordre avant d'orienter le patient vers cet acte / soin.
+                      </span>
+                    </div>
+                  </label>
                 </div>
               </div>
             )}

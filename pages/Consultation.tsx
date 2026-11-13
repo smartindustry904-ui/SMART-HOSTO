@@ -104,7 +104,12 @@ const Consultation: React.FC<ConsultationProps> = ({
           const sqSnap = await getDocs(qSq);
           if (!sqSnap.empty) {
             for (const d of sqSnap.docs) {
-              await updateDoc(doc(db, 'service_queues', d.id), { status: 'in_consultation' });
+              await updateDoc(doc(db, 'service_queues', d.id), {
+                status: 'in_consultation',
+                takenInCharge: true,
+                attente_module: 'EN_COURS',
+                calledAt: new Date().toISOString()
+              });
             }
           } else {
             await setDoc(doc(collection(db, 'service_queues')), sanitizeData(stampTenantData({
@@ -512,6 +517,8 @@ const Consultation: React.FC<ConsultationProps> = ({
           for (const dSnap of snaps.docs) {
             await updateDoc(doc(db, 'service_queues', dSnap.id), { 
               status: 'in_consultation',
+              takenInCharge: true,
+              attente_module: 'EN_COURS',
               calledAt: today.toISOString(),
               emergencyBypass: !isPaid && isEmergency
             });

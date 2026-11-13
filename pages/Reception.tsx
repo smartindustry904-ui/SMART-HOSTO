@@ -58,7 +58,7 @@ interface ReceptionProps {
 export interface MotifPriseEnCharge {
   id: string;
   label: string;
-  category: 'CONSULTATIONS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES';
+  category: 'CONSULTATIONS' | 'SOINS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES';
   serviceId: string;       // SRV-CONSULTATION, SRV-MATERNITE, etc.
   queueName: string;       // File d'attente
   speciality: string;      // Spécialité médicale
@@ -66,6 +66,7 @@ export interface MotifPriseEnCharge {
   actId?: string;
   codeInterne?: string;
   description?: string;
+  requiresPrescription?: boolean;
 }
 
 export const buildMotifsFromMedicalActsAndServices = (
@@ -215,13 +216,18 @@ export const buildMotifsFromMedicalActsAndServices = (
     }
 
     const serviceId = matchedService?.id || act.serviceId || act.servicePrincipal || 'SRV-CONSULTATION';
+    const actName = act.name || act.nom || (matchedService ? matchedService.name : 'Acte médical');
+    // Strict Module Separation: Pharmacie is NEVER routed by Accueil
+    if (serviceId === 'SRV-PHARMACIE' || /pharmacie|dispensaire/i.test(`${serviceId} ${matchedService?.name || ''} ${actName}`)) {
+      continue;
+    }
+
     coveredServiceIds.add(serviceId.toLowerCase());
 
-    const actName = act.name || act.nom || (matchedService ? matchedService.name : 'Acte médical');
     const actPrice = Number(act.price ?? act.prixBase ?? (matchedService?.specificSettings?.consultationFee || matchedService?.specificSettings?.fee || 10000));
 
     // Determine category based on matched service and act
-    let category: 'CONSULTATIONS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES' = 'CONSULTATIONS';
+    let category: 'CONSULTATIONS' | 'SOINS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES' = 'CONSULTATIONS';
 
     const isGynecoAct = /gynéco|gyneco/i.test(`${actName} ${act.sousService} ${act.category}`);
     const isCPNAct = /cpn|prénatale|prenatale|postnatale|grossesse/i.test(`${actName} ${act.sousService}`);
@@ -238,7 +244,12 @@ export const buildMotifsFromMedicalActsAndServices = (
     } else if (serviceId === 'SRV-HOSPITALISATION' || /hospitalis/i.test(matchedService?.name || '')) {
       category = 'HOSPITALISATION';
     } else if (
-      ['SRV-LABO', 'SRV-INFIRMIER', 'SRV-VACCINATION', 'SRV-PHARMACIE', 'SRV-IMAGERIE', 'SRV-KINE', 'SRV-NUTRITION'].includes(serviceId) ||
+      serviceId === 'SRV-INFIRMIER' ||
+      /soin|infirmier|pansement|injection|perfusion|suture/i.test(actName + ' ' + (act.categorie || '') + ' ' + (matchedService?.name || ''))
+    ) {
+      category = 'SOINS';
+    } else if (
+      ['SRV-LABO', 'SRV-VACCINATION', 'SRV-IMAGERIE', 'SRV-KINE', 'SRV-NUTRITION'].includes(serviceId) ||
       matchedService?.type === 'technique' || 
       matchedService?.type === 'soutien'
     ) {
@@ -273,14 +284,15 @@ export const buildMotifsFromMedicalActsAndServices = (
       fee: actPrice,
       actId: act.id,
       codeInterne: act.codeInterne || (act as any).code || '',
-      description: act.description || matchedService?.description || ''
-    });
+      description: act.description || matchedService?.description || '',
+      requiresPrescription: Boolean(act.requiresPrescription || act.soumisOrdonnance)
+    } as any);
   }
 
   // DYNAMIC INCLUSION: For every ACTIVE service in servicesToUse not yet covered by an act,
   // create an immediate, usable destination motif in Accueil!
-  // Exclude purely administrative internal services (like SRV-ACCUEIL, SRV-CAISSE, SRV-ADMIN, SRV-RH, SRV-ARCHIVES)
-  const nonClinicalAdminServices = ['SRV-ACCUEIL', 'SRV-CAISSE', 'SRV-ADMIN', 'SRV-RH', 'SRV-ARCHIVES'];
+  // Exclude purely administrative internal services AND Pharmacie (never routed from Accueil)
+  const nonClinicalAdminServices = ['SRV-ACCUEIL', 'SRV-CAISSE', 'SRV-ADMIN', 'SRV-RH', 'SRV-ARCHIVES', 'SRV-PHARMACIE'];
 
   for (const s of servicesToUse) {
     if (!isServiceActive(s)) continue;
@@ -289,9 +301,11 @@ export const buildMotifsFromMedicalActsAndServices = (
 
     // If no motif exists for this service, create a direct orientation motif
     if (!coveredServiceIds.has(s.id.toLowerCase())) {
-      let category: 'CONSULTATIONS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES' = 'CONSULTATIONS';
+      let category: 'CONSULTATIONS' | 'SOINS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES' = 'CONSULTATIONS';
       if (s.id === 'SRV-MATERNITE' || /matern/i.test(s.name)) {
         category = 'MATERNITE';
+      } else if (s.id === 'SRV-INFIRMIER' || /soin|infirmier/i.test(s.name)) {
+        category = 'SOINS';
       } else if (s.id === 'SRV-URGENCES' || /urgence/i.test(s.name)) {
         category = 'URGENCES';
       } else if (s.id === 'SRV-HOSPITALISATION' || /hospitalis/i.test(s.name)) {
@@ -501,16 +515,55 @@ const Reception: React.FC<ReceptionProps> = ({
     return Array.from(set).sort();
   }, [patientsToDischarge]);
 
+  const enrichedPatientsToDischarge = useMemo(() => {
+    return patientsToDischarge.map(patient => {
+      const pids = [patient.patientId, patient.id, patient.dmeId].filter(Boolean);
+      const unpaidReqs = paymentRequests.filter(pr => {
+        const matchesPatient = pids.includes(pr.patientId) || pids.includes((pr as any).patientDme);
+        if (!matchesPatient) return false;
+        const st = String(pr.status || '').toUpperCase();
+        if (['PAID', 'SOLDE', 'DELIVERED', 'CANCELLED', 'ANNULE'].includes(st)) return false;
+        const rem = Number((pr as any).remainingAmount ?? ((pr.totalAmount || 0) - ((pr as any).amountPaid || 0)));
+        return rem > 0;
+      });
+
+      const unpaidItems = unpaidReqs.map(pr => {
+        const rem = Number((pr as any).remainingAmount ?? ((pr.totalAmount || 0) - ((pr as any).amountPaid || 0)));
+        const firstItemName = pr.items && pr.items.length > 0
+          ? pr.items.map(i => i.name).join(', ')
+          : (pr.type || 'Facture en attente');
+        const modLabel = pr.sourceModule || pr.requestingService || pr.type || 'Caisse';
+        return {
+          id: pr.id,
+          label: firstItemName,
+          module: modLabel,
+          amount: rem
+        };
+      });
+
+      const totalUnpaidAmount = unpaidItems.reduce((sum, item) => sum + item.amount, 0);
+      const hasDebtLock = Boolean((patient as any).hasOutstandingEmergencyDebt || (patient as any).isLockedForDischarge);
+      const effectiveFinancialClearance = Boolean(patient.financialClearance) && totalUnpaidAmount === 0 && !hasDebtLock;
+
+      return {
+        ...patient,
+        financialClearance: effectiveFinancialClearance,
+        unpaidItems,
+        totalUnpaidAmount
+      };
+    });
+  }, [patientsToDischarge, paymentRequests]);
+
   const sortieStats = useMemo(() => {
-    const total = patientsToDischarge.length;
-    const ready = patientsToDischarge.filter(p => p.medicalClearance && p.hospitalizationClosed && p.financialClearance).length;
-    const pendingCaisse = patientsToDischarge.filter(p => !p.financialClearance).length;
-    const pendingMedical = patientsToDischarge.filter(p => !p.medicalClearance || !p.hospitalizationClosed).length;
+    const total = enrichedPatientsToDischarge.length;
+    const ready = enrichedPatientsToDischarge.filter(p => p.medicalClearance && p.hospitalizationClosed && p.financialClearance).length;
+    const pendingCaisse = enrichedPatientsToDischarge.filter(p => !p.financialClearance).length;
+    const pendingMedical = enrichedPatientsToDischarge.filter(p => !p.medicalClearance || !p.hospitalizationClosed).length;
     return { total, ready, pendingCaisse, pendingMedical };
-  }, [patientsToDischarge]);
+  }, [enrichedPatientsToDischarge]);
 
   const filteredAndSortedPatientsToDischarge = useMemo(() => {
-    return [...patientsToDischarge]
+    return [...enrichedPatientsToDischarge]
       .sort((a, b) => getSortieTimestamp(b) - getSortieTimestamp(a))
       .filter(patient => {
         // 1. Search Query
@@ -602,7 +655,12 @@ const Reception: React.FC<ReceptionProps> = ({
   
   const [visitMotif, setVisitMotif] = useState<VisitMotif | null>(null);
   const [selectedMotif, setSelectedMotif] = useState<MotifPriseEnCharge | null>(null);
-  const [currentMotifCategory, setCurrentMotifCategory] = useState<'CONSULTATIONS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES'>('CONSULTATIONS');
+  const [currentMotifCategory, setCurrentMotifCategory] = useState<'CONSULTATIONS' | 'SOINS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES'>('CONSULTATIONS');
+  const [isEditingPatientProfile, setIsEditingPatientProfile] = useState(false);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [soinsPrescriberName, setSoinsPrescriberName] = useState('');
+  const [soinsPrescriberLicense, setSoinsPrescriberLicense] = useState('');
+  const [soinsSearchQuery, setSoinsSearchQuery] = useState('');
 
   const renderStepper = (activeStep: 1 | 2 | 3) => {
     const steps = [
@@ -1489,7 +1547,10 @@ const Reception: React.FC<ReceptionProps> = ({
         practitionerName: user?.name || user?.username || 'Agent Accueil',
         practitionerRole: user?.role || 'RECEPTIONIST',
         requestedBy: user?.name || user?.username || 'Agent Accueil',
-        requestedById: user?.id || ''
+        requestedById: user?.id || '',
+        prescriberName: soinsPrescriberName.trim() || undefined,
+        prescriberLicense: soinsPrescriberLicense.trim() || undefined,
+        requiresPrescription: Boolean(selectedMotif?.requiresPrescription)
       };
       reqIdForLog = createdRequest.id;
       const tenantStampedRequest = stampTenantData(createdRequest, user, establishment);
@@ -1682,6 +1743,11 @@ const Reception: React.FC<ReceptionProps> = ({
           serviceId: targetSvcId,
           status: initialStatus,
           paymentStatus: 'AWAITING_PAYMENT',
+          paymentRequestId: createdRequest?.id || '',
+          attente_module: 'CAISSE',
+          takenInCharge: false,
+          prescriberName: soinsPrescriberName.trim() || undefined,
+          prescriberLicense: soinsPrescriberLicense.trim() || undefined,
           priority: effectiveSendToNurseTriage ? 'normal' : computedPriorityAndAlerts.priority,
           priorityAlerts: effectiveSendToNurseTriage ? [] : computedPriorityAndAlerts.alerts,
           admittedBy: user?.name || user?.username || 'Agent Accueil',
@@ -1783,6 +1849,9 @@ const Reception: React.FC<ReceptionProps> = ({
           priority: computedPriorityAndAlerts.priority === 'normal' ? 'NORMAL' : (computedPriorityAndAlerts.priority === 'urgent' ? 'HIGH' : 'CRITICAL'),
           paymentStatus: 'AWAITING_PAYMENT',
           paymentRequestId: createdRequest?.id || '',
+          prescriberName: soinsPrescriberName.trim() || undefined,
+          prescriberLicense: soinsPrescriberLicense.trim() || undefined,
+          requiresPrescription: Boolean(selectedMotif?.requiresPrescription),
           createdAt: new Date().toISOString(),
           requestedBy: user?.name || user?.username || 'Agent Accueil',
           requestedById: user?.id || '',
@@ -1877,13 +1946,69 @@ const Reception: React.FC<ReceptionProps> = ({
     }
   };
 
+  const handleSavePatientProfile = async (continueToTriage = false) => {
+    if (!permissions.canWrite || !currentPatient.lastName?.trim() || !currentPatient.firstName?.trim()) return;
+    setIsSavingProfile(true);
+    try {
+      const targetId = currentPatient.id || currentPatient.patientId || `PAT-${Date.now()}`;
+      const updatedPatient = stampTenantData({
+        ...currentPatient,
+        id: targetId,
+        patientId: currentPatient.patientId || targetId,
+        updatedAt: new Date().toISOString(),
+        updatedBy: user?.name || user?.username || 'Agent Accueil'
+      }, user, establishment);
+
+      await Promise.all([
+        setDoc(doc(db, 'patients', targetId), sanitizeData(updatedPatient), { merge: true }),
+        setDoc(doc(db, 'patient_records', targetId), sanitizeData({
+          id: targetId,
+          patientId: targetId,
+          lastName: updatedPatient.lastName,
+          firstName: updatedPatient.firstName,
+          phone: updatedPatient.phone || '',
+          birthDate: updatedPatient.birthDate || '',
+          gender: updatedPatient.gender || 'M',
+          address: updatedPatient.address || '',
+          cni: updatedPatient.cni || '',
+          updatedAt: new Date().toISOString()
+        }), { merge: true }),
+        logAudit('Modification profil patient (Accueil)', { patientId: targetId, patientName: `${updatedPatient.lastName} ${updatedPatient.firstName}` })
+      ]);
+
+      setCurrentPatient(updatedPatient);
+      setIsEditingPatientProfile(false);
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: `Profil patient mis à jour : ${updatedPatient.lastName} ${updatedPatient.firstName}`
+      }));
+
+      if (continueToTriage) {
+        setStep('triage');
+      } else {
+        setStep('search');
+      }
+    } catch (err) {
+      console.error('Erreur mise à jour profil patient:', err);
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
   const waitingCount = useMemo(() => {
-    return (globalWaitingQueue || []).filter(q => q.status === 'waiting').length;
+    return (globalWaitingQueue || []).filter(q => {
+      const isCleared = Boolean(q.takenInCharge) || q.attente_module === 'EN_COURS' ||
+        ['in_consultation', 'IN_PROGRESS', 'COMPLETED', 'discharged'].includes(q.status);
+      return !isCleared && (q.status === 'waiting' || q.status === 'waiting_triage');
+    }).length;
   }, [globalWaitingQueue]);
 
   const activeWaitingList = useMemo(() => {
-    // Return all patients in the queue for today that are strictly waiting
-    return (globalWaitingQueue || []).filter(q => q.status === 'waiting');
+    // Return all patients in the queue for today that are strictly waiting and not yet taken in charge
+    return (globalWaitingQueue || []).filter(q => {
+      const isCleared = Boolean(q.takenInCharge) || q.attente_module === 'EN_COURS' ||
+        ['in_consultation', 'IN_PROGRESS', 'COMPLETED', 'discharged'].includes(q.status);
+      return !isCleared && (q.status === 'waiting' || q.status === 'waiting_triage');
+    });
   }, [globalWaitingQueue]);
 
   const todaysRequests = useMemo(() => {
@@ -1908,34 +2033,91 @@ const Reception: React.FC<ReceptionProps> = ({
       setDischargeError({ patientId: id, message: "Action non autorisée : votre rôle dispose d'un accès en lecture seule." });
       return;
     }
-    const patient = patientsToDischarge.find(p => p.id === id);
+    const patient = enrichedPatientsToDischarge.find(p => p.id === id);
     if (!patient) return;
 
     // Strict criteria safety checks
-    const unmet = [];
+    const unmet: string[] = [];
     if (patient.medicalClearance !== true) unmet.push("Autorisation médicale obligatoire manquante");
     if (patient.hospitalizationClosed !== true) unmet.push("Dossier d'hospitalisation non clos");
-    if (patient.financialClearance !== true) unmet.push("Solde ou régularisation de facturation de caisse non accomplie");
     if ((patient as any).hasOutstandingEmergencyDebt === true || (patient as any).isLockedForDischarge === true) {
-      unmet.push("🔒 BLOQUÉ : Le patient possède une dette d'urgence laboratoire non réglée. Régularisation à la Caisse obligatoire");
+      unmet.push("🔒 BLOQUÉ : Dette d'urgence non réglée");
     }
 
-    // Check dettes_patient collection for emergency debts
+    // Global DB Check across ALL hospital modules (Consultations, Hospitalisation, Labo, Pharmacie, Soins, Dettes)
+    const targetPatientIds = Array.from(new Set([patient.patientId, patient.id, patient.dmeId].filter(Boolean)));
+    const dbUnpaidDetails: string[] = [];
+    let dbUnpaidSum = 0;
+
     try {
-      const debtQ = query(
-        collection(db, 'dettes_patient'), 
-        where('patientId', '==', patient.id), 
-        where('status', '==', 'PENDING')
-      );
-      const debtSnap = await getDocs(debtQ);
-      if (!debtSnap.empty) {
-        const hasLabDebt = debtSnap.docs.some(d => d.data().origin === 'LABORATOIRE_URGENCE');
-        if (hasLabDebt) {
-          unmet.push("🔒 BLOQUÉ : Dette d'urgence laboratoire non réglée détectée");
-        }
+      for (const pid of targetPatientIds) {
+        const [prSnap, debtSnap, rxSnap, labSnap] = await Promise.all([
+          getDocs(query(collection(db, 'payment_requests'), where('patientId', '==', pid))),
+          getDocs(query(collection(db, 'dettes_patient'), where('patientId', '==', pid), where('status', '==', 'PENDING'))),
+          getDocs(query(collection(db, 'pending_prescriptions'), where('patientId', '==', pid))),
+          getDocs(query(collection(db, 'lab_requests'), where('patientId', '==', pid)))
+        ]);
+
+        prSnap.docs.forEach(d => {
+          const data = d.data();
+          if (!belongsToTenant(data, activeTenantId)) return;
+          const st = String(data.status || '').toUpperCase();
+          if (['PAID', 'SOLDE', 'DELIVERED', 'CANCELLED', 'ANNULE'].includes(st)) return;
+          const rem = Number(data.remainingAmount ?? ((data.totalAmount || 0) - (data.amountPaid || 0)));
+          if (rem > 0) {
+            dbUnpaidSum += rem;
+            const itemLbl = data.items?.[0]?.name || data.type || 'Facture Caisse';
+            dbUnpaidDetails.push(`${itemLbl} (${rem.toLocaleString()} FCFA)`);
+          }
+        });
+
+        debtSnap.docs.forEach(d => {
+          const data = d.data();
+          if (!belongsToTenant(data, activeTenantId)) return;
+          const amt = Number(data.amount || data.remainingAmount || 0);
+          if (amt > 0) {
+            dbUnpaidSum += amt;
+            dbUnpaidDetails.push(`Dette ${data.origin || 'Patient'} (${amt.toLocaleString()} FCFA)`);
+          }
+        });
+
+        rxSnap.docs.forEach(d => {
+          const data = d.data();
+          if (!belongsToTenant(data, activeTenantId)) return;
+          const st = String(data.status || '').toUpperCase();
+          const pSt = String(data.paymentStatus || '').toUpperCase();
+          if (!['PAID', 'DELIVERED', 'DISPENSED', 'CANCELLED'].includes(st) && !['PAID', 'SOLDE'].includes(pSt)) {
+            const amt = Number(data.totalAmount || 0);
+            if (amt > 0) {
+              dbUnpaidSum += amt;
+              dbUnpaidDetails.push(`Ordonnance Pharmacie (${amt.toLocaleString()} FCFA)`);
+            }
+          }
+        });
+
+        labSnap.docs.forEach(d => {
+          const data = d.data();
+          if (!belongsToTenant(data, activeTenantId)) return;
+          const pSt = String(data.paymentStatus || '').toUpperCase();
+          if (!['PAID', 'SOLDE'].includes(pSt) && String(data.status || '').toUpperCase() !== 'CANCELLED') {
+            const amt = Number(data.totalCost || data.totalAmount || data.price || 0);
+            if (amt > 0) {
+              dbUnpaidSum += amt;
+              dbUnpaidDetails.push(`Examen Labo ${data.examName || ''} (${amt.toLocaleString()} FCFA)`);
+            }
+          }
+        });
       }
     } catch (e) {
-      console.error("Error checking patient emergency debts:", e);
+      console.error("Erreur vérification globale des impayés:", e);
+    }
+
+    if (dbUnpaidSum > 0 || patient.financialClearance !== true) {
+      const uniqueDetails = Array.from(new Set(dbUnpaidDetails));
+      const detailText = uniqueDetails.length > 0
+        ? `Impayés détectés (${dbUnpaidSum.toLocaleString()} FCFA) : ${uniqueDetails.join(', ')}`
+        : "Solde ou régularisation de facturation de caisse non accomplie";
+      unmet.push(detailText);
     }
 
     if (unmet.length > 0) {
@@ -2223,6 +2405,7 @@ const Reception: React.FC<ReceptionProps> = ({
                           onClick={async () => { 
                             const ids = await getNextSequentialIdsAndAssign(); 
                             setCurrentPatient({ id: ids.dmeId, patientId: ids.patientId, gender: 'M', maritalStatus: 'CELIBATAIRE', vitals: { bpSys: 120, bpDia: 80, heartRate: 75, respRate: 18, pulse: 75, spo2: 98, temp: 37, height: 170, weight: 70, bmi: 24.2, waistCirc: 85 } }); 
+                            setIsEditingPatientProfile(false);
                             setStep('register'); 
                           }} 
                           className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer"
@@ -2288,6 +2471,25 @@ const Reception: React.FC<ReceptionProps> = ({
                                 <History size={13} />
                                 <span className="hidden sm:inline">Historique</span>
                               </button>
+                              {permissions.canWrite && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setCurrentPatient({
+                                      ...p,
+                                      vitals: p.vitals || { bpSys: 120, bpDia: 80, heartRate: 75, respRate: 18, pulse: 75, spo2: 98, temp: 37, height: 170, weight: 70, bmi: 24.2, waistCirc: 85 }
+                                    });
+                                    setIsEditingPatientProfile(true);
+                                    setStep('register');
+                                  }}
+                                  className="px-2.5 py-1.5 bg-white hover:bg-amber-50 border border-slate-200 text-slate-700 hover:text-amber-700 hover:border-amber-300 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer"
+                                  title="Modifier le profil complet du patient"
+                                >
+                                  <Edit3 size={13} />
+                                  <span className="hidden sm:inline">Éditer</span>
+                                </button>
+                              )}
                               {!permissions.canWrite ? (
                                 <button
                                   type="button"
@@ -2332,6 +2534,7 @@ const Reception: React.FC<ReceptionProps> = ({
                       onClick={async () => { 
                         const ids = await getNextSequentialIdsAndAssign(); 
                         setCurrentPatient({ id: ids.dmeId, patientId: ids.patientId, gender: 'M', maritalStatus: 'CELIBATAIRE', vitals: { bpSys: 120, bpDia: 80, heartRate: 75, respRate: 18, pulse: 75, spo2: 98, temp: 37, height: 170, weight: 70, bmi: 24.2, waistCirc: 85 } }); 
+                        setIsEditingPatientProfile(false);
                         setStep('register'); 
                       }} 
                       className="w-full py-5 px-4 border border-dashed border-slate-300 rounded-xl hover:border-blue-500 hover:bg-blue-50/30 transition-all flex items-center justify-center gap-3 text-slate-600 hover:text-blue-600 group cursor-pointer"
@@ -2350,11 +2553,17 @@ const Reception: React.FC<ReceptionProps> = ({
                 
                 <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
                   <div>
-                    <h2 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">Nouveau Dossier DME</h2>
-                    <p className="text-xs text-slate-500 font-medium mt-0.5">Étape 1 : Saisie des informations d'état-civil du patient</p>
+                    <h2 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
+                      {isEditingPatientProfile ? `Modifier Profil Patient (${currentPatient.id})` : 'Nouveau Dossier DME'}
+                    </h2>
+                    <p className="text-xs text-slate-500 font-medium mt-0.5">
+                      {isEditingPatientProfile
+                        ? 'Mise à jour complète des informations administratives et médicales du patient'
+                        : 'Étape 1 : Saisie des informations d\'état-civil du patient'}
+                    </p>
                   </div>
                   <button 
-                    onClick={() => setStep('search')} 
+                    onClick={() => { setIsEditingPatientProfile(false); setStep('search'); }} 
                     className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200/70 rounded-lg font-bold text-xs transition-all cursor-pointer"
                   >
                     ← Retour
@@ -2501,23 +2710,46 @@ const Reception: React.FC<ReceptionProps> = ({
                   </div>
                 </div>
 
-                <div className="flex justify-end">
-                  <button 
-                    disabled={!permissions.canWrite || !currentPatient.lastName?.trim() || !currentPatient.firstName?.trim() || !currentPatient.birthDate}
-                    onClick={() => {
-                      if (!permissions.canWrite) return;
-                      const dupCheck = checkDuplicatePatient(currentPatient);
-                      if (dupCheck.isDuplicate && dupCheck.matchedPatient) {
-                        setDuplicateModalData(dupCheck);
-                        return;
-                      }
-                      setStep('triage');
-                    }} 
-                    className="w-full sm:w-auto px-6 py-3 bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs sm:text-sm shadow-md hover:bg-blue-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <span>Continuer vers l'Orientation</span>
-                    <ChevronRight size={16} />
-                  </button>
+                <div className="flex flex-wrap justify-end gap-2.5">
+                  {isEditingPatientProfile ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={!permissions.canWrite || isSavingProfile || !currentPatient.lastName?.trim() || !currentPatient.firstName?.trim()}
+                        onClick={() => handleSavePatientProfile(false)}
+                        className="w-full sm:w-auto px-5 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        {isSavingProfile ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                        <span>Enregistrer les Modifications</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!permissions.canWrite || isSavingProfile || !currentPatient.lastName?.trim() || !currentPatient.firstName?.trim()}
+                        onClick={() => handleSavePatientProfile(true)}
+                        className="w-full sm:w-auto px-5 py-3 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <span>Enregistrer & Orienter</span>
+                        <ChevronRight size={16} />
+                      </button>
+                    </>
+                  ) : (
+                    <button 
+                      disabled={!permissions.canWrite || !currentPatient.lastName?.trim() || !currentPatient.firstName?.trim() || !currentPatient.birthDate}
+                      onClick={() => {
+                        if (!permissions.canWrite) return;
+                        const dupCheck = checkDuplicatePatient(currentPatient);
+                        if (dupCheck.isDuplicate && dupCheck.matchedPatient) {
+                          setDuplicateModalData(dupCheck);
+                          return;
+                        }
+                        setStep('triage');
+                      }} 
+                      className="w-full sm:w-auto px-6 py-3 bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-bold text-xs sm:text-sm shadow-md hover:bg-blue-700 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      <span>Continuer vers l'Orientation</span>
+                      <ChevronRight size={16} />
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -2549,6 +2781,19 @@ const Reception: React.FC<ReceptionProps> = ({
                         <p className="font-extrabold text-slate-900 text-xs sm:text-sm leading-tight">{currentPatient.lastName} {currentPatient.firstName}</p>
                         <p className="text-[11px] text-slate-500 font-medium">{calculateAge(currentPatient.birthDate)} ans • {currentPatient.gender === 'F' ? 'Féminin' : 'Masculin'} • <span className="font-mono">{currentPatient.id}</span></p>
                       </div>
+                      {permissions.canWrite && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingPatientProfile(true);
+                            setStep('register');
+                          }}
+                          className="p-1.5 bg-white hover:bg-amber-50 border border-slate-200 text-slate-500 hover:text-amber-700 rounded-lg transition-all cursor-pointer"
+                          title="Modifier le profil du patient"
+                        >
+                          <Edit3 size={14} />
+                        </button>
+                      )}
                       <button 
                         onClick={() => {
                           if (confirm("Êtes-vous sûr de vouloir annuler l'admission en cours ?")) {
@@ -2586,14 +2831,15 @@ const Reception: React.FC<ReceptionProps> = ({
 
                   {/* Compact Category Pills */}
                   <div className="flex flex-wrap gap-1.5 mb-4">
-                    {(['CONSULTATIONS', 'MATERNITE', 'URGENCES', 'HOSPITALISATION', 'AUTRES'] as const).map((catName) => {
+                    {(['CONSULTATIONS', 'SOINS', 'MATERNITE', 'URGENCES', 'HOSPITALISATION', 'AUTRES'] as const).map((catName) => {
                       const isActive = currentMotifCategory === catName;
                       const catAttrs = {
                         CONSULTATIONS: { label: 'Consultations', icon: Stethoscope },
+                        SOINS: { label: 'Soins Infirmiers', icon: Syringe },
                         MATERNITE: { label: 'Maternité', icon: Award },
                         URGENCES: { label: 'Urgences', icon: ShieldAlert },
                         HOSPITALISATION: { label: 'Hospitalisation', icon: Bed },
-                        AUTRES: { label: 'Autres Actes', icon: Activity }
+                        AUTRES: { label: 'Labo & Autres', icon: Activity }
                       }[catName];
 
                       const CatIcon = catAttrs.icon;
@@ -2606,6 +2852,8 @@ const Reception: React.FC<ReceptionProps> = ({
                             setCurrentMotifCategory(catName);
                             setSelectedMotif(null);
                             setVisitMotif(null);
+                            setSoinsPrescriberName('');
+                            setSoinsPrescriberLicense('');
                           }}
                           className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border font-bold text-xs transition-all cursor-pointer ${
                             isActive 
@@ -2625,6 +2873,74 @@ const Reception: React.FC<ReceptionProps> = ({
 
                   {/* List Motifs for Active Category */}
                   <div>
+                    {currentMotifCategory === 'SOINS' && !motifSearchQuery.trim() ? (
+                      <div className="space-y-3">
+                        <div className="relative">
+                          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-indigo-500" size={16} />
+                          <input
+                            type="text"
+                            value={soinsSearchQuery}
+                            onChange={(e) => setSoinsSearchQuery(e.target.value)}
+                            placeholder="Rechercher un soin infirmier (ex: Pansement, Injection IV, Perfusion, Suture...)"
+                            className="w-full pl-10 pr-4 py-2.5 bg-indigo-50/40 border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 focus:bg-white text-xs sm:text-sm font-semibold text-slate-800"
+                          />
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100 max-h-[280px] overflow-y-auto custom-scrollbar shadow-2xs">
+                          {activeMotifs
+                            .filter(m => m.category === 'SOINS')
+                            .filter(m => {
+                              if (!soinsSearchQuery.trim()) return true;
+                              const q = soinsSearchQuery.toLowerCase().trim();
+                              return (
+                                (m.label || '').toLowerCase().includes(q) ||
+                                (m.codeInterne || '').toLowerCase().includes(q) ||
+                                (m.speciality || '').toLowerCase().includes(q)
+                              );
+                            })
+                            .map((motif) => {
+                              const isSelected = selectedMotif?.id === motif.id;
+                              return (
+                                <button
+                                  key={motif.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedMotif(motif);
+                                    setVisitMotif('SOIN_INFIRMIER');
+                                    setSoinsPrescriberName('');
+                                    setSoinsPrescriberLicense('');
+                                  }}
+                                  className={`w-full px-4 py-3 flex items-center justify-between gap-3 text-left transition-all cursor-pointer ${
+                                    isSelected ? 'bg-indigo-50/90 border-l-4 border-l-indigo-600' : 'hover:bg-slate-50'
+                                  }`}
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-bold text-xs sm:text-sm text-slate-900">{motif.label}</span>
+                                      {motif.codeInterne && (
+                                        <span className="text-[10px] font-mono text-slate-400">{motif.codeInterne}</span>
+                                      )}
+                                      {motif.requiresPrescription && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-black uppercase">
+                                          <Lock size={10} /> Soumis à ordonnance
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-slate-500 mt-0.5">{motif.queueName}</p>
+                                  </div>
+                                  <span className="font-black text-xs text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200/80 shrink-0 tabular-nums">
+                                    {(motif.fee || 0).toLocaleString()} FCFA
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          {activeMotifs.filter(m => m.category === 'SOINS' && (!soinsSearchQuery.trim() || (m.label || '').toLowerCase().includes(soinsSearchQuery.toLowerCase().trim()))).length === 0 && (
+                            <div className="p-6 text-center text-xs font-semibold text-slate-400">
+                              Aucun soin infirmier trouvé pour « {soinsSearchQuery} ».
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[340px] overflow-y-auto pr-1 custom-scrollbar">
                       {activeMotifs
                         .filter(m => {
@@ -2708,56 +3024,93 @@ const Reception: React.FC<ReceptionProps> = ({
                         </div>
                       )}
                     </div>
+                    )}
                   </div>
 
                   {/* Sticky Action Bar inside card when motif is selected */}
-                  {selectedMotif && (
-                    <div className="mt-4 pt-4 border-t border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-blue-50/50 p-3.5 rounded-xl border border-blue-200/80 animate-in fade-in">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-9 h-9 bg-blue-600 text-white rounded-xl flex items-center justify-center shrink-0">
-                          <Activity size={18} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="font-extrabold text-sm text-slate-900 truncate">{selectedMotif.label}</h4>
-                            <span className="text-xs font-black text-blue-600 bg-white px-2 py-0.5 rounded-md border border-blue-200 tabular-nums">
-                              {(selectedMotif.fee || 0).toLocaleString()} FCFA
-                            </span>
+                  {selectedMotif && (() => {
+                    const requiresRx = Boolean(selectedMotif.requiresPrescription);
+                    const hasValidPrescriber = !requiresRx || soinsPrescriberName.trim().length > 0 || soinsPrescriberLicense.trim().length > 0;
+                    return (
+                    <div className="mt-4 pt-4 border-t border-slate-200 space-y-3 bg-blue-50/50 p-3.5 rounded-xl border border-blue-200/80 animate-in fade-in">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 bg-blue-600 text-white rounded-xl flex items-center justify-center shrink-0">
+                            <Activity size={18} />
                           </div>
-                          <p className="text-xs text-slate-500 font-medium truncate">
-                            File : <strong className="text-slate-700">{selectedMotif.queueName}</strong> • Spécialité : <strong className="text-slate-700">{selectedMotif.speciality}</strong>
-                          </p>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-extrabold text-sm text-slate-900 truncate">{selectedMotif.label}</h4>
+                              <span className="text-xs font-black text-blue-600 bg-white px-2 py-0.5 rounded-md border border-blue-200 tabular-nums">
+                                {(selectedMotif.fee || 0).toLocaleString()} FCFA
+                              </span>
+                              {requiresRx && (
+                                <span className="text-[10px] font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200 flex items-center gap-1">
+                                  <Lock size={10} /> Soumis à ordonnance
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-500 font-medium truncate">
+                              File : <strong className="text-slate-700">{selectedMotif.queueName}</strong> • Spécialité : <strong className="text-slate-700">{selectedMotif.speciality}</strong>
+                            </p>
+                          </div>
                         </div>
+
+                        {!permissions.canWrite ? (
+                          <div className="w-full sm:w-auto bg-slate-100 text-slate-500 border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shrink-0">
+                            <Lock size={15} />
+                            <span>Lecture Seule (Validation Désactivée)</span>
+                          </div>
+                        ) : (
+                          <button 
+                            disabled={isSaving || !hasValidPrescriber}
+                            onClick={() => {
+                              finalizeAdmission(false);
+                            }}
+                            className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-md disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shrink-0"
+                          >
+                            {isSaving ? (
+                              <>
+                                <Loader2 size={15} className="animate-spin" />
+                                <span>Validation...</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 size={16} /> 
+                                <span>{!hasValidPrescriber ? 'Prescripteur Requis' : 'Valider Admission & Pro-forma'}</span>
+                              </>
+                            )}
+                          </button>
+                        )}
                       </div>
 
-                      {!permissions.canWrite ? (
-                        <div className="w-full sm:w-auto bg-slate-100 text-slate-500 border border-slate-200 px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shrink-0">
-                          <Lock size={15} />
-                          <span>Lecture Seule (Validation Désactivée)</span>
+                      {requiresRx && (
+                        <div className="p-3 bg-rose-50/90 border border-rose-200 rounded-xl space-y-2">
+                          <p className="text-[11px] font-black text-rose-800 uppercase tracking-wider flex items-center gap-1.5">
+                            <ShieldAlert size={13} className="text-rose-600" />
+                            Acte soumis à ordonnance médicale — Identification du prescripteur externe obligatoire
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <input
+                              type="text"
+                              value={soinsPrescriberName}
+                              onChange={(e) => setSoinsPrescriberName(e.target.value)}
+                              placeholder="Nom du Prescripteur (ex: Dr. Mbarga) *"
+                              className="w-full px-3 py-2 bg-white border border-rose-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-rose-500"
+                            />
+                            <input
+                              type="text"
+                              value={soinsPrescriberLicense}
+                              onChange={(e) => setSoinsPrescriberLicense(e.target.value)}
+                              placeholder="OU Numéro d'Ordre (ex: ONMC-4521) *"
+                              className="w-full px-3 py-2 bg-white border border-rose-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:border-rose-500"
+                            />
+                          </div>
                         </div>
-                      ) : (
-                        <button 
-                          disabled={isSaving}
-                          onClick={() => {
-                            finalizeAdmission(false);
-                          }}
-                          className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center justify-center gap-2 shadow-md disabled:opacity-50 cursor-pointer shrink-0"
-                        >
-                          {isSaving ? (
-                            <>
-                              <Loader2 size={15} className="animate-spin" />
-                              <span>Validation...</span>
-                            </>
-                          ) : (
-                            <>
-                              <CheckCircle2 size={16} /> 
-                              <span>Valider Admission & Pro-forma</span>
-                            </>
-                          )}
-                        </button>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -2797,11 +3150,23 @@ const Reception: React.FC<ReceptionProps> = ({
                   </div>
                 ) : (
                   activeWaitingList.map((p, i) => {
-                    const isPaid = p.paymentStatus === 'PAID' || p.status === 'SOLDE';
+                    const linkedReq = paymentRequests.find(pr =>
+                      (p.paymentRequestId && pr.id === p.paymentRequestId) ||
+                      ((pr.patientId === p.patientId || (pr as any).patientDme === p.dmeId) &&
+                        ['PENDING', 'PARTIAL'].includes(String(pr.status || '').toUpperCase()))
+                    );
+                    const hasUnpaidBill = linkedReq
+                      ? ['PENDING', 'PARTIAL'].includes(String(linkedReq.status || '').toUpperCase())
+                      : !(p.paymentStatus === 'PAID' || p.status === 'SOLDE');
+                    const destinationLabel = p.service || p.queueName || 'Consultation';
+                    const attenteLabel = hasUnpaidBill
+                      ? 'En attente : Caisse'
+                      : `En attente : ${destinationLabel}`;
+
                     return (
                       <div key={p.id || `wait-${p.patientId || 'pt'}-${i}`} className="p-3.5 hover:bg-slate-50 transition-all relative overflow-hidden">
                         {(p.status === 'waiting' || p.status === 'waiting_triage') && (
-                          <div className={`absolute top-0 left-0 w-1 h-full ${isPaid ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                          <div className={`absolute top-0 left-0 w-1 h-full ${!hasUnpaidBill ? 'bg-emerald-500' : 'bg-rose-500'}`} />
                         )}
                         <div className="flex justify-between items-start gap-2 mb-1.5 pl-1.5">
                            <div className="min-w-0">
@@ -2815,9 +3180,11 @@ const Reception: React.FC<ReceptionProps> = ({
                         </div>
                         <div className="flex justify-between items-center pl-1.5 mt-2">
                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                             isPaid ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+                             !hasUnpaidBill
+                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                               : 'bg-rose-50 text-rose-700 border-rose-200'
                            }`}>
-                             {isPaid ? 'Payé • Attente Médecin' : 'Attente Caisse'}
+                             {attenteLabel}
                            </span>
                            <span className="text-[11px] text-slate-400 font-medium">{p.priority === 'urgent' ? 'Urgent' : 'Normal'}</span>
                         </div>
@@ -3129,9 +3496,30 @@ const Reception: React.FC<ReceptionProps> = ({
 
                       {/* Financial Caution Notice if Unpaid */}
                       {!patient.financialClearance && (
-                        <div className="mb-3 p-2 bg-rose-50/70 border border-rose-200/80 dark:bg-rose-950/30 dark:border-rose-900 rounded-xl flex items-center gap-1.5 text-rose-700 dark:text-rose-300 text-[10.5px] font-medium leading-tight">
-                          <AlertCircle size={13} className="text-rose-500 shrink-0" />
-                          <span>Paiement en attente à la Caisse avant autorisation finale.</span>
+                        <div className="mb-3 p-2.5 bg-rose-50/80 border border-rose-200/90 dark:bg-rose-950/30 dark:border-rose-900 rounded-xl space-y-1.5 text-rose-700 dark:text-rose-300 text-[10.5px] leading-tight">
+                          <div className="flex items-center justify-between gap-1.5 font-black">
+                            <span className="flex items-center gap-1.5">
+                              <AlertCircle size={13} className="text-rose-500 shrink-0" />
+                              <span>BLOQUÉ : Impayés Caisse</span>
+                            </span>
+                            {(patient.totalUnpaidAmount || 0) > 0 && (
+                              <span className="font-mono text-rose-800 dark:text-rose-200">
+                                {(patient.totalUnpaidAmount || 0).toLocaleString()} FCFA
+                              </span>
+                            )}
+                          </div>
+                          {patient.unpaidItems && patient.unpaidItems.length > 0 ? (
+                            <ul className="space-y-0.5 pl-4 list-disc text-[10px] font-semibold">
+                              {patient.unpaidItems.map((item: any, idx: number) => (
+                                <li key={item.id || idx} className="flex justify-between gap-2">
+                                  <span className="truncate">{item.module} : {item.label}</span>
+                                  <span className="font-mono shrink-0">{(item.amount || 0).toLocaleString()} F</span>
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="font-medium">Paiement en attente à la Caisse avant autorisation finale.</p>
+                          )}
                         </div>
                       )}
 

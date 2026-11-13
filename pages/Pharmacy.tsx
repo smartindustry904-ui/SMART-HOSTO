@@ -364,6 +364,8 @@ const Pharmacy: React.FC<PharmacyProps> = ({
       debtAmount?: number;
       cashRemis?: number;
       changeToAvanceAmount?: number;
+      prescriberName?: string;
+      prescriberLicense?: string;
     }
   ) => {
     if (!activeSession) {
@@ -416,6 +418,8 @@ const Pharmacy: React.FC<PharmacyProps> = ({
       deliveredBy: user?.name || 'Pharmacien',
       deliveredById: user?.id || '',
       pharmacySessionId: activeSession.id,
+      prescriberName: financialOptions?.prescriberName || presc?.doctorName || presc?.doctor || undefined,
+      prescriberLicense: financialOptions?.prescriberLicense || undefined,
       createdAt: new Date().toISOString(),
       createdBy: user?.name || 'Pharmacien'
     };
@@ -1022,6 +1026,8 @@ const Pharmacy: React.FC<PharmacyProps> = ({
                   directAmountReceived={directAmountReceived}
                   isProcessing={isProcessing === 'direct-sale'}
                   currency={establishment.currency}
+                  user={user}
+                  establishment={establishment}
                   onRemoveFromCart={handleRemoveFromCart}
                   onSelectPatient={setLinkedPatient}
                   onSetPaymentMethod={setPaymentMethod}
@@ -1397,6 +1403,16 @@ const Pharmacy: React.FC<PharmacyProps> = ({
                 <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Client / Patient</p>
                 <p className="text-sm font-black text-slate-900">{selectedReceipt.patientName || 'VENTE COMPTANT DIRECT'}</p>
                 {selectedReceipt.patientId && <p className="text-[10px] font-bold text-slate-500">DME: {selectedReceipt.patientId}</p>}
+                {((selectedReceipt as any).prescriberName || (selectedReceipt as any).prescriberLicense) && (
+                  <div className="mt-2 pt-2 border-t border-slate-200/80 text-[10px] font-bold text-rose-700">
+                    {(selectedReceipt as any).prescriberName && (
+                      <p>Prescripteur : <span className="font-black text-slate-900">{(selectedReceipt as any).prescriberName}</span></p>
+                    )}
+                    {(selectedReceipt as any).prescriberLicense && (
+                      <p>N° d'Ordre : <span className="font-mono font-black text-slate-900">{(selectedReceipt as any).prescriberLicense}</span></p>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="mb-6">

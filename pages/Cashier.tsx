@@ -13,6 +13,7 @@ import { Avatar } from '../components/common/Avatar';
 
 import { useSettings } from '../hooks/useSettings';
 import { PrintReceiptModal, PrintableReceiptData } from '../components/common/PrintReceiptModal';
+import { LambdaConversionModal } from '../components/common/LambdaConversionModal';
 import { printElementDirectly } from '../src/utils/print';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 
@@ -532,10 +533,31 @@ const Cashier: React.FC<CashierProps> = ({
   const surplusGenereValue = surplusAction === 'AVANCE' ? surplus : 0;
 
   // Selected patient object & credit blocking status from real-time patients collection
+  const [showLambdaModal, setShowLambdaModal] = useState(false);
+
   const selectedPatientObj = useMemo(() => {
     if (!selectedRequest?.patientId) return null;
     return patientsMap.get(selectedRequest.patientId) || null;
   }, [selectedRequest, patientsMap]);
+
+  const isLambdaPatient = useMemo(() => {
+    if (!selectedRequest) return false;
+    if (selectedPatientObj && selectedPatientObj.isLambda === false && (selectedPatientObj as any).patientStatus === 'REGISTERED') {
+      return false;
+    }
+    const pName = (selectedRequest.patientName || '').toUpperCase();
+    const pId = (selectedRequest.patientId || '').toUpperCase();
+    if (pId.includes('LAMBDA') || pId === 'PATIENT-COMPTANT' || pName.includes('LAMBDA') || pName.includes('ANONYME')) {
+      return true;
+    }
+    if (!selectedPatientObj) return false;
+    return Boolean(
+      selectedPatientObj.isLambda === true ||
+      (selectedPatientObj as any).isAnonymous === true ||
+      (selectedPatientObj as any).patientStatus === 'LAMBDA' ||
+      (selectedPatientObj.lastName || '').toUpperCase() === 'LAMBDA'
+    );
+  }, [selectedRequest, selectedPatientObj]);
 
   const isCreditBlocked = useMemo(() => {
     if (!selectedPatientObj) return false;
@@ -573,6 +595,16 @@ const Cashier: React.FC<CashierProps> = ({
     if (!activeSession) {
       showNotification("Session de caisse fermée ! Veuillez ouvrir une session de caisse.", "error");
       setShowOpenSessionModal(true);
+      return;
+    }
+
+    if (isLambdaPatient && resteAPayer > 0) {
+      setShowLambdaModal(true);
+      return;
+    }
+
+    if (isLambdaPatient && surplusAction === 'AVANCE') {
+      showNotification("Opération refusée : Un patient Lambda ne peut pas générer d'avance / avoir. Veuillez rendre la monnaie ou convertir le patient.", "error");
       return;
     }
 
@@ -1963,14 +1995,18 @@ const Cashier: React.FC<CashierProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => setSurplusAction('AVANCE')}
-                          className={`py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
-                            surplusAction === 'AVANCE' 
-                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs' 
-                              : 'bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-50'
+                          disabled={isLambdaPatient}
+                          onClick={() => !isLambdaPatient && setSurplusAction('AVANCE')}
+                          title={isLambdaPatient ? "Avance verrouillée pour les patients Lambda" : "Mettre le surplus en avoir patient"}
+                          className={`py-1.5 px-2 rounded-lg text-[10px] font-black uppercase tracking-wider border transition-all ${
+                            isLambdaPatient
+                              ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60'
+                              : surplusAction === 'AVANCE' 
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs cursor-pointer' 
+                                : 'bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-50 cursor-pointer'
                           }`}
                         >
-                          Mettre en Avoir
+                          {isLambdaPatient ? '🔒 Avance (Lambda)' : 'Mettre en Avoir'}
                         </button>
                       </div>
                       {!surplusAction && (
@@ -1980,17 +2016,36 @@ const Cashier: React.FC<CashierProps> = ({
                   )}
 
                   {resteAPayer > 0 && remis > 0 && (
-                    <div className={`p-2.5 rounded-xl flex justify-between items-center text-xs ${
-                      isCreditBlocked ? 'bg-rose-100 border border-rose-300 text-rose-900' : 'bg-rose-50 border border-rose-100 text-rose-700'
-                    }`}>
-                      <div className="flex items-center gap-1.5">
-                        {isCreditBlocked && <Lock size={14} className="text-rose-600 shrink-0" />}
-                        <span className="text-[9px] font-black uppercase tracking-wider">
-                          {isCreditBlocked ? 'Reste non autorisé (Crédit bloqué)' : 'Reste à payer (Dette)'}
+                    isLambdaPatient ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowLambdaModal(true)}
+                        className="w-full p-2.5 rounded-xl flex justify-between items-center text-xs bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 transition-colors cursor-pointer"
+                        title="Les patients Lambda ne peuvent pas avoir de dette. Cliquez pour convertir en Patient Enregistré."
+                      >
+                        <div className="flex items-center gap-1.5 text-left">
+                          <Lock size={14} className="text-amber-600 shrink-0" />
+                          <span className="text-[9px] font-black uppercase tracking-wider">
+                            Mettre en Dette (Verrouillé — Patient Lambda)
+                          </span>
+                        </div>
+                        <span className="px-2 py-0.5 rounded bg-amber-600 text-white text-[9px] font-black uppercase">
+                          Convertir ({resteAPayer.toLocaleString()} F)
                         </span>
+                      </button>
+                    ) : (
+                      <div className={`p-2.5 rounded-xl flex justify-between items-center text-xs ${
+                        isCreditBlocked ? 'bg-rose-100 border border-rose-300 text-rose-900' : 'bg-rose-50 border border-rose-100 text-rose-700'
+                      }`}>
+                        <div className="flex items-center gap-1.5">
+                          {isCreditBlocked && <Lock size={14} className="text-rose-600 shrink-0" />}
+                          <span className="text-[9px] font-black uppercase tracking-wider">
+                            {isCreditBlocked ? 'Reste non autorisé (Crédit bloqué)' : 'Reste à payer (Dette)'}
+                          </span>
+                        </div>
+                        <span className="font-black text-sm text-rose-700 font-mono">{resteAPayer.toLocaleString()} F</span>
                       </div>
-                      <span className="font-black text-sm text-rose-700 font-mono">{resteAPayer.toLocaleString()} F</span>
-                    </div>
+                    )
                   )}
                 </div>
               )}
@@ -2008,9 +2063,9 @@ const Cashier: React.FC<CashierProps> = ({
               </button>
               <button 
                 onClick={processPayment}
-                disabled={(!paymentAmount && !useAvoir) || isProcessing || (isCreditBlocked && resteAPayer > 0)}
+                disabled={(!paymentAmount && !useAvoir) || isProcessing || (isCreditBlocked && resteAPayer > 0) || (isLambdaPatient && resteAPayer > 0)}
                 className={`py-2.5 px-5 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm ${
-                  isCreditBlocked && resteAPayer > 0
+                  (isCreditBlocked || isLambdaPatient) && resteAPayer > 0
                     ? 'bg-rose-600 text-white cursor-not-allowed opacity-90'
                     : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed'
                 }`}
@@ -2020,10 +2075,10 @@ const Cashier: React.FC<CashierProps> = ({
                     <Loader2 size={16} className="animate-spin" />
                     <span>Traitement...</span>
                   </>
-                ) : isCreditBlocked && resteAPayer > 0 ? (
+                ) : (isCreditBlocked || isLambdaPatient) && resteAPayer > 0 ? (
                   <>
                     <Lock size={14} />
-                    <span>Paiement intégral requis</span>
+                    <span>{isLambdaPatient ? 'Paiement intégral requis (Lambda)' : 'Paiement intégral requis'}</span>
                   </>
                 ) : (
                   <>
@@ -2036,6 +2091,29 @@ const Cashier: React.FC<CashierProps> = ({
           </div>
         </div>
       )}
+
+      <LambdaConversionModal
+        isOpen={showLambdaModal}
+        onClose={() => setShowLambdaModal(false)}
+        patient={selectedPatientObj}
+        patientId={selectedRequest?.patientId}
+        patientName={selectedRequest?.patientName}
+        user={user}
+        establishment={establishment}
+        onConverted={async (updatedPatient) => {
+          if (selectedRequest) {
+            const fullName = `${updatedPatient.firstName} ${updatedPatient.lastName}`.trim();
+            setSelectedRequest(prev => prev ? { ...prev, patientId: updatedPatient.id, patientName: fullName } : null);
+            try {
+              await updateDoc(doc(db, 'payment_requests', selectedRequest.id), sanitizeData({
+                patientId: updatedPatient.id,
+                patientName: fullName
+              })).catch(() => {});
+            } catch {}
+          }
+          showNotification(`✓ Patient converti en Enregistré (${updatedPatient.firstName} ${updatedPatient.lastName}). La mise en dette est maintenant autorisée.`, 'success');
+        }}
+      />
       {/* Modal 1: Open Session (Anti-Fraud: Fond initial alloué par le superviseur, fixe et verrouillé) */}
       {showOpenSessionModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
