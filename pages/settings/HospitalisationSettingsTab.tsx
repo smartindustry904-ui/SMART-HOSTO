@@ -3,6 +3,7 @@ import { BedDouble, Building2, DoorOpen, Plus, Trash2, CheckCircle2, Edit3, Load
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, sanitizeData } from '../../src/firebase';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
+import { normalizeBedStatus } from '../../src/utils/hospitalisation';
 import { Ward, Room, Bed } from '../../types';
 
 interface HospitalisationSettingsTabProps {
@@ -114,7 +115,7 @@ export const HospitalisationSettingsTab: React.FC<HospitalisationSettingsTabProp
         dailyRate: rate,
         tarifJournalier: rate,
         category: 'hospitalisation',
-        ...(editingBedId ? {} : { status: 'AVAILABLE', createdAt: new Date().toISOString() }),
+        ...(editingBedId ? {} : { status: 'LIBRE', createdAt: new Date().toISOString() }),
         lastUpdated: new Date().toISOString()
       }, user, establishment)), { merge: true });
 
@@ -281,7 +282,16 @@ export const HospitalisationSettingsTab: React.FC<HospitalisationSettingsTabProp
                       {room?.name || b.roomName || 'Chambre'} — {b.name}
                     </p>
                     <p className="text-[10px] font-bold text-indigo-600">
-                      {rate.toLocaleString()} {currency} / jour • <span className={b.status === 'OCCUPIED' ? 'text-rose-600' : 'text-emerald-600'}>{b.status === 'OCCUPIED' ? 'Occupé' : 'Libre'}</span>
+                      {rate.toLocaleString()} {currency} / jour •{' '}
+                      <span className={
+                        normalizeBedStatus(b.status) === 'OCCUPÉ'
+                          ? 'text-rose-600'
+                          : normalizeBedStatus(b.status) === 'EN NETTOYAGE'
+                            ? 'text-amber-600'
+                            : 'text-emerald-600'
+                      }>
+                        {normalizeBedStatus(b.status)}
+                      </span>
                     </p>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">

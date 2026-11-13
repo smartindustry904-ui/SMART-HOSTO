@@ -5,6 +5,9 @@ import {
   ExternalLink, LogOut, Building2, Sparkles, RefreshCw
 } from 'lucide-react';
 import { Bed, Room } from '../../types';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../../src/firebase';
+import { isBedLibre, isBedOccupe, isBedEnNettoyage } from '../../src/utils/hospitalisation';
 
 interface BedsOverviewTabProps {
   beds: Bed[];
@@ -25,7 +28,7 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
   onSeedDefaultBeds,
   theme = 'light'
 }) => {
-  const [filterView, setFilterView] = useState<'all' | 'available' | 'occupied'>('all');
+  const [filterView, setFilterView] = useState<'all' | 'available' | 'occupied' | 'cleaning'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoomId, setSelectedRoomId] = useState<string>('all');
 
@@ -34,14 +37,29 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
     return beds.filter(b => !b.category || b.category === 'hospitalisation' || b.category === 'all');
   }, [beds]);
 
-  // Available beds & Occupied beds
+  // Available, Occupied & Cleaning beds
   const availableBeds = useMemo(() => {
-    return hospitalBeds.filter(b => b.status === 'AVAILABLE');
+    return hospitalBeds.filter(b => isBedLibre(b.status));
   }, [hospitalBeds]);
 
   const occupiedBeds = useMemo(() => {
-    return hospitalBeds.filter(b => b.status === 'OCCUPIED');
+    return hospitalBeds.filter(b => isBedOccupe(b.status));
   }, [hospitalBeds]);
+
+  const cleaningBeds = useMemo(() => {
+    return hospitalBeds.filter(b => isBedEnNettoyage(b.status));
+  }, [hospitalBeds]);
+
+  const handleMarkBedLibre = async (bed: Bed) => {
+    try {
+      await updateDoc(doc(db, 'beds', bed.id), {
+        status: 'LIBRE',
+        lastUpdated: new Date().toISOString()
+      });
+    } catch (e) {
+      console.error('Error marking bed libre:', e);
+    }
+  };
 
   // Filtered by search & room
   const filteredAvailable = useMemo(() => {
@@ -178,6 +196,14 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
                 }`}
               >
                 Occupés ({occupiedBeds.length})
+              </button>
+              <button
+                onClick={() => setFilterView('cleaning')}
+                className={`px-3.5 py-1.5 rounded-xl font-black uppercase tracking-wider transition-all cursor-pointer ${
+                  filterView === 'cleaning' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                }`}
+              >
+                Nettoyage ({cleaningBeds.length})
               </button>
             </div>
 
@@ -374,6 +400,47 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* CATEGORY 3: LITS EN NETTOYAGE */}
+      {(filterView === 'all' || filterView === 'cleaning') && cleaningBeds.length > 0 && (
+        <div className="space-y-4 pt-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-black text-slate-900 uppercase tracking-wider flex items-center gap-2.5">
+              <span className="w-3 h-3 rounded-full bg-amber-500 inline-block shadow-xs shadow-amber-500/50"></span>
+              <span>Lits en Nettoyage ({cleaningBeds.length})</span>
+            </h2>
+            <span className="text-xs font-bold text-slate-400">Désinfection post-sortie</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {cleaningBeds.map(bed => {
+              const room = rooms.find(r => r.id === bed.roomId);
+              return (
+                <div
+                  key={bed.id}
+                  className="bg-amber-50/40 rounded-3xl border-2 border-amber-200 p-5 flex items-center justify-between gap-4"
+                >
+                  <div>
+                    <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-black uppercase rounded-lg">
+                      EN NETTOYAGE
+                    </span>
+                    <h3 className="font-black text-slate-900 text-base mt-2">{bed.name}</h3>
+                    <p className="text-xs font-bold text-slate-500">{room?.name || bed.roomName || 'Chambre'}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleMarkBedLibre(bed)}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[11px] uppercase tracking-wider transition-all cursor-pointer shrink-0 flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 size={14} />
+                    <span>Marquer Libre</span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

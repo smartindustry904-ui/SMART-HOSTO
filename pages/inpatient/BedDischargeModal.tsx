@@ -125,10 +125,36 @@ export const BedDischargeModal: React.FC<BedDischargeModalProps> = ({
           });
         }
 
-        const [rxSnap, labSnap] = await Promise.all([
+        const [rxSnap, labSnap, careSnap] = await Promise.all([
           getDocs(query(collection(db, 'pending_prescriptions'), where('patientId', '==', bed.patientId))),
-          getDocs(query(collection(db, 'lab_requests'), where('patientId', '==', bed.patientId)))
+          getDocs(query(collection(db, 'lab_requests'), where('patientId', '==', bed.patientId))),
+          getDocs(query(collection(db, 'nursing_acts'), where('patientId', '==', bed.patientId)))
         ]);
+
+        // Aggregate Care Charges (Soins Infirmiers parameterized acts)
+        const careGrouped = new Map<string, { name: string; count: number; unitPrice: number }>();
+        careSnap.docs.forEach(d => {
+          const data = d.data();
+          const pSt = String(data.paymentStatus || '').toUpperCase();
+          if (!['PAID', 'SOLDE'].includes(pSt) && String(data.status || '').toUpperCase() !== 'CANCELLED') {
+            const unitP = Number(data.unitPrice ?? data.price ?? 0);
+            if (unitP > 0 && !data.billedAtPrescription) {
+              const key = `${data.actName || data.type || 'Soin'}_${unitP}`;
+              const existing = careGrouped.get(key) || { name: data.actName || data.type || 'Soin infirmier', count: 0, unitPrice: unitP };
+              existing.count += 1;
+              careGrouped.set(key, existing);
+            }
+          }
+        });
+        careGrouped.forEach((val, key) => {
+          billingItems.push({
+            id: `ITEM-CARE-${key}`,
+            name: `Soins Hospitalisation : ${val.name} (${val.count}x)`,
+            quantity: val.count,
+            unitPrice: val.unitPrice,
+            totalPrice: val.count * val.unitPrice
+          });
+        });
 
         rxSnap.docs.forEach(d => {
           const data = d.data();
@@ -204,10 +230,10 @@ export const BedDischargeModal: React.FC<BedDischargeModalProps> = ({
         }, currentUser)));
       }
 
-      // 4. Liberate the Bed
+      // 4. Transition Bed to EN NETTOYAGE
       const bedRef = doc(db, 'beds', bed.id);
       batch.update(bedRef, {
-        status: 'AVAILABLE',
+        status: 'EN NETTOYAGE',
         patientId: null,
         patientName: null,
         patientAge: null,

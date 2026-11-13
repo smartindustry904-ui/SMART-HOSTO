@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { Bed, Room, Patient, User as UserType } from '../../types';
 import { stampTenantData } from '../../src/utils/tenant';
+import { isBedOccupe, isBedEnNettoyage } from '../../src/utils/hospitalisation';
 
 interface BedAdmissionModalProps {
   isOpen: boolean;
@@ -155,8 +156,11 @@ export const BedAdmissionModal: React.FC<BedAdmissionModalProps> = ({
         throw new Error("Lit introuvable dans la base de données.");
       }
       const bedData = bedSnap.data();
-      if (bedData.status === 'OCCUPIED' && bedData.patientId !== selectedPatient.id) {
+      if (isBedOccupe(bedData.status) && bedData.patientId !== selectedPatient.id) {
         throw new Error(`Le lit ${bedData.name} est déjà occupé par un autre patient (${bedData.patientName || 'Inconnu'}).`);
+      }
+      if (isBedEnNettoyage(bedData.status)) {
+        throw new Error(`Le lit ${bedData.name} est actuellement EN NETTOYAGE.`);
       }
 
       // 2. Check if patient is already admitted
@@ -175,10 +179,10 @@ export const BedAdmissionModal: React.FC<BedAdmissionModalProps> = ({
 
       const batch = writeBatch(db);
 
-      // 3. Update Bed to OCCUPIED
+      // 3. Update Bed to OCCUPÉ
       const nowIso = new Date().toISOString();
       batch.update(bedRef, sanitizeData({
-        status: 'OCCUPIED',
+        status: 'OCCUPÉ',
         patientId: selectedPatient.id,
         patientName: patientFullName,
         patientAge: selectedPatient.age || 35,

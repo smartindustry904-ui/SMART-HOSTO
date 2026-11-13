@@ -26,6 +26,7 @@ import { useHospitalServices, useSettings } from '../hooks/useSettings';
 import { db, sanitizeData } from '../src/firebase';
 import { collection, doc, setDoc, getDocs, query, where, updateDoc, onSnapshot, getDoc, writeBatch } from 'firebase/firestore';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
+import { isBedLibre } from '../src/utils/hospitalisation';
 
 interface ConsultationProps {
   user?: UserType;
@@ -1784,7 +1785,8 @@ const Consultation: React.FC<ConsultationProps> = ({
       // 1. Update bed status
       const bedRef = doc(db, 'beds', directAdmissionForm.bedId);
       batch.update(bedRef, {
-        status: 'OCCUPIED',
+        status: 'OCCUPÉ',
+        admittedAt: nowIso,
         patientName: `${activePatient.lastName} ${activePatient.firstName}`,
         patientId: activePatient.id,
         admissionDate: todayDate,
@@ -2660,7 +2662,7 @@ const Consultation: React.FC<ConsultationProps> = ({
                       required
                     >
                       <option value="">Choisir un lit disponible...</option>
-                      {beds.filter(b => b.status === 'AVAILABLE' && (!b.category || b.category === 'hospitalisation' || b.category === 'all')).map(b => {
+                      {beds.filter(b => isBedLibre(b.status) && (!b.category || b.category === 'hospitalisation' || b.category === 'all')).map(b => {
                         const rName = b.roomName || rooms.find(r => r.id === b.roomId)?.name || 'Chambre';
                         const wName = b.wardName ? `${b.wardName} • ` : '';
                         const rate = Number(b.dailyRate ?? b.tarifJournalier ?? 0);

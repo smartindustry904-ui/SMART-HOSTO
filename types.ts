@@ -215,7 +215,7 @@ export interface EmergencyEncounter {
   updatedAt?: string;
 }
 
-export type NurseSubMenu = 'dashboard' | 'triage' | 'soins' | 'historique' | 'hospitalisation';
+export type NurseSubMenu = 'dashboard' | 'triage' | 'soins' | 'soins_hosp' | 'historique' | 'hospitalisation';
 
 export type ReceptionSubMenu = 'dashboard' | 'admissions' | 'historique' | 'sorties' | 'demandes' | 'profil';
 
@@ -225,7 +225,7 @@ export type LabSubMenu = 'dashboard' | 'demandes' | 'encours' | 'resultats' | 'v
 
 export type InpatientSubMenu = 'beds' | 'patient_bed' | 'requests' | 'history' | 'dashboard' | 'planner';
 
-export type BedStatus = 'AVAILABLE' | 'OCCUPIED' | 'MAINTENANCE';
+export type BedStatus = 'LIBRE' | 'OCCUPÉ' | 'EN NETTOYAGE' | 'AVAILABLE' | 'OCCUPIED' | 'MAINTENANCE' | 'CLEANING';
 
 export type BedCategory = 'hospitalisation' | 'materniter' | 'all' | 'other';
 

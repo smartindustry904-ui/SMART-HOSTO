@@ -12,6 +12,7 @@ import Inpatient from './Inpatient';
 import { MicroHeader } from '../components/common/MicroHeader';
 import { useSettings } from '../hooks/useSettings';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
+import { UniversalHospitalisationModal } from '../components/common/UniversalHospitalisationModal';
 
 interface SoinsInfirmiersProps {
   user?: UserType;
@@ -41,6 +42,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
 
   const [searchFilter, setSearchFilter] = useState('');
   const [activePatient, setActivePatient] = useState<any | null>(null);
+  const [showHospitalisationModal, setShowHospitalisationModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [triageHistory, setTriageHistory] = useState<any[]>([]);
   const [historySearch, setHistorySearch] = useState('');
@@ -142,6 +144,20 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
   }, [triagedTodayList]);
 
   // Nursing care acts counters
+  const hospitalisationActs = useMemo(() => {
+    return nursingActs
+      .filter(a => a.source === 'HOSPITALISATION' || Boolean(a.bedId) || Boolean(a.locationBadge) || Boolean(a.hospitalizedOrigin))
+      .sort((a, b) => {
+        const tA = String(a.scheduledAt || `${a.scheduledDate || '9999-99-99'}T${a.scheduledTime || '23:59'}` || a.createdAt || '');
+        const tB = String(b.scheduledAt || `${b.scheduledDate || '9999-99-99'}T${b.scheduledTime || '23:59'}` || b.createdAt || '');
+        return tA.localeCompare(tB);
+      });
+  }, [nursingActs]);
+
+  const pendingHospActsCount = useMemo(() => {
+    return hospitalisationActs.filter(a => a.status !== 'FAIT' && a.status !== 'REALISE').length;
+  }, [hospitalisationActs]);
+
   const pendingActsCount = useMemo(() => {
     return nursingActs.filter(a => a.status === 'EN ATTENTE' || !a.status).length;
   }, [nursingActs]);
@@ -660,6 +676,19 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
               )}
             </button>
             <button
+              onClick={() => setActiveTab('soins_hosp')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all whitespace-nowrap cursor-pointer ${
+                activeTab === 'soins_hosp'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Clock size={14} />
+              <span>Soins Hospitalisation ({pendingHospActsCount})</span>
+            </button>
+            <button
               onClick={() => setActiveTab('historique')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-semibold text-xs transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'historique'
@@ -871,9 +900,17 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                       </p>
                     </div>
 
-                    {/* Calculated Priority Tag */}
-                    <div className="text-right flex flex-col items-end">
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Niveau de Priorité</span>
+                    {/* Calculated Priority Tag & Hospitalisation Action */}
+                    <div className="text-right flex flex-col items-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowHospitalisationModal(true)}
+                        className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      >
+                        <BedDouble size={14} />
+                        <span>Hospitaliser le patient</span>
+                      </button>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Niveau de Priorité</span>
                       <div className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest border transition-all ${
                         assessPriority.priority === 'critique' ? 'bg-rose-500 text-white border-transparent animate-pulse' :
                         assessPriority.priority === 'urgent' ? 'bg-amber-500 text-white border-transparent' :
@@ -1882,6 +1919,92 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
         </div>
       )}
 
+      {/* SOINS HOSPITALISATION CHRONOLOGICAL TAB */}
+      {activeTab === 'soins_hosp' && (
+        <div className="bg-white rounded-[28px] border border-slate-200 p-6 shadow-xs space-y-5 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <BedDouble size={20} className="text-indigo-600" />
+                <span>Chronologie des Soins Hospitalisation</span>
+              </h2>
+              <p className="text-xs text-slate-500 font-medium">
+                File infirmière triée chronologiquement par heure prévue — mise à jour en temps réel dans le dossier d'hospitalisation.
+              </p>
+            </div>
+            <span className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-black">
+              {pendingHospActsCount} soin(s) à exécuter
+            </span>
+          </div>
+
+          {hospitalisationActs.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-xs font-bold">
+              Aucun soin d'hospitalisation planifié pour le moment.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {hospitalisationActs.map((act) => {
+                const isDone = act.status === 'FAIT' || act.status === 'REALISE';
+                const schedTime = act.scheduledTime || (act.createdAt ? new Date(act.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--:--');
+                const schedDate = act.scheduledDate || act.date || '';
+                const locationText = act.locationBadge || `${act.roomName || 'Chambre'} - ${act.bedName || 'Lit'}`;
+                return (
+                  <div
+                    key={act.id}
+                    className={`p-4 rounded-2xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
+                      isDone
+                        ? 'bg-emerald-50/40 border-emerald-200 opacity-80'
+                        : 'bg-white border-indigo-100 hover:border-indigo-300 shadow-xs'
+                    }`}
+                  >
+                    <div className="flex items-start sm:items-center gap-4 min-w-0">
+                      <div className={`px-3.5 py-2.5 rounded-xl text-center shrink-0 border ${
+                        isDone ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-indigo-600 text-white border-indigo-600'
+                      }`}>
+                        <div className="text-sm font-black font-mono leading-none">[{schedTime}]</div>
+                        {schedDate && <div className="text-[9px] font-bold opacity-85 mt-1">{schedDate}</div>}
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded-lg text-[10px] font-black uppercase tracking-wider">
+                            {locationText}
+                          </span>
+                          <span className="text-sm font-black text-slate-900 truncate">{act.patientName}</span>
+                        </div>
+                        <p className="text-xs font-bold text-slate-700">{act.actName || act.actType || act.type}</p>
+                        {isDone && (
+                          <p className="text-[11px] font-bold text-emerald-700">
+                            ✓ Fait à {act.executionTime || '--:--'} par {act.executedBy || act.practitionerName || 'Infirmier(ère)'}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {!isDone ? (
+                        <button
+                          type="button"
+                          disabled={isExecutingAct}
+                          onClick={() => handleMarkActAsDone(act)}
+                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm cursor-pointer"
+                        >
+                          <Check size={15} />
+                          <span>Fait</span>
+                        </button>
+                      ) : (
+                        <span className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                          <CheckCircle2 size={13} /> Exécuté
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* HOSPITALISATION TAB */}
       {activeTab === 'hospitalisation' && (
         <Inpatient
@@ -1895,6 +2018,34 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
         />
       )}
       </main>
+
+      <UniversalHospitalisationModal
+        isOpen={showHospitalisationModal}
+        onClose={() => setShowHospitalisationModal(false)}
+        patient={activePatient ? {
+          id: activePatient.patientId || activePatient.dmeId || activePatient.id,
+          firstName: activePatient.firstName,
+          lastName: activePatient.lastName,
+          age: activePatient.age,
+          gender: activePatient.gender,
+          dossier: activePatient.dmeId || activePatient.patientId || activePatient.id,
+          motif: activePatient.motifLabel || activePatient.motif
+        } : null}
+        sourceModule="Soins Infirmiers"
+        user={user}
+        establishment={establishment}
+        onSuccess={async () => {
+          if (activePatient?.queueDocId || activePatient?.docId || activePatient?.id) {
+            const qId = activePatient.queueDocId || activePatient.docId || activePatient.id;
+            await updateDoc(doc(db, 'service_queues', qId), {
+              status: 'hospitalized',
+              attente_module: 'Hospitalisation',
+              lastUpdated: new Date().toISOString()
+            }).catch(() => {});
+          }
+          setActivePatient(null);
+        }}
+      />
 
     </div>
   );

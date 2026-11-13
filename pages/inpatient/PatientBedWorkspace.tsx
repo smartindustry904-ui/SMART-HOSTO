@@ -8,9 +8,10 @@ import {
 import { db, sanitizeData } from '../../src/firebase';
 import { 
   doc, onSnapshot, updateDoc, setDoc, 
-  collection, query, where, getDocs 
+  collection, query, where, getDocs, writeBatch 
 } from 'firebase/firestore';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
+import { CARE_FREQUENCY_OPTIONS, CareFrequencyCode, generateCareScheduleTasks } from '../../src/utils/hospitalisation';
 import { 
   Bed, Room, InpatientRecord, InpatientVitalSign, 
   InpatientCare, InpatientObservation, User as UserType 
@@ -42,6 +43,8 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
   const locationBadge = `HOSPITALISATION : ${room?.name || (bed as any).roomName || 'Chambre'} - ${bed.name}`;
 
   const [labActsList, setLabActsList] = useState<any[]>([]);
+  const [careActsList, setCareActsList] = useState<any[]>([]);
+  const [patientNursingTasks, setPatientNursingTasks] = useState<any[]>([]);
   const [pharmaMedsList, setPharmaMedsList] = useState<any[]>([]);
   const [selectedLabActId, setSelectedLabActId] = useState('');
   const [customLabName, setCustomLabName] = useState('');
@@ -56,9 +59,10 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
 
   useEffect(() => {
     const unsubActs = onSnapshot(collection(db, 'medical_acts'), (snap) => {
-      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .filter((a: any) => belongsToTenant(a, activeTenantId) && (a.type === 'examen' || a.servicePrincipal === 'laboratoire' || /labo|analyse/i.test(a.category || a.categorie || '')));
-      setLabActsList(list);
+      const allActs = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter((a: any) => belongsToTenant(a, activeTenantId));
+      setLabActsList(allActs.filter((a: any) => a.type === 'examen' || a.servicePrincipal === 'laboratoire' || /labo|analyse/i.test(a.category || a.categorie || '')));
+      setCareActsList(allActs.filter((a: any) => a.category === 'soin' || a.category === 'soins' || a.servicePrincipal === 'soins_infirmiers' || /soin|pansement|injection|perfusion/i.test(a.category || a.categorie || a.type || a.name || '')));
     });
     const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
@@ -67,6 +71,27 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
     });
     return () => { unsubActs(); unsubMeds(); };
   }, [activeTenantId]);
+
+  // Real-time chronological nursing tasks for this patient
+  useEffect(() => {
+    if (!bed.patientId) {
+      setPatientNursingTasks([]);
+      return;
+    }
+    const q = query(collection(db, 'nursing_acts'), where('patientId', '==', bed.patientId));
+    const unsub = onSnapshot(q, (snap) => {
+      const tasks = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter((t: any) => belongsToTenant(t, activeTenantId))
+        .sort((a: any, b: any) => {
+          const tA = String(a.scheduledAt || `${a.scheduledDate || '9999-99-99'}T${a.scheduledTime || '23:59'}` || a.createdAt || '');
+          const tB = String(b.scheduledAt || `${b.scheduledDate || '9999-99-99'}T${b.scheduledTime || '23:59'}` || b.createdAt || '');
+          return tA.localeCompare(tB);
+        });
+      setPatientNursingTasks(tasks);
+    });
+    return () => unsub();
+  }, [bed.patientId, activeTenantId]);
 
   // Forms state
   const [showVitalForm, setShowVitalForm] = useState(false);
@@ -85,10 +110,13 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
 
   const [showCareForm, setShowCareForm] = useState(false);
   const [careForm, setCareForm] = useState({
-    type: 'Médicament',
+    actId: '',
+    type: 'Injection',
     description: '',
+    frequency: 'Q6H' as CareFrequencyCode,
+    durationDays: 1,
     observation: '',
-    status: 'Réalisé' as 'Réalisé' | 'Prévu'
+    status: 'Prévu' as 'Réalisé' | 'Prévu'
   });
   const [isSavingCare, setIsSavingCare] = useState(false);
 
@@ -201,68 +229,105 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
     }
   };
 
-  // Handler: Add Care
+  // Handler: Add Chronological Care Schedule
   const handleSaveCare = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inpatientRecord || !careForm.description.trim()) return;
-    setIsSavingCare(true);
+    if (!inpatientRecord) return;
+    const selectedAct = careActsList.find(a => a.id === careForm.actId);
+    const actName = selectedAct ? (selectedAct.name || selectedAct.nom) : careForm.type;
+    const descText = careForm.description.trim() || actName;
+    if (!descText) return;
 
+    setIsSavingCare(true);
     try {
       const now = new Date();
+      const unitPrice = Number(selectedAct?.price ?? selectedAct?.prixBase ?? 0);
+      const slots = generateCareScheduleTasks(careForm.frequency, careForm.durationDays, now);
+      const totalCareCost = unitPrice * slots.length;
+      const freqMeta = CARE_FREQUENCY_OPTIONS.find(f => f.code === careForm.frequency);
+
+      const batch = writeBatch(db);
+
+      // 1. Generate individual time-stamped nursing_acts tasks
+      slots.forEach((slot) => {
+        const nursingActRef = doc(collection(db, 'nursing_acts'));
+        batch.set(nursingActRef, sanitizeData(stampTenantData({
+          id: nursingActRef.id,
+          patientId: bed.patientId || inpatientRecord.patientId,
+          patientDme: bed.patientDossier || bed.patientId || '',
+          patientName: bed.patientName || inpatientRecord.patientName || 'Patient Hospitalisé',
+          actId: selectedAct?.id || '',
+          actName: `${actName}${careForm.description.trim() ? ` — ${careForm.description.trim()}` : ''}`,
+          actType: `${actName}${careForm.description.trim() ? ` : ${careForm.description.trim()}` : ''}`,
+          careName: descText,
+          instructions: careForm.observation.trim() || `Administrer en ${locationBadge} (${freqMeta?.label || careForm.frequency})`,
+          frequency: careForm.frequency,
+          frequencyLabel: freqMeta?.label || careForm.frequency,
+          durationDays: careForm.durationDays,
+          scheduledDate: slot.scheduledDate,
+          scheduledTime: slot.scheduledTime,
+          scheduledAt: slot.scheduledAt,
+          unitPrice,
+          price: unitPrice,
+          source: 'HOSPITALISATION',
+          origin: 'HOSPITALISATION',
+          inpatientRecordId: inpatientRecord.id,
+          locationBadge,
+          roomName: room?.name || (bed as any).roomName || '',
+          bedName: bed.name,
+          bedId: bed.id,
+          status: 'EN ATTENTE',
+          priority: bed.priority === 'Critique' ? 'CRITICAL' : bed.priority === 'Urgent' ? 'HIGH' : 'NORMAL',
+          paymentStatus: unitPrice > 0 ? 'PENDING' : 'PAID',
+          prescribedBy: currentUser?.name || 'Médecin Hospitalisation',
+          prescribedById: currentUser?.id || '',
+          createdAt: now.toISOString()
+        }, currentUser)));
+      });
+
+      // 2. Append summary + careCharges to inpatient_records
       const newCare: InpatientCare = {
         id: `care_${Date.now()}`,
-        type: careForm.type,
-        description: careForm.description.trim(),
+        type: actName,
+        description: `${descText} (${freqMeta?.label || careForm.frequency} • ${slots.length} tâche(s) sur ${careForm.durationDays}j)`,
         timestamp: now.toISOString(),
         date: now.toISOString().split('T')[0],
         time: now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-        professional: currentUser?.name || 'Soignant Hospitalisation',
+        professional: currentUser?.name || 'Médecin Hospitalisation',
         professionalId: currentUser?.id || '',
-        status: careForm.status,
+        status: 'Prévu',
         observation: careForm.observation.trim() || undefined
       };
-
       const updatedCares = [newCare, ...(inpatientRecord.cares || [])];
       const recRef = doc(db, 'inpatient_records', inpatientRecord.id);
-      await updateDoc(recRef, sanitizeData({ cares: updatedCares }));
+      batch.update(recRef, sanitizeData({
+        cares: updatedCares,
+        careCharges: Number((inpatientRecord as any).careCharges || 0) + totalCareCost,
+        lastUpdated: now.toISOString()
+      }));
 
-      // Cross-Module Sync: Push to Soins Infirmiers queue with mandatory Hospitalisation location badge
-      const nursingActRef = doc(collection(db, 'nursing_acts'));
-      await setDoc(nursingActRef, sanitizeData(stampTenantData({
-        id: nursingActRef.id,
-        patientId: bed.patientId || inpatientRecord.patientId,
-        patientDme: bed.patientDossier || bed.patientId || '',
-        patientName: bed.patientName || inpatientRecord.patientName || 'Patient Hospitalisé',
-        actType: `${careForm.type} : ${careForm.description.trim()}`,
-        careName: `${careForm.type} : ${careForm.description.trim()}`,
-        instructions: careForm.observation.trim() || `Administrer en ${locationBadge}`,
-        source: 'HOSPITALISATION',
-        origin: 'HOSPITALISATION',
-        locationBadge,
-        roomName: room?.name || (bed as any).roomName || '',
-        bedName: bed.name,
-        bedId: bed.id,
-        status: careForm.status === 'Réalisé' ? 'TERMINÉ' : 'EN ATTENTE',
-        priority: bed.priority === 'Critique' ? 'CRITICAL' : bed.priority === 'Urgent' ? 'HIGH' : 'NORMAL',
-        paymentStatus: 'PAID',
-        prescribedBy: currentUser?.name || 'Médecin Hospitalisation',
-        createdAt: now.toISOString()
-      }, currentUser)));
+      await batch.commit();
 
       setCareForm({
-        type: 'Médicament',
+        actId: '',
+        type: 'Injection',
         description: '',
+        frequency: 'Q6H',
+        durationDays: 1,
         observation: '',
-        status: 'Réalisé'
+        status: 'Prévu'
       });
       setShowCareForm(false);
 
       window.dispatchEvent(new CustomEvent('app-notification', {
-        detail: { message: "Soin enregistré avec succès.", type: 'success' }
+        detail: {
+          message: `${slots.length} tâche(s) de soin planifiée(s) chronologiquement et envoyée(s) aux Soins Infirmiers.`,
+          type: 'success'
+        }
       }));
     } catch (e) {
       console.error("Error saving care:", e);
-      alert("Erreur lors de l'enregistrement du soin.");
+      alert("Erreur lors de la planification chronologique du soin.");
     } finally {
       setIsSavingCare(false);
     }
@@ -802,81 +867,109 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
             </button>
           </div>
 
-          {/* New Care Form */}
+          {/* New Chronological Care Form */}
           {showCareForm && (
             <form onSubmit={handleSaveCare} className="bg-slate-50 border border-slate-200 rounded-3xl p-6 sm:p-8 space-y-5 animate-in slide-in-from-top-2">
-              <h4 className="text-sm font-black text-slate-900 uppercase tracking-wider">
-                Enregistrement d'un Soin Infirmier / Médical
-              </h4>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">
-                    Type de Soin
-                  </label>
-                  <select
-                    value={careForm.type}
-                    onChange={(e) => setCareForm({ ...careForm, type: e.target.value })}
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-sm"
-                  >
-                    <option value="Médicament">Médicament / Perfusion</option>
-                    <option value="Injection">Injection (IM / IV / SC)</option>
-                    <option value="Pansement">Pansement / Soin de plaie</option>
-                    <option value="Surveillance">Surveillance clinique / Monitoring</option>
-                    <option value="Hygiène">Soin d'hygiène / Confort</option>
-                    <option value="Sonde / Drain">Sonde / Drain / Cathéter</option>
-                    <option value="Prélèvement">Prélèvement sanguin / Examen</option>
-                    <option value="Autre">Autre acte</option>
-                  </select>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">
-                    Description du soin <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={careForm.description}
-                    onChange={(e) => setCareForm({ ...careForm, description: e.target.value })}
-                    placeholder="Ex: Pose perfusion Sérum Salé 0.9% 500ml + Paracétamol 1g IV..."
-                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-sm"
-                  />
-                </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-sm font-black text-slate-900 uppercase tracking-wider">
+                  Prescription Chronologique de Soins Infirmiers
+                </h4>
+                <span className="px-3 py-1 bg-indigo-100 text-indigo-800 rounded-xl text-[11px] font-black">
+                  {generateCareScheduleTasks(careForm.frequency, careForm.durationDays).length} tâche(s) générée(s)
+                  {(() => {
+                    const act = careActsList.find(a => a.id === careForm.actId);
+                    const p = Number(act?.price ?? act?.prixBase ?? 0);
+                    const count = generateCareScheduleTasks(careForm.frequency, careForm.durationDays).length;
+                    return p > 0 ? ` • Total : ${(p * count).toLocaleString()} FCFA` : '';
+                  })()}
+                </span>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">
-                    Statut du soin
+                    Type de Soin (Paramètres)
                   </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCareForm({ ...careForm, status: 'Réalisé' })}
-                      className={`flex-1 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border ${
-                        careForm.status === 'Réalisé'
-                          ? 'bg-emerald-600 text-white border-emerald-600'
-                          : 'bg-white text-slate-600 border-slate-200'
-                      }`}
-                    >
-                      Réalisé
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setCareForm({ ...careForm, status: 'Prévu' })}
-                      className={`flex-1 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-all border ${
-                        careForm.status === 'Prévu'
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white text-slate-600 border-slate-200'
-                      }`}
-                    >
-                      Prévu
-                    </button>
-                  </div>
+                  <select
+                    value={careForm.actId}
+                    onChange={(e) => {
+                      const act = careActsList.find(a => a.id === e.target.value);
+                      setCareForm({
+                        ...careForm,
+                        actId: e.target.value,
+                        type: act ? (act.name || act.nom) : 'Injection'
+                      });
+                    }}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-sm"
+                  >
+                    <option value="">-- Acte libre / Personnalisé --</option>
+                    {careActsList.map(act => {
+                      const price = Number(act.price ?? act.prixBase ?? 0);
+                      return (
+                        <option key={act.id} value={act.id}>
+                          {act.name || act.nom}{price > 0 ? ` (${price.toLocaleString()} FCFA)` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
                 </div>
 
-                <div className="sm:col-span-2">
+                <div>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">
+                    Fréquence
+                  </label>
+                  <select
+                    value={careForm.frequency}
+                    onChange={(e) => {
+                      const freq = e.target.value as CareFrequencyCode;
+                      setCareForm({
+                        ...careForm,
+                        frequency: freq,
+                        durationDays: freq === 'UNE_FOIS' ? 1 : careForm.durationDays
+                      });
+                    }}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-sm"
+                  >
+                    {CARE_FREQUENCY_OPTIONS.map(opt => (
+                      <option key={opt.code} value={opt.code}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">
+                    Durée (jours)
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={30}
+                    disabled={careForm.frequency === 'UNE_FOIS'}
+                    value={careForm.frequency === 'UNE_FOIS' ? 1 : careForm.durationDays}
+                    onChange={(e) => setCareForm({ ...careForm, durationDays: Math.max(1, Number(e.target.value) || 1) })}
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-sm disabled:opacity-50"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">
+                    Précision / Posologie {!careForm.actId && <span className="text-rose-500">*</span>}
+                  </label>
+                  <input
+                    type="text"
+                    required={!careForm.actId}
+                    value={careForm.description}
+                    onChange={(e) => setCareForm({ ...careForm, description: e.target.value })}
+                    placeholder="Ex: Ceftriaxone 1g IVL, Pansement stérile..."
+                    className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-sm"
+                  />
+                </div>
+
+                <div>
                   <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">
                     Observation éventuelle
                   </label>
@@ -884,7 +977,7 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
                     type="text"
                     value={careForm.observation}
                     onChange={(e) => setCareForm({ ...careForm, observation: e.target.value })}
-                    placeholder="Ex: Bonne tolérance veineuse, débit 30 gttes/min..."
+                    placeholder="Ex: Surveiller voie veineuse, débit 30 gttes/min..."
                     className="w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl font-bold text-slate-900 text-sm"
                   />
                 </div>
@@ -901,7 +994,7 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
                 <button
                   type="submit"
                   disabled={isSavingCare}
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-xs"
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 cursor-pointer shadow-xs"
                 >
                   {isSavingCare ? "Enregistrement..." : "Enregistrer le soin"}
                 </button>
@@ -964,6 +1057,55 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
               </div>
             )}
           </div>
+
+          {/* Live Synchronized Chronological Nursing Tasks */}
+          {patientNursingTasks.length > 0 && (
+            <div className="bg-white rounded-3xl border border-indigo-200 overflow-hidden shadow-xs">
+              <div className="px-6 py-4 bg-indigo-50/70 border-b border-indigo-100 flex items-center justify-between">
+                <h4 className="text-xs font-black text-indigo-900 uppercase tracking-wider flex items-center gap-2">
+                  <Clock size={15} className="text-indigo-600" />
+                  <span>Planning Chronologique Infirmier ({patientNursingTasks.length})</span>
+                </h4>
+                <span className="text-[11px] font-bold text-indigo-600">
+                  {patientNursingTasks.filter(t => t.status === 'FAIT' || t.status === 'REALISE').length} / {patientNursingTasks.length} exécuté(s)
+                </span>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {patientNursingTasks.map((task: any) => {
+                  const isDone = task.status === 'FAIT' || task.status === 'REALISE';
+                  return (
+                    <div key={task.id} className="px-6 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center gap-3">
+                        <span className={`px-2.5 py-1 rounded-lg text-xs font-black font-mono ${
+                          isDone ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-600 text-white'
+                        }`}>
+                          [{task.scheduledTime || '--:--'}]
+                        </span>
+                        <div>
+                          <p className="text-xs font-black text-slate-900">{task.actName || task.actType}</p>
+                          <p className="text-[10px] text-slate-500 font-bold">
+                            {task.scheduledDate || ''} {task.unitPrice > 0 ? `• ${Number(task.unitPrice).toLocaleString()} FCFA` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        {isDone ? (
+                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-100 text-emerald-800 rounded-xl text-[10px] font-black">
+                            <CheckCircle2 size={12} />
+                            Fait à {task.executionTime || '--:--'} • {task.executedBy || task.practitionerName || 'Infirmier'}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl text-[10px] font-black">
+                            <Clock size={12} /> En attente (Soins Infirmiers)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

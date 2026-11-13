@@ -20,6 +20,7 @@ import { BedAdmissionModal } from './inpatient/BedAdmissionModal';
 import { BedDischargeModal } from './inpatient/BedDischargeModal';
 import { useSettings } from '../hooks/useSettings';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
+import { isBedLibre, isBedOccupe } from '../src/utils/hospitalisation';
 
 interface InpatientProps {
   user?: UserType;
@@ -91,10 +92,10 @@ const Inpatient: React.FC<InpatientProps> = ({
       // Keep active workspace bed in sync
       if (activeBedForWorkspace) {
         const updated = list.find(b => b.id === activeBedForWorkspace.id);
-        if (updated && updated.status === 'OCCUPIED') {
+        if (updated && isBedOccupe(updated.status)) {
           setActiveBedForWorkspace(updated);
-        } else if (updated && updated.status === 'AVAILABLE') {
-          // If the bed was liberated elsewhere, switch back to beds list
+        } else if (updated && !isBedOccupe(updated.status)) {
+          // If the bed was liberated or moved to cleaning elsewhere, switch back to beds list
           setActiveBedForWorkspace(null);
           handleTabChange('beds');
         }
@@ -142,11 +143,11 @@ const Inpatient: React.FC<InpatientProps> = ({
   }, [beds]);
 
   const availableBeds = useMemo(() => {
-    return hospitalBeds.filter(b => b.status === 'AVAILABLE');
+    return hospitalBeds.filter(b => isBedLibre(b.status));
   }, [hospitalBeds]);
 
   const occupiedBeds = useMemo(() => {
-    return hospitalBeds.filter(b => b.status === 'OCCUPIED');
+    return hospitalBeds.filter(b => isBedOccupe(b.status));
   }, [hospitalBeds]);
 
   // Seed standard default rooms & beds if collection is empty
@@ -163,12 +164,12 @@ const Inpatient: React.FC<InpatientProps> = ({
       batch.set(doc(db, 'rooms', r3.id), r3);
 
       const defaultBeds = [
-        { id: `${activeTenantId}_lit_a01`, name: 'Lit A01', roomId: r1.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Médecine Générale' },
-        { id: `${activeTenantId}_lit_a02`, name: 'Lit A02', roomId: r1.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Médecine Générale' },
-        { id: `${activeTenantId}_lit_b01`, name: 'Lit B01', roomId: r2.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Chirurgie' },
-        { id: `${activeTenantId}_lit_b02`, name: 'Lit B02', roomId: r2.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Chirurgie' },
-        { id: `${activeTenantId}_lit_c01`, name: 'Lit C01', roomId: r3.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Soins Intensifs' },
-        { id: `${activeTenantId}_lit_c02`, name: 'Lit C02', roomId: r3.id, status: 'AVAILABLE', category: 'hospitalisation', service: 'Soins Intensifs' },
+        { id: `${activeTenantId}_lit_a01`, name: 'Lit A01', roomId: r1.id, status: 'LIBRE', dailyRate: 15000, tarifJournalier: 15000, category: 'hospitalisation', service: 'Médecine Générale' },
+        { id: `${activeTenantId}_lit_a02`, name: 'Lit A02', roomId: r1.id, status: 'LIBRE', dailyRate: 15000, tarifJournalier: 15000, category: 'hospitalisation', service: 'Médecine Générale' },
+        { id: `${activeTenantId}_lit_b01`, name: 'Lit B01', roomId: r2.id, status: 'LIBRE', dailyRate: 20000, tarifJournalier: 20000, category: 'hospitalisation', service: 'Chirurgie' },
+        { id: `${activeTenantId}_lit_b02`, name: 'Lit B02', roomId: r2.id, status: 'LIBRE', dailyRate: 20000, tarifJournalier: 20000, category: 'hospitalisation', service: 'Chirurgie' },
+        { id: `${activeTenantId}_lit_c01`, name: 'Lit C01', roomId: r3.id, status: 'LIBRE', dailyRate: 35000, tarifJournalier: 35000, category: 'hospitalisation', service: 'Soins Intensifs' },
+        { id: `${activeTenantId}_lit_c02`, name: 'Lit C02', roomId: r3.id, status: 'LIBRE', dailyRate: 35000, tarifJournalier: 35000, category: 'hospitalisation', service: 'Soins Intensifs' },
       ];
 
       defaultBeds.forEach(b => {

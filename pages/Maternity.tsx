@@ -49,6 +49,7 @@ import { CpnTab } from './maternity/CpnTab';
 import { DeliveryRoomTab } from './maternity/DeliveryRoomTab';
 import { ObstetricalHistoryTab } from './maternity/ObstetricalHistoryTab';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
+import { isBedLibre } from '../src/utils/hospitalisation';
 
 interface MaternityProps {
   user: User;
@@ -741,7 +742,7 @@ const Maternity: React.FC<MaternityProps> = ({
                   className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:border-indigo-500"
                 >
                   <option value="">-- Choisir un lit libre --</option>
-                  {beds.filter(b => b.status === 'AVAILABLE').map(b => {
+                  {beds.filter(b => isBedLibre(b.status)).map(b => {
                     const rName = b.roomName || rooms.find(r => r.id === b.roomId)?.name || 'Chambre';
                     const rate = Number(b.dailyRate ?? b.tarifJournalier ?? 0);
                     return (
@@ -784,7 +785,8 @@ const Maternity: React.FC<MaternityProps> = ({
                     const inpId = `INP-${Date.now()}`;
                     await Promise.all([
                       setDoc(doc(db, 'beds', maternityHospBedId), sanitizeData({
-                        status: 'OCCUPIED',
+                        status: 'OCCUPÉ',
+                        admittedAt: nowIso,
                         patientId: selectedPatient.id,
                         patientName: fullName,
                         admissionDate: nowIso.split('T')[0],

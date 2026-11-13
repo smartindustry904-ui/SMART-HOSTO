@@ -11,6 +11,7 @@ import {
 } from '../../types';
 import { VoiceNoteRecorder } from './VoiceNoteRecorder';
 import { PrescriptionSoinsTab } from '../consultation/PrescriptionSoinsTab';
+import { UniversalHospitalisationModal } from '../../components/common/UniversalHospitalisationModal';
 
 interface PriseEnChargeTabProps {
   encounter: EmergencyEncounter | null;
@@ -38,6 +39,7 @@ export const PriseEnChargeTab: React.FC<PriseEnChargeTabProps> = ({
   theme = 'light'
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'resume' | 'parametres' | 'soins' | 'suivi' | 'sortie'>('resume');
+  const [showHospitalisationModal, setShowHospitalisationModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -367,6 +369,15 @@ export const PriseEnChargeTab: React.FC<PriseEnChargeTabProps> = ({
                 </button>
               ))}
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowHospitalisationModal(true)}
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
+            >
+              <Bed size={14} />
+              <span>Hospitaliser le patient</span>
+            </button>
 
             <button
               onClick={onBackToList}
@@ -1178,6 +1189,27 @@ export const PriseEnChargeTab: React.FC<PriseEnChargeTabProps> = ({
           </form>
         </div>
       )}
+
+      <UniversalHospitalisationModal
+        isOpen={showHospitalisationModal}
+        onClose={() => setShowHospitalisationModal(false)}
+        patient={encounter ? {
+          id: encounter.patientId || encounter.id,
+          firstName: encounter.firstName,
+          lastName: encounter.lastName,
+          age: encounter.age,
+          gender: encounter.gender,
+          dossier: encounter.patientId,
+          motif: encounter.motif
+        } : null}
+        sourceModule="Urgences"
+        user={currentUser}
+        defaultReason={encounter?.motif || 'Hospitalisation depuis Urgences'}
+        onSuccess={async () => {
+          await onUpdateStatus(encounter.id, 'Sortie');
+          showNotification("Patient hospitalisé avec succès sur un lit libre.");
+        }}
+      />
     </div>
   );
 };
