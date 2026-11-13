@@ -43,6 +43,7 @@ import {
   FileText
 } from 'lucide-react';
 import { Role, User, EstablishmentConfig, MedicalAct, Medication, CustomRole, UserStatus, Supplier, SupplierInvoice, Licence } from '../types';
+import { HospitalisationSettingsTab } from './settings/HospitalisationSettingsTab';
 import { DEFAULT_ROLES } from '../constants/rbac';
 import { THEMES, ThemeColor, applyTheme } from '../constants/themes';
 import RolesPermissions from './settings/RolesPermissions';
@@ -1074,6 +1075,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
               { id: 'licence', label: '💳 Licence & Abonnement' },
               { id: 'appearance', label: '🎨 Thèmes & Couleurs' },
               { id: 'referentials', label: 'Référentiels' },
+              { id: 'hospitalisation', label: '🛏️ Hospitalisation' },
               { id: 'cashier_settings', label: 'Caisse' },
               { id: 'protocols', label: 'Protocoles' },
               { id: 'whatsapp_agent', label: '💬 WhatsApp IA' }
@@ -2564,6 +2566,15 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 </div>
               )}
             </div>
+          )}
+
+          {activeTab === 'hospitalisation' && (
+            <HospitalisationSettingsTab
+              user={user}
+              establishment={establishment}
+              currency={establishment.currency}
+              showMessage={showMessage}
+            />
           )}
 
           {activeTab === 'cashier_settings' && (

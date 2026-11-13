@@ -3,13 +3,14 @@ import {
   ArrowLeft, BedDouble, Activity, Heart, Thermometer, 
   Stethoscope, Plus, CheckCircle2, Clock, Calendar, 
   User, AlertCircle, FileText, Check, Mic, Volume2, 
-  Printer, LogOut, ShieldAlert, Sparkles, Droplet, Eye
+  Printer, LogOut, ShieldAlert, Sparkles, Droplet, Eye, Beaker, Pill
 } from 'lucide-react';
 import { db, sanitizeData } from '../../src/firebase';
 import { 
   doc, onSnapshot, updateDoc, setDoc, 
   collection, query, where, getDocs 
 } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
 import { 
   Bed, Room, InpatientRecord, InpatientVitalSign, 
   InpatientCare, InpatientObservation, User as UserType 
@@ -33,9 +34,39 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
   onOpenDischargeModal,
   theme = 'light'
 }) => {
-  const [activeSection, setActiveSection] = useState<'vitals' | 'cares' | 'observations' | 'history'>('vitals');
+  const [activeSection, setActiveSection] = useState<'vitals' | 'cares' | 'observations' | 'prescribe' | 'history'>('vitals');
   const [inpatientRecord, setInpatientRecord] = useState<InpatientRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const activeTenantId = React.useMemo(() => getActiveTenantId(currentUser), [currentUser]);
+  const locationBadge = `HOSPITALISATION : ${room?.name || (bed as any).roomName || 'Chambre'} - ${bed.name}`;
+
+  const [labActsList, setLabActsList] = useState<any[]>([]);
+  const [pharmaMedsList, setPharmaMedsList] = useState<any[]>([]);
+  const [selectedLabActId, setSelectedLabActId] = useState('');
+  const [customLabName, setCustomLabName] = useState('');
+  const [labPriority, setLabPriority] = useState<'normal' | 'urgent'>('normal');
+  const [isSendingLab, setIsSendingLab] = useState(false);
+
+  const [selectedMedId, setSelectedMedId] = useState('');
+  const [customMedName, setCustomMedName] = useState('');
+  const [medDosage, setMedDosage] = useState('1 cp matin et soir');
+  const [medQty, setMedQty] = useState('1');
+  const [isSendingMed, setIsSendingMed] = useState(false);
+
+  useEffect(() => {
+    const unsubActs = onSnapshot(collection(db, 'medical_acts'), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter((a: any) => belongsToTenant(a, activeTenantId) && (a.type === 'examen' || a.servicePrincipal === 'laboratoire' || /labo|analyse/i.test(a.category || a.categorie || '')));
+      setLabActsList(list);
+    });
+    const unsubMeds = onSnapshot(collection(db, 'pharmacy_inventory'), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .filter((m: any) => belongsToTenant(m, activeTenantId));
+      setPharmaMedsList(list);
+    });
+    return () => { unsubActs(); unsubMeds(); };
+  }, [activeTenantId]);
 
   // Forms state
   const [showVitalForm, setShowVitalForm] = useState(false);
@@ -194,6 +225,29 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
       const updatedCares = [newCare, ...(inpatientRecord.cares || [])];
       const recRef = doc(db, 'inpatient_records', inpatientRecord.id);
       await updateDoc(recRef, sanitizeData({ cares: updatedCares }));
+
+      // Cross-Module Sync: Push to Soins Infirmiers queue with mandatory Hospitalisation location badge
+      const nursingActRef = doc(collection(db, 'nursing_acts'));
+      await setDoc(nursingActRef, sanitizeData(stampTenantData({
+        id: nursingActRef.id,
+        patientId: bed.patientId || inpatientRecord.patientId,
+        patientDme: bed.patientDossier || bed.patientId || '',
+        patientName: bed.patientName || inpatientRecord.patientName || 'Patient Hospitalisé',
+        actType: `${careForm.type} : ${careForm.description.trim()}`,
+        careName: `${careForm.type} : ${careForm.description.trim()}`,
+        instructions: careForm.observation.trim() || `Administrer en ${locationBadge}`,
+        source: 'HOSPITALISATION',
+        origin: 'HOSPITALISATION',
+        locationBadge,
+        roomName: room?.name || (bed as any).roomName || '',
+        bedName: bed.name,
+        bedId: bed.id,
+        status: careForm.status === 'Réalisé' ? 'TERMINÉ' : 'EN ATTENTE',
+        priority: bed.priority === 'Critique' ? 'CRITICAL' : bed.priority === 'Urgent' ? 'HIGH' : 'NORMAL',
+        paymentStatus: 'PAID',
+        prescribedBy: currentUser?.name || 'Médecin Hospitalisation',
+        createdAt: now.toISOString()
+      }, currentUser)));
 
       setCareForm({
         type: 'Médicament',
@@ -430,7 +484,19 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
           }`}
         >
           <FileText size={16} />
-          <span>Observations du Jour ({inpatientRecord?.observations?.length || 0})</span>
+          <span>Visites & Observations ({inpatientRecord?.observations?.length || 0})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSection('prescribe')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+            activeSection === 'prescribe'
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+              : 'bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200'
+          }`}
+        >
+          <Stethoscope size={16} />
+          <span>Prescrire (Labo / Pharma)</span>
         </button>
 
         <button
@@ -1190,6 +1256,197 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
               ));
             })()}
 
+          </div>
+        </div>
+      )}
+
+      {/* SECTION 4: PRESCRIRE LABO & PHARMACIE (VISITE MÉDICALE) */}
+      {activeSection === 'prescribe' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in">
+          {/* Labo */}
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center">
+                  <Beaker size={18} />
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-slate-900">Prescrire un Examen de Laboratoire</h4>
+                  <p className="text-[11px] text-indigo-600 font-bold">🛏️ {locationBadge}</p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <select
+                value={selectedLabActId}
+                onChange={(e) => setSelectedLabActId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:border-blue-500"
+              >
+                <option value="">-- Choisir un examen du référentiel --</option>
+                {labActsList.map(a => (
+                  <option key={a.id} value={a.id}>{a.name || a.nom} ({Number(a.price || a.prixBase || 0).toLocaleString()} FCFA)</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={customLabName}
+                onChange={(e) => setCustomLabName(e.target.value)}
+                placeholder="Ou saisir un examen libre (ex: NFS + CRP)"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-blue-500"
+              />
+              <div className="flex items-center gap-2">
+                {(['normal', 'urgent'] as const).map(pr => (
+                  <button
+                    key={pr}
+                    type="button"
+                    onClick={() => setLabPriority(pr)}
+                    className={`flex-1 py-2 rounded-xl text-xs font-black uppercase border cursor-pointer ${
+                      labPriority === pr ? (pr === 'urgent' ? 'bg-rose-600 text-white border-rose-600' : 'bg-blue-600 text-white border-blue-600') : 'bg-slate-50 text-slate-500 border-slate-200'
+                    }`}
+                  >
+                    {pr}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={isSendingLab || (!selectedLabActId && !customLabName.trim())}
+                onClick={async () => {
+                  setIsSendingLab(true);
+                  try {
+                    const act = labActsList.find(a => a.id === selectedLabActId);
+                    const examName = act ? (act.name || act.nom) : customLabName.trim();
+                    const price = act ? Number(act.price || act.prixBase || 0) : 5000;
+                    const reqRef = doc(collection(db, 'lab_requests'));
+                    await setDoc(reqRef, sanitizeData(stampTenantData({
+                      id: reqRef.id,
+                      patientId: bed.patientId || inpatientRecord?.patientId || '',
+                      patientName: bed.patientName || inpatientRecord?.patientName || 'Patient Hospitalisé',
+                      exams: [{ id: act?.id || reqRef.id, name: examName, price }],
+                      examName,
+                      totalCost: price,
+                      priority: labPriority,
+                      status: 'en attente',
+                      paymentStatus: 'PENDING',
+                      source: 'HOSPITALISATION',
+                      requestingService: 'Hospitalisation',
+                      locationBadge,
+                      roomName: room?.name || (bed as any).roomName || '',
+                      bedName: bed.name,
+                      bedId: bed.id,
+                      prescriberName: currentUser?.name || 'Médecin Hospitalisation',
+                      createdAt: new Date().toISOString(),
+                      date: new Date().toISOString()
+                    }, currentUser)));
+                    setSelectedLabActId('');
+                    setCustomLabName('');
+                    window.dispatchEvent(new CustomEvent('app-notification', {
+                      detail: { message: `Examen "${examName}" transmis au Laboratoire (${locationBadge}).`, type: 'success' }
+                    }));
+                  } finally {
+                    setIsSendingLab(false);
+                  }
+                }}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer"
+              >
+                {isSendingLab ? 'Transmission...' : 'Transmettre au Laboratoire'}
+              </button>
+            </div>
+          </div>
+
+          {/* Pharmacie */}
+          <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                  <Pill size={18} />
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-slate-900">Prescrire un Médicament (Pharmacie)</h4>
+                  <p className="text-[11px] text-indigo-600 font-bold">🛏️ {locationBadge}</p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <select
+                value={selectedMedId}
+                onChange={(e) => setSelectedMedId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:border-emerald-500"
+              >
+                <option value="">-- Choisir un médicament en stock --</option>
+                {pharmaMedsList.map(m => (
+                  <option key={m.id} value={m.id}>{m.name} ({Number(m.price || m.prixVente || 0).toLocaleString()} FCFA)</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={customMedName}
+                onChange={(e) => setCustomMedName(e.target.value)}
+                placeholder="Ou saisir un médicament libre"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-emerald-500"
+              />
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="text"
+                  value={medDosage}
+                  onChange={(e) => setMedDosage(e.target.value)}
+                  placeholder="Posologie"
+                  className="col-span-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none"
+                />
+                <input
+                  type="number"
+                  min={1}
+                  value={medQty}
+                  onChange={(e) => setMedQty(e.target.value)}
+                  placeholder="Qté"
+                  className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-center outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                disabled={isSendingMed || (!selectedMedId && !customMedName.trim())}
+                onClick={async () => {
+                  setIsSendingMed(true);
+                  try {
+                    const med = pharmaMedsList.find(m => m.id === selectedMedId);
+                    const medName = med ? med.name : customMedName.trim();
+                    const qty = Math.max(1, Number(medQty) || 1);
+                    const unitPrice = med ? Number(med.price || med.prixVente || 0) : 1500;
+                    const totalAmount = qty * unitPrice;
+                    const rxRef = doc(collection(db, 'pending_prescriptions'));
+                    await setDoc(rxRef, sanitizeData(stampTenantData({
+                      id: rxRef.id,
+                      patientId: bed.patientId || inpatientRecord?.patientId || '',
+                      patient: bed.patientName || inpatientRecord?.patientName || 'Patient Hospitalisé',
+                      patientName: bed.patientName || inpatientRecord?.patientName || 'Patient Hospitalisé',
+                      doctor: currentUser?.name || 'Médecin Hospitalisation',
+                      doctorName: currentUser?.name || 'Médecin Hospitalisation',
+                      date: new Date().toLocaleDateString('fr-FR'),
+                      items: [{ id: med?.id || rxRef.id, name: `${medName} (${medDosage})`, quantity: qty, unitPrice, price: totalAmount }],
+                      totalAmount,
+                      status: 'PENDING',
+                      paymentStatus: 'PENDING',
+                      source: 'HOSPITALISATION',
+                      locationBadge,
+                      roomName: room?.name || (bed as any).roomName || '',
+                      bedName: bed.name,
+                      bedId: bed.id,
+                      createdAt: new Date().toISOString()
+                    }, currentUser)));
+                    setSelectedMedId('');
+                    setCustomMedName('');
+                    window.dispatchEvent(new CustomEvent('app-notification', {
+                      detail: { message: `Ordonnance "${medName}" transmise à la Pharmacie (${locationBadge}).`, type: 'success' }
+                    }));
+                  } finally {
+                    setIsSendingMed(false);
+                  }
+                }}
+                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer"
+              >
+                {isSendingMed ? 'Transmission...' : 'Transmettre à la Pharmacie'}
+              </button>
+            </div>
           </div>
         </div>
       )}

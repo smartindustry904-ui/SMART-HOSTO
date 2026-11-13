@@ -107,6 +107,11 @@ const EnCoursTab: React.FC<EnCoursTabProps> = ({ requests, updateRequests, user 
               <div className="flex justify-between items-start mb-2">
                 <div>
                   <h3 className="font-bold text-slate-900 text-sm">{req.patientName}</h3>
+                  {(req as any).locationBadge && (
+                    <span className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[9px] font-black uppercase">
+                      🛏️ {(req as any).locationBadge}
+                    </span>
+                  )}
                   <p className="text-[10px] text-slate-500 uppercase tracking-wider">{req.id}</p>
                 </div>
                 <span className={`text-[10px] font-bold px-2 py-1 rounded-lg ${

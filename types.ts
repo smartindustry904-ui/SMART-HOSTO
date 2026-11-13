@@ -234,6 +234,11 @@ export interface Bed {
   name: string;
   status: BedStatus;
   roomId: string;
+  roomName?: string;
+  wardId?: string;
+  wardName?: string;
+  dailyRate?: number;
+  tarifJournalier?: number;
   patientId?: string;
   patientName?: string;
   patientAge?: number;
@@ -334,11 +339,20 @@ export interface InpatientRecord {
   observations?: InpatientObservation[];
 }
 
+export interface Ward {
+  id: string;
+  name: string;
+  description?: string;
+  service?: string;
+}
+
 export interface Room {
   id: string;
   name: string;
   description?: string;
   capacity: number;
+  wardId?: string;
+  wardName?: string;
 }
 
 export type PharmacySubMenu = 'dashboard' | 'prescriptions' | 'sales' | 'history';

@@ -213,6 +213,8 @@ const Pharmacy: React.FC<PharmacyProps> = ({
               date: item.date || 'Aujourd\'hui',
               items: item.items || [],
               status: item.status || 'pending',
+              locationBadge: item.locationBadge || '',
+              source: item.source || '',
               createdAt: item.createdAt || new Date().toISOString()
             });
           }
@@ -945,6 +947,11 @@ const Pharmacy: React.FC<PharmacyProps> = ({
                             <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 font-mono">ID: {presc.id}</span>
                             <h3 className="font-black text-slate-800 text-sm mt-0.5 group-hover:text-blue-600 transition-colors">{presc.patient}</h3>
                             <p className="text-[10px] text-slate-400 font-bold mt-0.5">DME: {presc.patientId}</p>
+                            {presc.locationBadge && (
+                              <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 text-[9px] font-black uppercase">
+                                🛏️ {presc.locationBadge}
+                              </span>
+                            )}
                           </div>
                           <span className="text-[9px] font-black text-slate-500 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-100">
                             {presc.date}

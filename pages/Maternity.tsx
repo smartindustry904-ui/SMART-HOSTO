@@ -85,6 +85,10 @@ const Maternity: React.FC<MaternityProps> = ({
   const [pregnancies, setPregnancies] = useState<PregnancyDossier[]>([]);
   const [cpnVisits, setCpnVisits] = useState<CPNVisit[]>([]);
   const [beds, setBeds] = useState<Bed[]>([]);
+  const [showMaternityHospModal, setShowMaternityHospModal] = useState(false);
+  const [maternityHospBedId, setMaternityHospBedId] = useState('');
+  const [maternityHospReason, setMaternityHospReason] = useState('Surveillance post-partum / Hospitalisation Maternité');
+  const [isMaternityHospitalizing, setIsMaternityHospitalizing] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [medications, setMedications] = useState<Medication[]>([]);
 
@@ -398,6 +402,17 @@ const Maternity: React.FC<MaternityProps> = ({
                 >
                   <Pill size={14} />
                 </button>
+                <button
+                  onClick={() => {
+                    setMaternityHospBedId('');
+                    setShowMaternityHospModal(true);
+                  }}
+                  className="px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl hover:bg-indigo-100 transition-all cursor-pointer flex items-center gap-1 text-[11px] font-black"
+                  title="Hospitaliser la patiente sur un lit libre"
+                >
+                  <BedDouble size={13} />
+                  <span>Hospitaliser</span>
+                </button>
               </div>
             )}
           </div>
@@ -703,6 +718,113 @@ const Maternity: React.FC<MaternityProps> = ({
                 setShowLabExamForm(false);
               }}
             />
+          </div>
+        </div>
+      )}
+      {/* Maternity Hospitalisation Modal (Lits Libres) */}
+      {showMaternityHospModal && selectedPatient && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-lg p-6 shadow-2xl border border-slate-200 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Hospitaliser — {selectedPatient.lastName} {selectedPatient.firstName}</h3>
+                <p className="text-xs text-slate-500 font-medium">Sélectionnez un lit libre pour assigner la patiente</p>
+              </div>
+              <button onClick={() => setShowMaternityHospModal(false)} className="p-2 text-slate-400 hover:text-slate-600 rounded-xl cursor-pointer">✕</button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Lits Libres Disponibles *</label>
+                <select
+                  value={maternityHospBedId}
+                  onChange={(e) => setMaternityHospBedId(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:border-indigo-500"
+                >
+                  <option value="">-- Choisir un lit libre --</option>
+                  {beds.filter(b => b.status === 'AVAILABLE').map(b => {
+                    const rName = b.roomName || rooms.find(r => r.id === b.roomId)?.name || 'Chambre';
+                    const rate = Number(b.dailyRate ?? b.tarifJournalier ?? 0);
+                    return (
+                      <option key={b.id} value={b.id}>
+                        {b.wardName ? `${b.wardName} • ` : ''}{rName} — {b.name}{rate > 0 ? ` (${rate.toLocaleString()} FCFA/jour)` : ''}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1">Motif d'hospitalisation</label>
+                <input
+                  type="text"
+                  value={maternityHospReason}
+                  onChange={(e) => setMaternityHospReason(e.target.value)}
+                  className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowMaternityHospModal(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!maternityHospBedId || isMaternityHospitalizing}
+                onClick={async () => {
+                  if (!maternityHospBedId || !selectedPatient) return;
+                  setIsMaternityHospitalizing(true);
+                  try {
+                    const chosenBed = beds.find(b => b.id === maternityHospBedId);
+                    const chosenRoom = rooms.find(r => r.id === chosenBed?.roomId);
+                    const nowIso = new Date().toISOString();
+                    const fullName = `${selectedPatient.lastName || ''} ${selectedPatient.firstName || ''}`.trim();
+                    const inpId = `INP-${Date.now()}`;
+                    await Promise.all([
+                      setDoc(doc(db, 'beds', maternityHospBedId), sanitizeData({
+                        status: 'OCCUPIED',
+                        patientId: selectedPatient.id,
+                        patientName: fullName,
+                        admissionDate: nowIso.split('T')[0],
+                        admissionTime: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+                        admissionDoctor: user?.name || 'Maternité',
+                        admissionReason: maternityHospReason,
+                        lastUpdated: nowIso
+                      }), { merge: true }),
+                      setDoc(doc(db, 'inpatient_records', inpId), sanitizeData(stampTenantData({
+                        id: inpId,
+                        patientId: selectedPatient.id,
+                        patientName: fullName,
+                        bedId: maternityHospBedId,
+                        bedName: chosenBed?.name || '',
+                        roomId: chosenBed?.roomId || '',
+                        roomName: chosenRoom?.name || chosenBed?.roomName || '',
+                        dailyRate: Number(chosenBed?.dailyRate ?? chosenBed?.tarifJournalier ?? 0),
+                        admissionDate: nowIso,
+                        status: 'admitted',
+                        doctorName: user?.name || 'Maternité',
+                        doctorId: user?.id || '',
+                        reason: maternityHospReason,
+                        service: 'Maternité'
+                      }, user, establishment)))
+                    ]);
+                    setShowMaternityHospModal(false);
+                    window.dispatchEvent(new CustomEvent('app-notification', {
+                      detail: `Patiente ${fullName} hospitalisée sur ${chosenBed?.name || 'le lit sélectionné'}.`
+                    }));
+                  } catch (err) {
+                    console.error('Erreur hospitalisation Maternité:', err);
+                  } finally {
+                    setIsMaternityHospitalizing(false);
+                  }
+                }}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer"
+              >
+                {isMaternityHospitalizing ? 'Affectation...' : 'Confirmer Hospitalisation'}
+              </button>
+            </div>
           </div>
         </div>
       )}

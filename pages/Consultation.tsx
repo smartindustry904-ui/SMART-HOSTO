@@ -1775,20 +1775,33 @@ const Consultation: React.FC<ConsultationProps> = ({
     try {
       const batch = writeBatch(db);
 
+      const selectedBedObj = beds.find(b => b.id === directAdmissionForm.bedId);
+      const selectedRoomObj = rooms.find(r => r.id === selectedBedObj?.roomId);
+      const nowIso = new Date().toISOString();
+      const todayDate = nowIso.split('T')[0];
+      const nowTime = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
       // 1. Update bed status
       const bedRef = doc(db, 'beds', directAdmissionForm.bedId);
       batch.update(bedRef, {
         status: 'OCCUPIED',
         patientName: `${activePatient.lastName} ${activePatient.firstName}`,
         patientId: activePatient.id,
-        lastUpdated: new Date().toISOString()
+        admissionDate: todayDate,
+        admissionTime: nowTime,
+        admissionDoctor: user?.name || 'Docteur',
+        admissionDoctorId: user?.id || '',
+        admissionReason: directAdmissionForm.reason || activePatient.motif || '',
+        lastUpdated: nowIso
       });
 
       // 2. Update patient status
       const patientRef = doc(db, 'patients', activePatient.id);
       batch.update(patientRef, {
         hospitalizationStatus: 'en_cours',
-        lastUpdated: new Date().toISOString()
+        admittedBedId: directAdmissionForm.bedId,
+        admittedBedName: selectedBedObj?.name || '',
+        lastUpdated: nowIso
       });
 
       // 3. Create inpatient record
@@ -1799,7 +1812,11 @@ const Consultation: React.FC<ConsultationProps> = ({
         patientId: activePatient.id,
         patientName: `${activePatient.lastName} ${activePatient.firstName}`,
         bedId: directAdmissionForm.bedId,
-        admissionDate: new Date().toISOString(),
+        bedName: selectedBedObj?.name || '',
+        roomId: selectedBedObj?.roomId || '',
+        roomName: selectedRoomObj?.name || selectedBedObj?.roomName || '',
+        dailyRate: Number(selectedBedObj?.dailyRate ?? selectedBedObj?.tarifJournalier ?? 0),
+        admissionDate: nowIso,
         status: 'admitted',
         doctorName: user?.name || 'Docteur',
         doctorId: user?.id || '',
@@ -2284,9 +2301,68 @@ const Consultation: React.FC<ConsultationProps> = ({
 
           {activeMenu === 'CONSULTATION' && (
             activePatient ? (
-              <div className="grid grid-cols-1 xl:grid-cols-4 gap-8 items-start animate-in fade-in duration-150">
-                {/* Workspace area (3 columns) */}
-                <div className="xl:col-span-3 flex flex-col h-full space-y-6">
+              <div className="w-full flex flex-col h-full space-y-4 animate-in fade-in duration-150">
+                {/* Compact Horizontal Patient Micro-Header Banner */}
+                {contextData && (
+                  <div className="bg-white rounded-2xl border border-slate-200/90 px-4 py-3 shadow-xs flex flex-wrap items-center justify-between gap-3 shrink-0">
+                    <div className="flex items-center gap-3 min-w-0 flex-wrap">
+                      <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-sm shrink-0">
+                        {(contextData.lastName?.[0] || 'P').toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-sm sm:text-base font-black text-slate-900 truncate">
+                            {contextData.lastName} {contextData.firstName}
+                          </h3>
+                          <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200">
+                            {contextData.id}
+                          </span>
+                          <span className="text-[10px] font-black text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md">
+                            {contextData.age} ans • {contextData.gender === 'F' ? 'Féminin ♀' : 'Masculin ♂'}
+                          </span>
+                          <span className="text-[10px] font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
+                            GS: {(activePatient as any).bloodGroup || (activePatient as any).groupeSanguin || 'N/R'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                          <span className="text-[10px] font-black uppercase text-rose-500 flex items-center gap-1">
+                            <AlertTriangle size={11} /> Allergies :
+                          </span>
+                          {contextData.allergies && contextData.allergies.length > 0 && contextData.allergies[0] !== 'Aucune allergie connue' ? (
+                            contextData.allergies.map((all, i) => (
+                              <span key={i} className="bg-rose-50 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded text-[10px] font-black">
+                                {all}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[10px] font-semibold text-slate-400">Aucune allergie signalée</span>
+                          )}
+                          {contextData.hospStatus && contextData.hospStatus !== 'Patient Externe (Aucun lit)' && (
+                            <span className="ml-2 text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md flex items-center gap-1">
+                              <MapPin size={10} /> {contextData.hospStatus}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Compact Vitals Strip */}
+                    <div className="flex items-center gap-2 sm:gap-3 bg-slate-50 border border-slate-200/80 px-3 py-2 rounded-xl text-[11px] font-bold text-slate-700 flex-wrap">
+                      <span title="Température"><Thermometer size={12} className="inline text-rose-500 mr-0.5" /> {contextData.vitals.temp}°C</span>
+                      <span className="text-slate-300">|</span>
+                      <span title="Tension Artérielle"><Activity size={12} className="inline text-blue-500 mr-0.5" /> {contextData.vitals.bp}</span>
+                      <span className="text-slate-300">|</span>
+                      <span title="Fréquence Cardiaque"><Heart size={12} className="inline text-emerald-500 mr-0.5" /> {contextData.vitals.pulse} bpm</span>
+                      <span className="text-slate-300">|</span>
+                      <span title="Saturation O2">SpO2 {contextData.vitals.spo2}%</span>
+                      <span className="text-slate-300">|</span>
+                      <span className="text-blue-600 font-black">IMC {contextData.vitals.bmi}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Full-Width Clinical Workspace */}
+                <div className="w-full flex flex-col h-full space-y-5">
                   {/* Hub Tabs Navigation */}
                   <div className="flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4 bg-white p-3 rounded-[24px] border border-slate-200 shadow-sm shrink-0">
                     <div className="flex items-center gap-1 bg-slate-50 p-1.5 rounded-[20px] border border-slate-200/60 overflow-x-auto custom-scrollbar">
@@ -2500,159 +2576,6 @@ const Consultation: React.FC<ConsultationProps> = ({
                   </div>
                 </div>
 
-                {/* Permanent Patient Context Panel (1 column) -> Point 2 */}
-                {contextData && (
-                  <div className="xl:col-span-1 bg-white rounded-2xl border border-slate-200/90 p-4.5 shadow-xs flex flex-col gap-3.5 sticky top-36 max-h-[82vh] overflow-y-auto animate-in slide-in-from-right duration-500">
-                    <div className="border-b border-slate-100 pb-2">
-                      <h4 className="text-[9px] font-black uppercase tracking-wider text-slate-400 mb-0.5">Cadre Contexte Patient</h4>
-                      <p className="text-xs font-black text-slate-800">Affichage Permanent Clinique</p>
-                    </div>
-
-                    {/* Patient identity block (Point 2.1) */}
-                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex flex-col gap-1">
-                      <p className="text-[7.5px] font-black uppercase tracking-wider text-slate-400">Identité Patient</p>
-                      <p className="text-xs font-black text-slate-900">{contextData.lastName} {contextData.firstName}</p>
-                      <div className="flex justify-between text-[9px] text-slate-500 font-bold mt-0.5">
-                        <span>Genre: {contextData.gender === 'F' ? 'Femme ♀' : 'Homme ♂'}</span>
-                        <span>Âge: {contextData.age} ans</span>
-                      </div>
-                      <p className="text-[9px] text-slate-400 font-mono mt-0.5">DME: {contextData.id}</p>
-                    </div>
-
-                    {/* Vitals summary with BMI (Point 2.2) */}
-                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex flex-col gap-2">
-                      <p className="text-[7.5px] font-black uppercase tracking-wider text-slate-400">Constantes de Triage</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="flex items-center gap-1.5">
-                          <Thermometer size={12} className="text-rose-500" />
-                          <div>
-                            <p className="text-[7.5px] font-bold text-slate-500">Température</p>
-                            <p className="text-[11px] font-black text-slate-800">{contextData.vitals.temp} °C</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Activity size={12} className="text-blue-500" />
-                          <div>
-                            <p className="text-[7.5px] font-bold text-slate-500">Tension (TA)</p>
-                            <p className="text-[11px] font-black text-slate-800">{contextData.vitals.bp}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Heart size={12} className="text-emerald-500" />
-                          <div>
-                            <p className="text-[7.5px] font-bold text-slate-500">Pouls (FC)</p>
-                            <p className="text-[11px] font-black text-slate-800">{contextData.vitals.pulse} bpm</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Activity size={12} className="text-orange-500" />
-                          <div>
-                            <p className="text-[7.5px] font-bold text-slate-500">SPO2</p>
-                            <p className="text-[11px] font-black text-slate-800">{contextData.vitals.spo2} %</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 col-span-2 border-t border-slate-100 pt-1.5 text-[9px] font-bold text-slate-600 justify-between">
-                          <span>FR: {contextData.vitals.respRate} cpm</span>
-                          <span>Poids: {contextData.vitals.weight} kg</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 col-span-2 text-[9px] font-bold text-slate-600 justify-between">
-                          <span>Taille: {contextData.vitals.height} cm</span>
-                          <span className="text-blue-600">IMC: {contextData.vitals.bmi}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Structured alerts Pregnancy & Chroniques (Point 2.3) */}
-                    <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl flex flex-col gap-2">
-                      <p className="text-[7.5px] font-black uppercase tracking-wider text-rose-500 flex items-center gap-1">
-                        <AlertTriangle size={10} /> Alertes Signalées
-                      </p>
-                      
-                      {/* Allergies */}
-                      <div>
-                        <p className="text-[7.5px] font-bold text-rose-400 mb-0.5">Allergies</p>
-                        <div className="flex flex-wrap gap-1">
-                          {contextData.allergies.map((all, i) => (
-                            <span key={i} className="bg-white text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded text-[8.5px] font-black leading-tight">
-                              {all}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Pregnancy Alert */}
-                      <div>
-                        <p className="text-[7.5px] font-bold text-rose-400 mb-0.5">Statut de grossesse</p>
-                        <p className="text-[9px] font-black text-rose-800">{contextData.pregnancyStatus}</p>
-                      </div>
-
-                      {/* Chronic pathologies */}
-                      <div>
-                        <p className="text-[7.5px] font-bold text-rose-400 mb-0.5">Pathologies chroniques</p>
-                        <ul className="text-[8.5px] font-black text-rose-800 list-disc list-inside">
-                          {contextData.chronicPathologies.map((patho, i) => (
-                            <li key={i}>{patho}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-
-                    {/* Ongoing activities (Point 2.4) */}
-                    <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex flex-col gap-2.5">
-                      <p className="text-[7.5px] font-black uppercase tracking-wider text-slate-400">Activités & Traitements en cours</p>
-                      
-                      {/* Active treatments */}
-                      <div className="border-b border-slate-100 pb-1.5">
-                        <p className="text-[7.5px] font-bold text-slate-500 mb-0.5">Traitements de fond actifs</p>
-                        <ul className="text-[9px] font-semibold text-slate-700 space-y-0.5">
-                          {contextData.meds.map((med, i) => (
-                            <li key={i} className="flex gap-1.5 items-start">
-                              <span className="w-1.5 h-1.5 bg-blue-500 rounded-full mt-1 shrink-0"></span>
-                              <span>{med}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      {/* Pending Exams */}
-                      <div className="border-b border-slate-100 pb-2">
-                        <p className="text-[8px] font-bold text-slate-500 mb-1">Examens en attente de résultats</p>
-                        <ul className="text-[10px] font-semibold text-slate-700 space-y-1">
-                          {contextData.pendingExams.map((ex, i) => (
-                            <li key={i} className="flex gap-1.5 items-start">
-                              <span className="w-1.5 h-1.5 bg-amber-500 rounded-full mt-1 shrink-0"></span>
-                              <span>{ex}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      {/* Hospitalization active status */}
-                      <div className="border-b border-slate-100 pb-2">
-                        <p className="text-[8px] font-bold text-slate-500 mb-1">Statut d'hospitalisation</p>
-                        <div className="flex gap-1.5 items-center text-[10px] font-black text-slate-700 uppercase">
-                          <MapPin size={10} className="text-blue-500 shrink-0" />
-                          <span>{contextData.hospStatus}</span>
-                        </div>
-                      </div>
-
-                      {/* Scheduled Appointments */}
-                      <div>
-                        <p className="text-[8px] font-bold text-slate-500 mb-1">Dernier RDV programmé</p>
-                        <ul className="text-[10px] font-semibold text-slate-700 space-y-1">
-                          {activePatientAppointments.length > 0 ? activePatientAppointments.map((ap, i) => (
-                            <li key={i} className="flex gap-1.5 items-start">
-                              <Calendar size={10} className="text-emerald-500 mt-1 shrink-0" />
-                              <span>{ap.date} à {ap.time} - {ap.reason || 'Consultation'} ({ap.status})</span>
-                            </li>
-                          )) : (
-                            <li className="text-slate-400 italic">Aucun RDV programmé</li>
-                          )}
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="h-full flex flex-col items-center justify-center text-center py-20 bg-white rounded-[50px] border-4 border-dashed border-slate-100">
@@ -2736,11 +2659,16 @@ const Consultation: React.FC<ConsultationProps> = ({
                       required
                     >
                       <option value="">Choisir un lit disponible...</option>
-                      {beds.filter(b => b.status === 'AVAILABLE' && (!b.category || b.category === 'hospitalisation' || b.category === 'all')).map(b => (
-                        <option key={b.id} value={b.id}>
-                          {b.name} ({rooms.find(r => r.id === b.roomId)?.name})
-                        </option>
-                      ))}
+                      {beds.filter(b => b.status === 'AVAILABLE' && (!b.category || b.category === 'hospitalisation' || b.category === 'all')).map(b => {
+                        const rName = b.roomName || rooms.find(r => r.id === b.roomId)?.name || 'Chambre';
+                        const wName = b.wardName ? `${b.wardName} • ` : '';
+                        const rate = Number(b.dailyRate ?? b.tarifJournalier ?? 0);
+                        return (
+                          <option key={b.id} value={b.id}>
+                            {wName}{rName} — {b.name}{rate > 0 ? ` (${rate.toLocaleString()} FCFA/jour)` : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 

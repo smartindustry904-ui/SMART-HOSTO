@@ -1508,6 +1508,11 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                               <p className="font-black text-slate-900 dark:text-white text-sm">
                                 {act.patientName}
                               </p>
+                              {act.locationBadge && (
+                                <span className="inline-flex items-center gap-1 mt-0.5 mb-0.5 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-black uppercase">
+                                  🛏️ {act.locationBadge}
+                                </span>
+                              )}
                               <p className="text-[11px] text-slate-400 font-medium">
                                 #{act.patientId || act.id?.slice(0, 6)}
                                 {act.age ? ` • ${act.age} ans` : ''}

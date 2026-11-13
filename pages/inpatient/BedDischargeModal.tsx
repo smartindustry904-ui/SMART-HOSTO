@@ -9,6 +9,7 @@ import {
   collection, where, getDocs, setDoc 
 } from 'firebase/firestore';
 import { Bed, Room, User as UserType } from '../../types';
+import { stampTenantData } from '../../src/utils/tenant';
 
 interface BedDischargeModalProps {
   isOpen: boolean;
@@ -50,6 +51,19 @@ export const BedDischargeModal: React.FC<BedDischargeModalProps> = ({
     if (days === 0) return `${hours} heure${hours > 1 ? 's' : ''}`;
     return `${days} jour${days > 1 ? 's' : ''}${hours > 0 ? `, ${hours} heure${hours > 1 ? 's' : ''}` : ''}`;
   };
+
+  const getDaysStayed = () => {
+    if (!bed.admissionDate) return 1;
+    const admDateTimeStr = `${bed.admissionDate}T${bed.admissionTime || '00:00'}:00`;
+    const admTime = new Date(admDateTimeStr).getTime();
+    if (isNaN(admTime)) return 1;
+    const diffHours = Math.max(1, (Date.now() - admTime) / (1000 * 60 * 60));
+    return Math.max(1, Math.ceil(diffHours / 24));
+  };
+
+  const dailyRate = Number(bed.dailyRate ?? bed.tarifJournalier ?? 15000);
+  const daysStayed = getDaysStayed();
+  const estimatedBedCost = daysStayed * dailyRate;
 
   const handleConfirmDischarge = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,10 +111,85 @@ export const BedDischargeModal: React.FC<BedDischargeModalProps> = ({
           lastUpdated: now.toISOString()
         }));
 
+        // 2b. Automated Hospitalisation Billing (Days Stayed × Bed Daily Rate + Unpaid Lab/Pharmacy)
+        const billingItems: any[] = [];
+        if (estimatedBedCost > 0) {
+          billingItems.push({
+            id: `ITEM-BED-${bed.id}`,
+            name: `Séjour Hospitalisation : ${room?.name || bed.roomName || 'Chambre'} - ${bed.name} (${daysStayed} j × ${dailyRate.toLocaleString()} FCFA)`,
+            quantity: daysStayed,
+            unitPrice: dailyRate,
+            totalPrice: estimatedBedCost,
+            practitionerId: currentUser?.id || '',
+            practitionerName: currentUser?.name || 'Hospitalisation'
+          });
+        }
+
+        const [rxSnap, labSnap] = await Promise.all([
+          getDocs(query(collection(db, 'pending_prescriptions'), where('patientId', '==', bed.patientId))),
+          getDocs(query(collection(db, 'lab_requests'), where('patientId', '==', bed.patientId)))
+        ]);
+
+        rxSnap.docs.forEach(d => {
+          const data = d.data();
+          const st = String(data.status || '').toUpperCase();
+          const pSt = String(data.paymentStatus || '').toUpperCase();
+          if (!['PAID', 'DELIVERED', 'DISPENSED', 'CANCELLED'].includes(st) && !['PAID', 'SOLDE'].includes(pSt)) {
+            const amt = Number(data.totalAmount || 0);
+            if (amt > 0) {
+              billingItems.push({
+                id: `ITEM-RX-${d.id}`,
+                name: `Ordonnance Pharmacie (${data.items?.map((i: any) => i.name).join(', ') || d.id})`,
+                quantity: 1,
+                unitPrice: amt,
+                totalPrice: amt
+              });
+            }
+          }
+        });
+
+        labSnap.docs.forEach(d => {
+          const data = d.data();
+          const pSt = String(data.paymentStatus || '').toUpperCase();
+          if (!['PAID', 'SOLDE'].includes(pSt) && String(data.status || '').toUpperCase() !== 'CANCELLED') {
+            const amt = Number(data.totalCost || data.totalAmount || data.price || 0);
+            if (amt > 0) {
+              billingItems.push({
+                id: `ITEM-LAB-${d.id}`,
+                name: `Examen Labo : ${data.examName || (data.exams?.[0]?.name) || d.id}`,
+                quantity: 1,
+                unitPrice: amt,
+                totalPrice: amt
+              });
+            }
+          }
+        });
+
+        const totalHospitalisationInvoice = billingItems.reduce((sum, it) => sum + (it.totalPrice || 0), 0);
+        if (totalHospitalisationInvoice > 0) {
+          const reqId = `REQ-HOSP-${Date.now()}`;
+          batch.set(doc(db, 'payment_requests', reqId), sanitizeData(stampTenantData({
+            id: reqId,
+            patientId: bed.patientId,
+            patientName: bed.patientName || 'Patient Hospitalisé',
+            requestingService: 'Hospitalisation',
+            sourceModule: 'Inpatient',
+            type: 'HOSPITALISATION',
+            items: billingItems,
+            totalAmount: totalHospitalisationInvoice,
+            amountPaid: 0,
+            status: 'PENDING',
+            createdAt: now.toISOString(),
+            createdBy: currentUser?.name || 'Hospitalisation',
+            createdById: currentUser?.id || ''
+          }, currentUser)));
+        }
+
         // 3. Register in discharges_waiting for Reception & Cashier clearance
         const dwRef = doc(db, 'discharges_waiting', bed.patientId);
-        batch.set(dwRef, sanitizeData({
+        batch.set(dwRef, sanitizeData(stampTenantData({
           id: bed.patientId,
+          patientId: bed.patientId,
           name: bed.patientName,
           admissionDate: bed.admissionDate || dischargeDate,
           dischargeDate,
@@ -108,11 +197,11 @@ export const BedDischargeModal: React.FC<BedDischargeModalProps> = ({
           bedName: bed.name,
           medicalClearance: true,
           hospitalizationClosed: true,
-          financialClearance: false,
+          financialClearance: totalHospitalisationInvoice === 0,
           dischargedBy: currentUser?.name || 'Personnel Hospitalisation',
           dischargeReason,
           createdAt: now.toISOString()
-        }));
+        }, currentUser)));
       }
 
       // 4. Liberate the Bed
@@ -186,6 +275,20 @@ export const BedDischargeModal: React.FC<BedDischargeModalProps> = ({
               <span>{errorMsg}</span>
             </div>
           )}
+
+          {/* Facturation Automatique du Séjour */}
+          <div className="p-4 bg-indigo-50/70 border border-indigo-200 rounded-2xl flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-wider text-indigo-600">Facturation Automatique Lit</p>
+              <p className="text-xs font-bold text-slate-700 mt-0.5">
+                {daysStayed} jour{daysStayed > 1 ? 's' : ''} × {dailyRate.toLocaleString()} FCFA / jour
+              </p>
+            </div>
+            <div className="text-right">
+              <span className="text-base font-black text-indigo-700 tabular-nums">{estimatedBedCost.toLocaleString()} FCFA</span>
+              <p className="text-[10px] text-slate-500 font-medium">+ impayés Labo/Pharma</p>
+            </div>
+          </div>
 
           {/* Patient and Bed Summary */}
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
