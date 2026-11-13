@@ -31,6 +31,7 @@ import {
   RotateCcw,
   BadgeCheck
 } from 'lucide-react';
+import { deductConsumablesForAct } from '../../src/utils/consumablesStock';
 import { 
   collection, 
   doc, 
@@ -640,6 +641,11 @@ export const CpnTab: React.FC<CpnTabProps> = ({
       };
 
       await setDoc(doc(db, 'cpn_visits', visitId), sanitizeData(cpnVisitDoc), { merge: true });
+      deductConsumablesForAct({
+        actName: 'Consultation Prénatale (CPN)',
+        user,
+        moduleSource: 'Maternité (CPN)'
+      }).catch(() => {});
 
       // 3. Integration with Laboratory (`lab_requests`) + Caisse (`payment_requests`)
       if (selectedExams.length > 0) {

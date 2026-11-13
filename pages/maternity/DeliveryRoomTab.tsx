@@ -31,6 +31,7 @@ import {
   orderBy 
 } from 'firebase/firestore';
 import { db, sanitizeData } from '../../src/firebase';
+import { deductConsumablesForAct } from '../../src/utils/consumablesStock';
 import { 
   User, 
   MaternityAdmission, 
@@ -373,6 +374,11 @@ export const DeliveryRoomTab: React.FC<DeliveryRoomTabProps> = ({
         createdAt: nowIso
       };
       await setDoc(doc(db, 'maternity_deliveries', deliveryId), sanitizeData(deliveryDoc));
+      deductConsumablesForAct({
+        actName: deliveryForm.deliveryMode || 'Accouchement',
+        user,
+        moduleSource: 'Maternité (Accouchement)'
+      }).catch(() => {});
 
       // 2. Create Newborn Record in 'newborns'
       const newbornDoc: NewbornRecord = {

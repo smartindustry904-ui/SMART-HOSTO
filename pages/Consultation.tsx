@@ -27,6 +27,7 @@ import { db, sanitizeData } from '../src/firebase';
 import { collection, doc, setDoc, getDocs, query, where, updateDoc, onSnapshot, getDoc, writeBatch } from 'firebase/firestore';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 import { isBedLibre } from '../src/utils/hospitalisation';
+import { deductConsumablesForAct } from '../src/utils/consumablesStock';
 
 interface ConsultationProps {
   user?: UserType;
@@ -668,6 +669,13 @@ const Consultation: React.FC<ConsultationProps> = ({
             createdAt: nowIso
           }, user);
           await setDoc(consRef, sanitizeData(consPayload));
+          deductConsumablesForAct({
+            actId: (activePatient as any).actId,
+            actName: activePatient.motifLabel || activePatient.motif || 'Consultation Générale',
+            user,
+            establishment,
+            moduleSource: 'Consultation'
+          }).catch(() => {});
 
           const historyId = `HIST-${targetPid}-${consultationId}`;
           await setDoc(doc(db, 'patient_history', historyId), sanitizeData(stampTenantData({
@@ -2078,6 +2086,13 @@ const Consultation: React.FC<ConsultationProps> = ({
       return false;
     }
     
+    // Strict Waiting Room Guard for Rendez-vous: must be cleared by Caisse (paid or free follow-up) AND Soins Infirmiers (vitals/triage done => status === 'waiting')
+    if (p.isAppointment || p.appointmentId) {
+      const pSt = String(p.paymentStatus || '').toUpperCase();
+      const caisseCleared = Boolean(p.isFreeFollowUp) || ['PAID', 'SOLDE', 'PAYE', 'PAYÉ', 'VALIDE', 'EXONERE', 'ASSURANCE', 'PEC', 'TIERS_PAYANT'].includes(pSt) || checkPatientIsPaid(p);
+      return p.status === 'waiting' && caisseCleared;
+    }
+
     // Patients waiting for doctor consultation must have finished nurse triage (status === 'waiting')
     // Patients with status === 'waiting_triage' are currently at Soins Infirmiers (Nurse Triage)
     return p.status === 'waiting' || !p.status;

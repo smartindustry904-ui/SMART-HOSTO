@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Clock, ChevronRight, Eye, RefreshCw, X, AlertCircle, ShieldAlert, Pill, TestTube, Activity, FileText, Check, BedDouble, Lock, Zap, Stethoscope, AlertTriangle } from 'lucide-react';
+import { Users, Clock, ChevronRight, Eye, RefreshCw, X, AlertCircle, ShieldAlert, Pill, TestTube, Activity, FileText, Check, BedDouble, Lock, Zap, Stethoscope, AlertTriangle, Info, Calendar } from 'lucide-react';
 import { AvatarPlaceholder } from '../../components/common/AvatarPlaceholder';
 
 interface WaitingRoomProps {
@@ -35,6 +35,7 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
   const [cancelPatient, setCancelPatient] = useState<any | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelError, setCancelError] = useState('');
+  const [selectedAppointmentTrace, setSelectedAppointmentTrace] = useState<any | null>(null);
 
   const checkPatientIsPaid = (patient: any): boolean => {
     if (!patient) return false;
@@ -198,6 +199,20 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
                     <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Motif & Aperçu</p>
                     <p className="text-xs font-bold text-slate-700 truncate mb-2">{p.motifLabel || p.motif}</p>
                     <div className="flex flex-wrap gap-1.5">
+                      {(p.isAppointment || p.appointmentId) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedAppointmentTrace(p);
+                          }}
+                          className="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase border border-indigo-300 flex items-center gap-1 cursor-pointer transition-colors"
+                          title="Voir les détails du rendez-vous d'origine"
+                        >
+                          <span>📅 Rendez-vous</span>
+                          <Info size={10} />
+                        </button>
+                      )}
                       {p.allergies && p.allergies.length > 0 && (
                         <span className="bg-rose-50 text-rose-600 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase border border-rose-100 flex items-center gap-1">
                           <AlertCircle size={10} /> Allergies
@@ -787,6 +802,52 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Rendez-vous Traceability Modal */}
+      {selectedAppointmentTrace && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl border border-slate-100 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                  <Calendar size={20} />
+                </div>
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm">Traçabilité Rendez-vous</h4>
+                  <p className="text-[11px] font-bold text-slate-500">
+                    {selectedAppointmentTrace.lastName} {selectedAppointmentTrace.firstName}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedAppointmentTrace(null)}
+                className="p-2 text-slate-400 hover:text-slate-700 rounded-xl cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-2.5 text-xs bg-slate-50 p-4 rounded-2xl border border-slate-100">
+              <p><span className="font-black text-slate-500 uppercase">Date / Heure prévue :</span> <span className="font-bold text-slate-900">{selectedAppointmentTrace.appointmentDate || selectedAppointmentTrace.date || '-'} {selectedAppointmentTrace.appointmentTime ? `à ${selectedAppointmentTrace.appointmentTime}` : ''}</span></p>
+              <p><span className="font-black text-slate-500 uppercase">Médecin / Référent :</span> <span className="font-bold text-slate-900">{selectedAppointmentTrace.appointmentDoctor || 'Non spécifié'}</span></p>
+              <p><span className="font-black text-slate-500 uppercase">Motif initial :</span> <span className="font-bold text-indigo-700">{selectedAppointmentTrace.appointmentReason || selectedAppointmentTrace.motifLabel || selectedAppointmentTrace.motif || '-'}</span></p>
+              {selectedAppointmentTrace.appointmentNotes && (
+                <p><span className="font-black text-slate-500 uppercase">Notes :</span> <span className="font-medium text-slate-700">{selectedAppointmentTrace.appointmentNotes}</span></p>
+              )}
+              {selectedAppointmentTrace.isFreeFollowUp && (
+                <p className="text-emerald-700 font-black">✓ Contrôle / Suivi gratuit validé</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedAppointmentTrace(null)}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer"
+            >
+              Fermer
+            </button>
+          </div>
         </div>
       )}
     </div>

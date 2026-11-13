@@ -50,6 +50,7 @@ import { DeliveryRoomTab } from './maternity/DeliveryRoomTab';
 import { ObstetricalHistoryTab } from './maternity/ObstetricalHistoryTab';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 import { isBedLibre } from '../src/utils/hospitalisation';
+import Appointments from './consultation/Appointments';
 
 interface MaternityProps {
   user: User;
@@ -194,6 +195,12 @@ const Maternity: React.FC<MaternityProps> = ({
         motifLbl.includes('cpn') ||
         motifLbl.includes('travail') ||
         motifLbl.includes('césarienne');
+
+      if (p.isAppointment || p.appointmentId) {
+        const pSt = String(p.paymentStatus || '').toUpperCase();
+        const caisseCleared = Boolean(p.isFreeFollowUp) || ['PAID', 'SOLDE', 'PAYE', 'PAYÉ', 'VALIDE', 'EXONERE', 'ASSURANCE', 'PEC', 'TIERS_PAYANT'].includes(pSt);
+        return isMaternity && p.status === 'waiting' && caisseCleared;
+      }
 
       return isMaternity && p.status !== 'in_consultation';
     });
@@ -370,6 +377,20 @@ const Maternity: React.FC<MaternityProps> = ({
                   {(admissions || []).filter(a => a.status === 'En travail').length}
                 </span>
               )}
+            </button>
+
+            <button
+              onClick={() => setActiveTab('appointments' as any)}
+              className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
+                (normalizedActiveTab as string) === 'appointments' 
+                  ? 'bg-pink-600 text-white shadow-xs' 
+                  : theme === 'dark'
+                  ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
+                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+            >
+              <Calendar size={13} />
+              Rendez-vous
             </button>
 
             <button
@@ -627,6 +648,26 @@ const Maternity: React.FC<MaternityProps> = ({
             onSelectPatientForDelivery={handleSelectPatientForDelivery}
             onOpenDossier={handleSelectPatientForCpn}
             theme={theme}
+          />
+        )}
+
+        {/* VIEW 2B: RENDEZ-VOUS MATERNITÉ */}
+        {(normalizedActiveTab as string) === 'appointments' && (
+          <Appointments
+            user={user}
+            establishment={establishment}
+            moduleFilter="MATERNITE"
+            onStartConsultation={(rdv) => {
+              handleSelectPatientForCpn({
+                id: rdv.patientId || rdv.id,
+                patientId: rdv.patientId || rdv.id,
+                firstName: rdv.firstName || '',
+                lastName: rdv.lastName || rdv.patient || 'Patiente',
+                age: rdv.age || 28,
+                gender: 'F',
+                motif: rdv.reason || 'CPN'
+              });
+            }}
           />
         )}
 

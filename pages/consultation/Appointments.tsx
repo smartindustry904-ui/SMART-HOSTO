@@ -19,15 +19,17 @@ interface AppointmentsProps {
   };
   establishment?: any;
   initialPatient?: any;
+  moduleFilter?: 'CONSULTATION' | 'MATERNITE';
   onStartConsultation?: (appointment: any) => void;
 }
 
-const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initialPatient, onStartConsultation }) => {
+const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initialPatient, moduleFilter, onStartConsultation }) => {
   const activeTenantId = getActiveTenantId(user as any, establishment);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [dateRange, setDateRange] = useState<'ALL' | 'DAY' | 'WEEK' | 'MONTH'>('ALL');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Modal State
@@ -433,20 +435,41 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
     }
   };
 
-  // Only show appointments validated through Accueil check-in
+  // Only show appointments validated through Accueil check-in (and matching moduleFilter if provided)
   const isValidatedByAccueil = (rdv: any) =>
     rdv.status === 'CHECKED_IN' ||
     rdv.status === 'IN_PROGRESS' ||
     rdv.status === 'COMPLETED' ||
     Boolean(rdv.checkedInAt);
 
-  const validatedAppointments = appointments.filter(isValidatedByAccueil);
+  const validatedAppointments = appointments.filter(rdv => {
+    if (!isValidatedByAccueil(rdv)) return false;
+    if (moduleFilter === 'MATERNITE') {
+      const txt = `${rdv.reason || ''} ${rdv.motif || ''} ${rdv.service || ''}`.toLowerCase();
+      return txt.includes('cpn') || txt.includes('prénatale') || txt.includes('maternit') || txt.includes('accouchement') || txt.includes('obstétri') || rdv.serviceId === 'SRV-MATERNITE';
+    }
+    return true;
+  });
 
-  // Filter & Search appointments
+  // Filter & Search appointments (including Day / Week / Month planning filter)
   const filteredAppointments = validatedAppointments.filter(rdv => {
     const matchesSearch = (rdv.patient || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
                           (rdv.reason || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                           (rdv.id || '').toLowerCase().includes(searchQuery.toLowerCase());
+
+    if (dateRange !== 'ALL' && rdv.date) {
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      if (dateRange === 'DAY' && rdv.date !== todayStr) return false;
+      if (dateRange === 'WEEK') {
+        const d = new Date(rdv.date);
+        const diffDays = (d.getTime() - new Date(todayStr).getTime()) / (1000 * 3600 * 24);
+        if (diffDays < 0 || diffDays > 7) return false;
+      }
+      if (dateRange === 'MONTH') {
+        if (!rdv.date.startsWith(todayStr.slice(0, 7))) return false;
+      }
+    }
 
     let matchesStatus = false;
     if (filterStatus === 'ALL') {
@@ -559,7 +582,22 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
               <div className="w-8 h-8 bg-orange-100 rounded-xl flex items-center justify-center text-orange-600"><Clock size={18} /></div>
               Rendez-vous ({filteredAppointments.length})
             </h2>
-            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+            <div className="flex flex-wrap items-center gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              {[
+                { id: 'ALL', label: 'Tous' },
+                { id: 'DAY', label: 'Jour' },
+                { id: 'WEEK', label: 'Semaine' },
+                { id: 'MONTH', label: 'Mois' }
+              ].map((rng) => (
+                <button
+                  key={rng.id}
+                  onClick={() => setDateRange(rng.id as any)}
+                  className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all whitespace-nowrap cursor-pointer ${dateRange === rng.id ? 'bg-indigo-600 text-white shadow-md' : 'bg-indigo-50 border border-indigo-200 text-indigo-700 hover:bg-indigo-100'}`}
+                >
+                  {rng.label}
+                </button>
+              ))}
+              <div className="w-px h-5 bg-slate-200 mx-1" />
               {[
                 { id: 'ALL', label: 'Tous' },
                 { id: 'CHECKED_IN', label: 'Validés Accueil' },

@@ -4,6 +4,7 @@ import {
   ArrowLeft, CheckCircle2, AlertCircle, Clock, Bed
 } from 'lucide-react';
 import { db, sanitizeData, handleFirestoreError, OperationType } from '../src/firebase';
+import { deductConsumablesForAct } from '../src/utils/consumablesStock';
 import { 
   collection, query, onSnapshot, orderBy, setDoc, doc, updateDoc 
 } from 'firebase/firestore';
@@ -291,6 +292,17 @@ const Emergency: React.FC<EmergencyProps> = ({
       );
 
       await updateDoc(doc(db, 'emergency_patients', encounterId), sanitizeData({ cares: updatedCares }));
+      if (status === 'Réalisé') {
+        const targetCare = (encounter.cares || []).find(c => c.id === careId);
+        if (targetCare) {
+          deductConsumablesForAct({
+            actId: (targetCare as any).actId,
+            actName: targetCare.type || targetCare.description,
+            user,
+            moduleSource: 'Urgences'
+          }).catch(() => {});
+        }
+      }
       return true;
     } catch (err) {
       console.error("Failed to update care status:", err);

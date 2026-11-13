@@ -455,6 +455,7 @@ const Reception: React.FC<ReceptionProps> = ({
 
   const [patients, setPatients] = useState<Patient[]>([]);
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [interceptedAppointment, setInterceptedAppointment] = useState<{ patient: Patient; appointment: any } | null>(null);
   const [patientsToDischarge, setPatientsToDischarge] = useState<any[]>([]);
   const [dischargeError, setDischargeError] = useState<{ patientId: string; message: string } | null>(null);
   const [isProcessingDischarge, setIsProcessingDischarge] = useState<string | null>(null);
@@ -1307,12 +1308,13 @@ const Reception: React.FC<ReceptionProps> = ({
       } as Patient;
 
       const reasonStr = (rdv.reason || rdv.motif || rdv.service || 'Consultation').toLowerCase();
+      const isMaternityRdv = reasonStr.includes('cpn') || reasonStr.includes('prénatale') || reasonStr.includes('maternit') || reasonStr.includes('accouchement');
       const matchedMotif = activeMotifs.find(m =>
-        (m.category === 'CONSULTATIONS' || m.serviceId === 'SRV-CONSULTATION') &&
+        (isMaternityRdv ? (m.category === 'MATERNITE' || m.serviceId === 'SRV-MATERNITE') : (m.category === 'CONSULTATIONS' || m.serviceId === 'SRV-CONSULTATION')) &&
         ((m.label || '').toLowerCase() === reasonStr ||
          (m.speciality || '').toLowerCase().includes(reasonStr) ||
          reasonStr.includes((m.speciality || '').toLowerCase()))
-      ) || activeMotifs.find(m => m.category === 'CONSULTATIONS') || null;
+      ) || activeMotifs.find(m => isMaternityRdv ? m.category === 'MATERNITE' : m.category === 'CONSULTATIONS') || null;
 
       const validity = checkConsultationValidity(matchedPatient, matchedMotif);
       const fee = validity.isFreeFollowUp ? 0 : (matchedMotif?.fee || 10000);
@@ -1370,8 +1372,8 @@ const Reception: React.FC<ReceptionProps> = ({
         motifLabel: matchedMotif?.label || rdv.reason || 'Consultation RDV',
         speciality: matchedMotif?.speciality || rdv.service || 'Médecine générale',
         queueName: matchedMotif?.queueName || 'Médecine Générale',
-        service: 'Consultation',
-        serviceId: matchedMotif?.serviceId || 'SRV-CONSULTATION',
+        service: isMaternityRdv ? 'Maternité' : 'Consultation',
+        serviceId: matchedMotif?.serviceId || (isMaternityRdv ? 'SRV-MATERNITE' : 'SRV-CONSULTATION'),
         status: 'waiting_triage',
         paymentStatus: bypassCashier ? 'PAID' : 'AWAITING_PAYMENT',
         paymentRequestId: createdReq?.id || '',
@@ -1379,7 +1381,13 @@ const Reception: React.FC<ReceptionProps> = ({
         takenInCharge: false,
         isFreeFollowUp: validity.isFreeFollowUp,
         freeFollowUpRef: validity.lastPaidInvoiceId || '',
+        isAppointment: true,
         appointmentId: rdv.id,
+        appointmentReason: rdv.reason || rdv.motif || 'Rendez-vous',
+        appointmentDoctor: rdv.doctor || '',
+        appointmentNotes: rdv.notes || rdv.observation || rdv.reason || '',
+        appointmentTime: rdv.time || '',
+        appointmentDate: rdv.date || todayStr,
         priority: 'normal',
         admittedBy: user?.name || user?.username || 'Agent Accueil',
         admittedById: user?.id || '',
@@ -1595,7 +1603,20 @@ const Reception: React.FC<ReceptionProps> = ({
       setSelectedPatientForHistory(p);
       setActiveTab('historique');
     } else {
-      setStep('triage');
+      // Smart Rendez-vous Intercept: check if patient has a PENDING appointment scheduled today
+      const todayStr = new Date().toISOString().split('T')[0];
+      const fullNameNorm = `${p.lastName || ''} ${p.firstName || ''}`.trim().toLowerCase();
+      const matchedRdv = (appointments || []).find((a: any) => {
+        if (a.date !== todayStr || a.status !== 'PENDING') return false;
+        if (a.patientId && (a.patientId === p.id || a.patientId === p.patientId)) return true;
+        const rdvName = String(a.patient || `${a.lastName || ''} ${a.firstName || ''}`).trim().toLowerCase();
+        return fullNameNorm.length > 2 && rdvName === fullNameNorm;
+      });
+      if (matchedRdv) {
+        setInterceptedAppointment({ patient: p, appointment: matchedRdv });
+      } else {
+        setStep('triage');
+      }
     }
     setSearchQuery('');
   };
@@ -4272,6 +4293,63 @@ const Reception: React.FC<ReceptionProps> = ({
           }}
           theme={theme}
         />
+      )}
+
+      {/* Smart Rendez-vous Intercept Modal */}
+      {interceptedAppointment && (
+        <div className="fixed inset-0 z-[85] flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 bg-gradient-to-r from-indigo-600 to-blue-600 text-white flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                <Calendar size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-black tracking-tight">Rendez-vous Détecté Aujourd'hui</h3>
+                <p className="text-[11px] font-bold text-blue-100">
+                  {interceptedAppointment.patient.lastName} {interceptedAppointment.patient.firstName}
+                </p>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm font-bold text-slate-800 leading-relaxed">
+                Ce patient a un rendez-vous prévu aujourd'hui pour{' '}
+                <span className="text-indigo-700 font-black">
+                  {interceptedAppointment.appointment.reason || interceptedAppointment.appointment.motif || 'Consultation'}
+                </span>{' '}
+                avec{' '}
+                <span className="text-indigo-700 font-black">
+                  {interceptedAppointment.appointment.doctor || 'le médecin référent'}
+                </span>
+                {interceptedAppointment.appointment.time ? ` à ${interceptedAppointment.appointment.time}` : ''}.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+                <button
+                  type="button"
+                  disabled={checkingInRdvId === interceptedAppointment.appointment.id}
+                  onClick={async () => {
+                    const rdv = interceptedAppointment.appointment;
+                    setInterceptedAppointment(null);
+                    await handleCheckInAppointment(rdv);
+                  }}
+                  className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl font-black text-xs uppercase tracking-wider shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <CheckCircle2 size={16} />
+                  <span>Confirmer le Rendez-vous</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInterceptedAppointment(null);
+                    setStep('triage');
+                  }}
+                  className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-black text-xs uppercase tracking-wider cursor-pointer"
+                >
+                  Autre Motif
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

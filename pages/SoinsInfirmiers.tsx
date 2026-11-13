@@ -13,6 +13,7 @@ import { MicroHeader } from '../components/common/MicroHeader';
 import { useSettings } from '../hooks/useSettings';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 import { UniversalHospitalisationModal } from '../components/common/UniversalHospitalisationModal';
+import { deductConsumablesForAct } from '../src/utils/consumablesStock';
 
 interface SoinsInfirmiersProps {
   user?: UserType;
@@ -607,6 +608,15 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
 
       // 2. Background Firestore persistence via local IndexedDB cache
       setDoc(actRef, sanitizeData(stampTenantData(completedActPayload, user, establishment)), { merge: true }).catch(() => {});
+
+      // 2b. Automated Stock Decrement (Consommables linked to this act in Paramètres)
+      deductConsumablesForAct({
+        actId: act.actId,
+        actName: act.actName || act.actType || act.careName,
+        user,
+        establishment,
+        moduleSource: 'Soins Infirmiers'
+      }).catch(() => {});
 
       // Also assign any related payment request for this soin to the nurse who executed it
       if (act.paymentRequestId) {
