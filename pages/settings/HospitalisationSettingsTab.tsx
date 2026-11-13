@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { BedDouble, Building2, DoorOpen, Plus, Trash2, CheckCircle2, Edit3 } from 'lucide-react';
+import { BedDouble, Building2, DoorOpen, Plus, Trash2, CheckCircle2, Edit3, Loader2 } from 'lucide-react';
 import { collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { db, sanitizeData } from '../../src/firebase';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
@@ -34,6 +34,9 @@ export const HospitalisationSettingsTab: React.FC<HospitalisationSettingsTabProp
   const [bedRoomId, setBedRoomId] = useState('');
   const [bedDailyRate, setBedDailyRate] = useState('15000');
   const [editingBedId, setEditingBedId] = useState<string | null>(null);
+  const [isSavingWard, setIsSavingWard] = useState(false);
+  const [isSavingRoom, setIsSavingRoom] = useState(false);
+  const [isSavingBed, setIsSavingBed] = useState(false);
 
   useEffect(() => {
     const unsubWards = onSnapshot(collection(db, 'wards'), (snap) => {
@@ -50,62 +53,77 @@ export const HospitalisationSettingsTab: React.FC<HospitalisationSettingsTabProp
 
   const handleAddWard = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!wardName.trim()) return;
-    const id = `${activeTenantId}_ward_${Date.now()}`;
-    await setDoc(doc(db, 'wards', id), sanitizeData(stampTenantData({
-      id,
-      name: wardName.trim(),
-      service: wardService.trim() || 'Médecine Générale',
-      createdAt: new Date().toISOString()
-    }, user, establishment)));
-    setWardName('');
-    showMessage?.('success', 'Pavillon ajouté avec succès');
+    if (!wardName.trim() || isSavingWard) return;
+    setIsSavingWard(true);
+    try {
+      const id = `${activeTenantId}_ward_${Date.now()}`;
+      await setDoc(doc(db, 'wards', id), sanitizeData(stampTenantData({
+        id,
+        name: wardName.trim(),
+        service: wardService.trim() || 'Médecine Générale',
+        createdAt: new Date().toISOString()
+      }, user, establishment)));
+      setWardName('');
+      showMessage?.('success', 'Pavillon ajouté avec succès');
+    } finally {
+      setIsSavingWard(false);
+    }
   };
 
   const handleAddRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!roomName.trim()) return;
-    const ward = wards.find(w => w.id === roomWardId);
-    const id = `${activeTenantId}_room_${Date.now()}`;
-    await setDoc(doc(db, 'rooms', id), sanitizeData(stampTenantData({
-      id,
-      name: roomName.trim(),
-      wardId: ward?.id || '',
-      wardName: ward?.name || 'Pavillon Général',
-      description: ward?.name || 'Hospitalisation',
-      capacity: Math.max(1, Number(roomCapacity) || 2),
-      createdAt: new Date().toISOString()
-    }, user, establishment)));
-    setRoomName('');
-    showMessage?.('success', 'Chambre ajoutée avec succès');
+    if (!roomName.trim() || isSavingRoom) return;
+    setIsSavingRoom(true);
+    try {
+      const ward = wards.find(w => w.id === roomWardId);
+      const id = `${activeTenantId}_room_${Date.now()}`;
+      await setDoc(doc(db, 'rooms', id), sanitizeData(stampTenantData({
+        id,
+        name: roomName.trim(),
+        wardId: ward?.id || '',
+        wardName: ward?.name || 'Pavillon Général',
+        description: ward?.name || 'Hospitalisation',
+        capacity: Math.max(1, Number(roomCapacity) || 2),
+        createdAt: new Date().toISOString()
+      }, user, establishment)));
+      setRoomName('');
+      showMessage?.('success', 'Chambre ajoutée avec succès');
+    } finally {
+      setIsSavingRoom(false);
+    }
   };
 
   const handleSaveBed = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bedName.trim() || !bedRoomId) return;
-    const room = rooms.find(r => r.id === bedRoomId);
-    const ward = wards.find(w => w.id === room?.wardId);
-    const rate = Math.max(0, Number(bedDailyRate) || 0);
-    const id = editingBedId || `${activeTenantId}_bed_${Date.now()}`;
+    if (!bedName.trim() || !bedRoomId || isSavingBed) return;
+    setIsSavingBed(true);
+    try {
+      const room = rooms.find(r => r.id === bedRoomId);
+      const ward = wards.find(w => w.id === room?.wardId);
+      const rate = Math.max(0, Number(bedDailyRate) || 0);
+      const id = editingBedId || `${activeTenantId}_bed_${Date.now()}`;
 
-    await setDoc(doc(db, 'beds', id), sanitizeData(stampTenantData({
-      id,
-      name: bedName.trim(),
-      roomId: room?.id || bedRoomId,
-      roomName: room?.name || '',
-      wardId: ward?.id || room?.wardId || '',
-      wardName: ward?.name || room?.wardName || '',
-      service: ward?.service || 'Hospitalisation',
-      dailyRate: rate,
-      tarifJournalier: rate,
-      category: 'hospitalisation',
-      ...(editingBedId ? {} : { status: 'AVAILABLE', createdAt: new Date().toISOString() }),
-      lastUpdated: new Date().toISOString()
-    }, user, establishment)), { merge: true });
+      await setDoc(doc(db, 'beds', id), sanitizeData(stampTenantData({
+        id,
+        name: bedName.trim(),
+        roomId: room?.id || bedRoomId,
+        roomName: room?.name || '',
+        wardId: ward?.id || room?.wardId || '',
+        wardName: ward?.name || room?.wardName || '',
+        service: ward?.service || 'Hospitalisation',
+        dailyRate: rate,
+        tarifJournalier: rate,
+        category: 'hospitalisation',
+        ...(editingBedId ? {} : { status: 'AVAILABLE', createdAt: new Date().toISOString() }),
+        lastUpdated: new Date().toISOString()
+      }, user, establishment)), { merge: true });
 
-    setBedName('');
-    setEditingBedId(null);
-    showMessage?.('success', editingBedId ? 'Lit mis à jour' : 'Lit ajouté avec succès');
+      setBedName('');
+      setEditingBedId(null);
+      showMessage?.('success', editingBedId ? 'Lit mis à jour' : 'Lit ajouté avec succès');
+    } finally {
+      setIsSavingBed(false);
+    }
   };
 
   return (
@@ -144,8 +162,8 @@ export const HospitalisationSettingsTab: React.FC<HospitalisationSettingsTabProp
               placeholder="Service associé (ex: Pédiatrie)"
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-blue-500"
             />
-            <button type="submit" className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer">
-              <Plus size={14} /> Ajouter Pavillon
+            <button type="submit" disabled={isSavingWard} className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer">
+              {isSavingWard ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} {isSavingWard ? 'Ajout...' : 'Ajouter Pavillon'}
             </button>
           </form>
           <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto">
@@ -195,8 +213,8 @@ export const HospitalisationSettingsTab: React.FC<HospitalisationSettingsTabProp
                 className="w-16 px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-center outline-none"
               />
             </div>
-            <button type="submit" className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer">
-              <Plus size={14} /> Ajouter Chambre
+            <button type="submit" disabled={isSavingRoom} className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer">
+              {isSavingRoom ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} {isSavingRoom ? 'Ajout...' : 'Ajouter Chambre'}
             </button>
           </form>
           <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto">
@@ -248,8 +266,8 @@ export const HospitalisationSettingsTab: React.FC<HospitalisationSettingsTabProp
                 required
               />
             </div>
-            <button type="submit" className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer">
-              <CheckCircle2 size={14} /> {editingBedId ? 'Mettre à jour le Lit' : 'Ajouter Lit & Tarif'}
+            <button type="submit" disabled={isSavingBed} className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer">
+              {isSavingBed ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} {isSavingBed ? 'Enregistrement...' : (editingBedId ? 'Mettre à jour le Lit' : 'Ajouter Lit & Tarif')}
             </button>
           </form>
           <div className="divide-y divide-slate-100 max-h-60 overflow-y-auto">

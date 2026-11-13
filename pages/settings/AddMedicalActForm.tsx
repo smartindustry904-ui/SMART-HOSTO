@@ -18,6 +18,7 @@ import {
   Check, 
   Layers,
   Wrench,
+  Loader2,
   CheckCircle2,
   Info
 } from 'lucide-react';
@@ -116,6 +117,7 @@ const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, 
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // --- Real-time Inventory Sources ---
   const [inventoryMeds, setInventoryMeds] = useState<any[]>([]);
@@ -406,10 +408,16 @@ const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, 
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (validateForm()) {
-      onSave(formData);
+      setIsSubmitting(true);
+      try {
+        await onSave(formData);
+      } finally {
+        setIsSubmitting(false);
+      }
     } else {
       if (errors.nom) setActiveTab('general');
       else if (errors.servicePrincipal) setActiveTab('classification');
@@ -1476,9 +1484,11 @@ const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, 
             <button 
               type="submit"
               form="medical-act-form"
-              className="px-6 py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/20"
+              disabled={isSubmitting}
+              className="px-6 py-3 rounded-xl font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/20 cursor-pointer"
             >
-              <Save size={18} /> {initialData ? 'Mettre à jour la prestation' : 'Enregistrer la prestation'}
+              {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+              {isSubmitting ? 'Enregistrement...' : (initialData ? 'Mettre à jour la prestation' : 'Enregistrer la prestation')}
             </button>
           </div>
         </div>

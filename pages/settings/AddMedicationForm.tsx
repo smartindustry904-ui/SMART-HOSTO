@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Save, Pill, AlertCircle } from 'lucide-react';
+import { X, Save, Pill, AlertCircle, Loader2 } from 'lucide-react';
 
 interface AddMedicationFormProps {
   initialData?: any;
@@ -89,20 +89,28 @@ const AddMedicationForm: React.FC<AddMedicationFormProps> = ({ initialData, onCl
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (validate()) {
       const finalFamily = formData.family === 'Autre' ? formData.customFamily.trim() : formData.family;
       const finalUnit = formData.unit === 'Autre' ? formData.customUnit.trim() : formData.unit;
 
-      onSave({
-        name: formData.name.trim(),
-        family: finalFamily,
-        unit: finalUnit,
-        price: parseFloat(formData.price),
-        seuilAlerte: parseInt(formData.seuilAlerte, 10),
-        requiresPrescription: formData.requiresPrescription
-      });
+      setIsSubmitting(true);
+      try {
+        await onSave({
+          name: formData.name.trim(),
+          family: finalFamily,
+          unit: finalUnit,
+          price: parseFloat(formData.price),
+          seuilAlerte: parseInt(formData.seuilAlerte, 10),
+          requiresPrescription: formData.requiresPrescription
+        });
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -302,9 +310,11 @@ const AddMedicationForm: React.FC<AddMedicationFormProps> = ({ initialData, onCl
           <button 
             type="submit"
             form="med-form"
-            className="px-6 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/20"
+            disabled={isSubmitting}
+            className="px-6 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/20 cursor-pointer"
           >
-            <Save size={16} /> {initialData ? 'Enregistrer les modifications' : 'Créer la référence'}
+            {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            {isSubmitting ? 'Enregistrement...' : (initialData ? 'Enregistrer les modifications' : 'Créer la référence')}
           </button>
         </div>
 
