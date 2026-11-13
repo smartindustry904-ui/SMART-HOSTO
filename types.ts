@@ -636,6 +636,7 @@ export interface User {
   token: string;
   profession?: string;
   salary?: string;
+  salaire_de_base?: number;
   schedule?: string;
   quotePartRate?: string;
   profileImage?: string;

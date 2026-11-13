@@ -700,6 +700,8 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
     const finalName = (newUser.name || '').trim() || cleanUsername;
     const finalEmail = (newUser.email || '').trim() || `${cleanUsername.toLowerCase()}@smarthosto.com`;
 
+    const sanitizedBaseSalary = Math.max(0, Math.floor(Number(newUser.salaire_de_base) || 0));
+
     try {
       if (isEditingUser && newUser.id) {
         const photoUrl = newUser.profile_image_url || newUser.profileImage;
@@ -708,6 +710,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
           username: cleanUsername,
           name: finalName,
           email: finalEmail,
+          salaire_de_base: sanitizedBaseSalary,
           profile_image_url: photoUrl || null,
           profileImage: photoUrl || null,
           updatedAt: new Date().toISOString()
@@ -732,6 +735,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
               roles: newUser.roles || [],
               status: newUser.status || 'ACTIVE',
               profession: newUser.profession || '',
+              salaire_de_base: sanitizedBaseSalary,
               hospital_id: currentClinicId,
               clinicId: currentClinicId,
               structureName: currentStructureName,
@@ -772,6 +776,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
             status: newUser.status || 'ACTIVE',
             token: 'fake',
             profession: newUser.profession || '',
+            salaire_de_base: sanitizedBaseSalary,
             profileImage: photoUrl,
             profile_image_url: photoUrl,
             createdAt: new Date().toISOString()
@@ -1385,6 +1390,54 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                           <option value="BLOCKED">Bloqué (Accès refusé)</option>
                         </select>
                       </div>
+
+                      {/* Informations Financières / RH (Admin Only Guard) */}
+                      {([Role.ADMIN, Role.SUPER_ADMIN, 'ADMIN', 'ADMINISTRATEUR', 'DIRECTEUR', 'SUPER_ADMIN'].includes(String(user?.role || '').toUpperCase()) ||
+                        (user?.roles || []).includes('role_admin') ||
+                        (user?.roles || []).includes('role_super_admin')) && (
+                        <div className="col-span-1 md:col-span-2 p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200/80 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
+                              Informations Financières / RH (Accès Administrateur)
+                            </span>
+                            <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md">
+                              Synchronisé avec Comptabilité / Paie
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-slate-600 uppercase">
+                                Salaire de Base (Mensuel) — CFA
+                              </label>
+                              <div className="relative">
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={500}
+                                  className="w-full px-4 py-3 pr-16 rounded-xl border border-emerald-300 focus:ring-2 ring-emerald-500/30 outline-none font-black text-slate-900 bg-white shadow-sm"
+                                  placeholder="0"
+                                  value={newUser.salaire_de_base ?? 0}
+                                  onChange={e =>
+                                    setNewUser({
+                                      ...newUser,
+                                      salaire_de_base: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                                    })
+                                  }
+                                />
+                                <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-black text-emerald-700">
+                                  FCFA
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-xs font-bold text-emerald-800 pb-2">
+                              Montant formaté :{' '}
+                              <span className="text-sm font-black">
+                                {Number(newUser.salaire_de_base || 0).toLocaleString('fr-FR')} FCFA / mois
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Rôles & Habilitations additionnels (Multi-sélection spacieuse) */}
                       <div className="col-span-1 md:col-span-2 space-y-2 mt-1">

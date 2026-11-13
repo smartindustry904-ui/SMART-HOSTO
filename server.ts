@@ -445,7 +445,8 @@ const handleStaffUserCreation = async (req: express.Request, res: express.Respon
       structureName = '',
       forcePasswordChange = true,
       profileImage = null,
-      profile_image_url = null
+      profile_image_url = null,
+      salaire_de_base = 0
     } = req.body;
 
     if (!username) {
@@ -470,6 +471,7 @@ const handleStaffUserCreation = async (req: express.Request, res: express.Respon
       roles,
       status,
       profession,
+      salaire_de_base: Math.max(0, Math.floor(Number(salaire_de_base) || 0)),
       hospital_id: finalHospitalId,
       clinicId: finalHospitalId,
       structureName,

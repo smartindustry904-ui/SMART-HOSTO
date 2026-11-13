@@ -227,8 +227,8 @@ export const AccountingDepensesTab: React.FC<AccountingDepensesTabProps> = ({
     setBeneficiaryId(u.id);
     setBeneficiaryRole(u.role || u.profession || 'Personnel');
 
-    // Parse base salary
-    const rawSal = u.salary || (u as any).baseSalary || 0;
+    // Parse base salary (prioritizing salaire_de_base from Paramètres > Utilisateurs)
+    const rawSal = u.salaire_de_base ?? u.salary ?? (u as any).baseSalary ?? 0;
     let cleanSalary = 0;
     if (typeof rawSal === 'number') {
       cleanSalary = rawSal;

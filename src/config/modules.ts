@@ -210,7 +210,8 @@ export const getModuleByRoleOrId = (roleOrId: Role | string): CanonicalModule | 
  */
 export const isModuleActiveAndAvailable = (
   moduleIdOrRole: Role | string,
-  servicesList: Array<{ id: string; status: 'active' | 'inactive'; is_active?: boolean }>
+  servicesList: Array<{ id: string; status: 'active' | 'inactive'; is_active?: boolean }>,
+  establishment?: any
 ): boolean => {
   const mod = getModuleByRoleOrId(moduleIdOrRole);
   if (!mod || mod.status !== 'IMPLEMENTED') return false;
@@ -220,12 +221,31 @@ export const isModuleActiveAndAvailable = (
     return true;
   }
 
-  // Find the corresponding service
+  // Check Super Admin license activation on establishment if present
+  const licenseModules: string[] = [
+    ...(Array.isArray(establishment?.activeModules) ? establishment.activeModules : []),
+    ...(Array.isArray(establishment?.enabledModules) ? establishment.enabledModules : []),
+    ...(Array.isArray(establishment?.activeServices) ? establishment.activeServices : []),
+  ].map((x: any) => String(x || '').toUpperCase());
+
+  if (
+    licenseModules.length > 0 &&
+    (licenseModules.includes(String(mod.serviceId).toUpperCase()) ||
+      licenseModules.includes(String(mod.id).toUpperCase()) ||
+      licenseModules.includes(String(mod.role).toUpperCase()))
+  ) {
+    return true;
+  }
+
+  // Find the corresponding service in hospital_services
   const service = (servicesList || []).find(
     s => s.id.toUpperCase() === mod.serviceId?.toUpperCase()
   );
 
-  if (!service) return false;
+  if (!service) {
+    // Legacy establishments seeded before SRV-COMPTABILITE existed should still expose Comptabilité if not explicitly disabled
+    return mod.serviceId === 'SRV-COMPTABILITE';
+  }
   return service.status === 'active' && service.is_active !== false;
 };
 
@@ -287,6 +307,9 @@ export const isUserAuthorizedForModule = (
 
   const isAdmin = 
     rawUserRole === Role.ADMIN ||
+    rawUserRole === 'ADMIN' ||
+    rawUserRole === 'ADMINISTRATEUR' ||
+    rawUserRole === 'DIRECTEUR' ||
     rawUserRole === Role.SUPER_ADMIN ||
     rawUserRole === 'SUPER_ADMIN' ||
     userRoles.includes('role_admin') ||
@@ -410,6 +433,9 @@ export const getUserModulePermissions = (
 
   const isAdmin = 
     rawUserRole === Role.ADMIN ||
+    rawUserRole === 'ADMIN' ||
+    rawUserRole === 'ADMINISTRATEUR' ||
+    rawUserRole === 'DIRECTEUR' ||
     rawUserRole === Role.SUPER_ADMIN ||
     rawUserRole === 'SUPER_ADMIN' ||
     userRoles.includes('role_admin') ||

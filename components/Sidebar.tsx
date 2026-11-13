@@ -56,7 +56,7 @@ import {
 } from 'lucide-react';
 import { Role, User, EmergencySubMenu, NurseSubMenu, ReceptionSubMenu, CashierSubMenu, LabSubMenu, InpatientSubMenu, PharmacySubMenu, AccountingSubMenu, MaternitySubMenu, ConsultationSubMenu } from '../types';
 import { useSystemAlerts } from '../hooks/useSystemAlerts';
-import { useHospitalServices } from '../hooks/useSettings';
+import { useHospitalServices, useSettings } from '../hooks/useSettings';
 import { isModuleActiveAndAvailable, isUserAuthorizedForModule } from '../src/config/modules';
 import { useCustomRoles } from '../hooks/useCustomRoles';
 
@@ -231,18 +231,20 @@ const Sidebar: React.FC<SidebarProps> = ({
   const accountingMenu = [
     { id: 'dashboard', label: 'Tableau de Bord', icon: LayoutDashboard },
     { id: 'tresorerie', label: 'Trésorerie & Caisses', icon: Landmark },
+    { id: 'depenses', label: 'Dépenses & Paiements', icon: CreditCard },
     { id: 'creances', label: 'Comptes Clients', icon: AlertCircle },
     { id: 'fournisseurs', label: 'Fournisseurs & Achats', icon: Truck },
   ];
 
   const { services } = useHospitalServices();
+  const { establishment } = useSettings();
 
   const { roles: customRoles } = useCustomRoles(user);
 
-  // Filtrer les menus selon le statut d'activation du service et le rôle de l'utilisateur
+  // Filtrer les menus selon le statut d'activation du service (ou licence Super Admin) et le rôle de l'utilisateur
   const filteredItems = menuConfig.filter(item => {
-    // 1. Strict service activation check: a module linked to a service must be active in Firestore
-    if (!isModuleActiveAndAvailable(item.id, services)) {
+    // 1. Strict service activation check: a module linked to a service must be active in Firestore or Super Admin license
+    if (!isModuleActiveAndAvailable(item.id, services, establishment)) {
       return false;
     }
 
