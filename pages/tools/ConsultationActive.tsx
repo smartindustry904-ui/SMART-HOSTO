@@ -10,6 +10,8 @@ import {
 import { User, PaymentRequest, ConsultationAddendum } from '../../types';
 import { db, sanitizeData } from '../../src/firebase';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
+import { PaymentStatusBadge } from '../../src/components/PaymentStatusBadge';
+import { resolvePaymentBadgeStatus } from '../../src/utils/visitCycle';
 import { collection, doc, setDoc, getDocs, query, where, updateDoc, addDoc, onSnapshot, orderBy } from 'firebase/firestore';
 import VoiceDictationButton from '../../components/VoiceDictationButton';
 import { 
@@ -312,6 +314,30 @@ export default function ConsultationActive({
   // Unsent Orders Guardrail Warning State
   const [showUnsentWarningModal, setShowUnsentWarningModal] = useState(false);
   const [unsentPendingAction, setUnsentPendingAction] = useState<'EXIT' | 'CLOTURER' | null>(null);
+
+  // Real-time listener for payment requests for this patient/visit
+  const [livePaymentRequests, setLivePaymentRequests] = useState<PaymentRequest[]>([]);
+
+  useEffect(() => {
+    const pids = Array.from(new Set([patient?.patientId, patient?.dmeId, patient?.id].filter(Boolean).map(String)));
+    if (pids.length === 0) return;
+    try {
+      const tenantId = getActiveTenantId();
+      const unsub = onSnapshot(collection(db, 'payment_requests'), (snap) => {
+        const list = snap.docs
+          .map(d => ({ ...(d.data() as any), id: d.id }) as PaymentRequest)
+          .filter(pr => {
+            if (tenantId && !belongsToTenant(pr, tenantId)) return false;
+            if (patient?.visite_id && pr.visite_id) return pr.visite_id === patient.visite_id;
+            return pids.includes(String(pr.patientId)) || pids.includes(String((pr as any).patientDme || ''));
+          });
+        setLivePaymentRequests(list);
+      });
+      return () => unsub();
+    } catch (e) {
+      console.warn('Error setting up payment_requests listener:', e);
+    }
+  }, [patient?.id, patient?.patientId, patient?.dmeId, patient?.visite_id]);
 
   // Real-time listener for nursing care acts prescribed for this patient
   const [liveNursingActs, setLiveNursingActs] = useState<any[]>([]);
@@ -1621,9 +1647,20 @@ Orientation: ${orientation}
                 </span>
               )}
             </div>
-            <p className="text-sm text-slate-500 font-medium mt-0.5">
-              Patient: <span className="font-bold text-slate-800">{patient?.lastName} {patient?.firstName}</span> ({patient?.age || 35} ans) • Mode: <span className="uppercase text-blue-600 font-bold">{mode.replace('_', ' ')}</span>
-            </p>
+            <div className="flex items-center gap-2 flex-wrap mt-0.5">
+              <p className="text-sm text-slate-500 font-medium">
+                Patient: <span className="font-bold text-slate-800">{patient?.lastName} {patient?.firstName}</span> ({patient?.age || 35} ans) • Mode: <span className="uppercase text-blue-600 font-bold">{mode.replace('_', ' ')}</span>
+              </p>
+              <PaymentStatusBadge
+                size="sm"
+                status={resolvePaymentBadgeStatus({
+                  item: patient,
+                  paymentRequests: livePaymentRequests,
+                  patientIds: [patient?.patientId, patient?.dmeId, patient?.id].filter(Boolean).map(String),
+                  visiteId: patient?.visite_id,
+                })}
+              />
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {isReadOnly && (
@@ -3054,8 +3091,25 @@ Orientation: ${orientation}
                           return (
                             <div key={examKey} className="flex justify-between items-center p-4 bg-slate-50 border border-slate-200 rounded-2xl">
                               <div>
-                                <div className="flex items-center gap-2 mb-1">
+                                <div className="flex items-center gap-2 mb-1 flex-wrap">
                                   <span className="font-bold text-slate-800 text-sm block">{e.name}</span>
+                                  {(() => {
+                                    const matchedPr = livePaymentRequests.find(pr =>
+                                      (e as any).paymentRequestId ? pr.id === (e as any).paymentRequestId :
+                                      (pr.type === 'LABORATOIRE' && (pr.items || []).some(it => (it.name || '').toLowerCase().includes((e.name || '').toLowerCase())))
+                                    );
+                                    const examBadge = resolvePaymentBadgeStatus({
+                                      item: {
+                                        ...e,
+                                        paymentStatus: e.status === 'payé' || e.status === 'validé' || e.status === 'prélevé' ? 'PAID' : (e as any).paymentStatus,
+                                        paymentRequestId: (e as any).paymentRequestId || matchedPr?.id,
+                                      },
+                                      paymentRequests: livePaymentRequests,
+                                      patientIds: [patient?.patientId, patient?.dmeId, patient?.id].filter(Boolean).map(String),
+                                      visiteId: patient?.visite_id,
+                                    });
+                                    return <PaymentStatusBadge status={examBadge} />;
+                                  })()}
                                   {e.urgent && <span className="bg-rose-100 text-rose-700 text-[8px] font-black uppercase px-1.5 py-0.5 rounded-md">Urgent</span>}
                                 </div>
                                 <div className="flex items-center gap-3">

@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Users, Clock, ChevronRight, Eye, RefreshCw, X, AlertCircle, ShieldAlert, Pill, TestTube, Activity, FileText, Check, BedDouble, Lock, Zap, Stethoscope, AlertTriangle, Info, Calendar } from 'lucide-react';
 import { AvatarPlaceholder } from '../../components/common/AvatarPlaceholder';
+import { PaymentStatusBadge } from '../../src/components/PaymentStatusBadge';
+import { resolvePaymentBadgeStatus } from '../../src/utils/visitCycle';
 
 interface WaitingRoomProps {
   waitingQueue: any[];
@@ -226,26 +228,23 @@ const WaitingRoom: React.FC<WaitingRoomProps> = ({
 
                   {/* Financial & Triage status badges */}
                   {(() => {
-                    const isPaid = checkPatientIsPaid(p);
+                    const badge = resolvePaymentBadgeStatus({
+                      item: p,
+                      paymentRequests,
+                      patientIds: [p.patientId, p.dmeId, p.id].filter(Boolean),
+                      visiteId: p.visite_id,
+                    });
+                    const isPaid = checkPatientIsPaid(p) || badge.code === 'PAID' || badge.code === 'EXONERE';
                     const isEmergency = p.priority === 'critique' || p.priority === 'urgent';
 
                     return (
                       <>
                         <div className="flex flex-wrap gap-1.5 mb-3.5">
-                          {isPaid ? (
-                            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs">
-                              <Check size={11} className="text-emerald-600" />
-                              <span>Ticket Réglé</span>
-                            </span>
-                          ) : isEmergency ? (
+                          <PaymentStatusBadge status={badge} size="sm" />
+                          {isEmergency && (
                             <span className="bg-rose-50 text-rose-700 border border-rose-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs animate-pulse">
                               <Zap size={11} className="text-rose-600" />
                               <span>Urgence Vitale</span>
-                            </span>
-                          ) : (
-                            <span className="bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-1 rounded-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs">
-                              <AlertTriangle size={11} className="text-amber-600" />
-                              <span>Ticket Non Encaissé</span>
                             </span>
                           )}
 

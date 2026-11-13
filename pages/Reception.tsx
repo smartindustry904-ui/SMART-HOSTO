@@ -19,6 +19,13 @@ import { useCustomRoles } from '../hooks/useCustomRoles';
 import { getUserModulePermissions, isUserAuthorizedForModule } from '../src/config/modules';
 import { Avatar } from '../components/common/Avatar';
 import { PrintReceiptModal, PrintableReceiptData } from '../components/common/PrintReceiptModal';
+import {
+  openVisitCycle,
+  appendDestinationToVisitCycle,
+  closeVisitCycle,
+  findActiveVisitForPatient,
+  VisitCycle,
+} from '../src/utils/visitCycle';
 
 import { 
   collection, 
@@ -456,6 +463,9 @@ const Reception: React.FC<ReceptionProps> = ({
   const [patients, setPatients] = useState<Patient[]>([]);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [interceptedAppointment, setInterceptedAppointment] = useState<{ patient: Patient; appointment: any } | null>(null);
+  const [activeVisits, setActiveVisits] = useState<VisitCycle[]>([]);
+  const [activeCycleLockModal, setActiveCycleLockModal] = useState<{ patient: Patient; visit: VisitCycle } | null>(null);
+  const [rerouteVisitId, setRerouteVisitId] = useState<string | null>(null);
   const [patientsToDischarge, setPatientsToDischarge] = useState<any[]>([]);
   const [dischargeError, setDischargeError] = useState<{ patientId: string; message: string } | null>(null);
   const [isProcessingDischarge, setIsProcessingDischarge] = useState<string | null>(null);
@@ -763,7 +773,19 @@ const Reception: React.FC<ReceptionProps> = ({
         setAppointments(list);
       });
 
-      unsubs = [unsubPatients, unsubDischarges, unsubApps];
+      const unsubVisites = onSnapshot(
+        query(collection(db, 'visites'), where('status', '==', 'ACTIF')),
+        (snapshot) => {
+          const rawList = snapshot.docs.map(doc => ({ ...(doc.data() as any), id: doc.id, visite_id: (doc.data() as any).visite_id || doc.id }));
+          const list = rawList.filter(v => belongsToTenant(v, activeTenantId)) as VisitCycle[];
+          setActiveVisits(list);
+        },
+        (err) => {
+          console.warn('Error listening to active visites:', err);
+        }
+      );
+
+      unsubs = [unsubPatients, unsubDischarges, unsubApps, unsubVisites];
     };
 
     const unsubscribeAuth = auth.onAuthStateChanged((firebaseUser) => {
@@ -1323,12 +1345,40 @@ const Reception: React.FC<ReceptionProps> = ({
       const pid = matchedPatient.id || matchedPatient.patientId;
       const fullName = `${matchedPatient.lastName || ''} ${matchedPatient.firstName || ''}`.trim() || rdv.patient || 'Patient';
 
+      // Open or reuse active Visit Cycle (Parcours Patient)
+      const queueDocRef = doc(collection(db, 'service_queues'));
+      const destinationMeta = {
+        service: isMaternityRdv ? 'Maternité' : 'Consultation',
+        serviceId: matchedMotif?.serviceId || (isMaternityRdv ? 'SRV-MATERNITE' : 'SRV-CONSULTATION'),
+        motif: 'CONSULTATION',
+        motifLabel: matchedMotif?.label || rdv.reason || 'Consultation RDV',
+        queueId: queueDocRef.id,
+        routedAt: new Date().toISOString(),
+        routedBy: user?.name || user?.username || 'Agent Accueil',
+      };
+      const existingActive = await findActiveVisitForPatient([pid, matchedPatient.patientId, matchedPatient.id].filter(Boolean) as string[], activeTenantId);
+      let activeVisiteId = existingActive?.visite_id || existingActive?.id || '';
+      if (activeVisiteId) {
+        await appendDestinationToVisitCycle({ visiteId: activeVisiteId, destination: destinationMeta });
+      } else {
+        const opened = await openVisitCycle({
+          patientId: pid,
+          dmeId: pid,
+          patientName: fullName,
+          destination: destinationMeta,
+          user,
+          establishment,
+        });
+        activeVisiteId = opened.visite_id;
+      }
+
       let createdReq: PaymentRequest | null = null;
       if (!bypassCashier) {
         createdReq = {
           id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
           patientId: pid,
           patientName: fullName,
+          visite_id: activeVisiteId,
           requestingService: 'Accueil',
           sourceModule: 'Reception',
           type: 'CONSULTATION',
@@ -1352,13 +1402,13 @@ const Reception: React.FC<ReceptionProps> = ({
           createdById: user?.id || '',
           requestedBy: user?.name || user?.username || 'Agent Accueil',
           requestedById: user?.id || ''
-        };
-        await setDoc(doc(db, 'payment_requests', createdReq.id), sanitizeData(stampTenantData(createdReq, user, establishment)));
+        } as any;
+        await setDoc(doc(db, 'payment_requests', createdReq!.id), sanitizeData(stampTenantData(createdReq, user, establishment)));
       }
 
-      const queueDocRef = doc(collection(db, 'service_queues'));
       const queueEntry = stampTenantData({
         id: queueDocRef.id,
+        visite_id: activeVisiteId,
         patientId: pid,
         dmeId: pid,
         firstName: matchedPatient.firstName || fullName,
@@ -1398,6 +1448,7 @@ const Reception: React.FC<ReceptionProps> = ({
         setDoc(queueDocRef, sanitizeData(queueEntry)),
         setDoc(doc(db, 'appointments', rdv.id), sanitizeData({
           status: 'CHECKED_IN',
+          visite_id: activeVisiteId,
           checkedInAt: new Date().toISOString(),
           checkedInBy: user?.name || user?.username || 'Agent Accueil',
           isFreeFollowUp: validity.isFreeFollowUp,
@@ -1599,11 +1650,23 @@ const Reception: React.FC<ReceptionProps> = ({
 
   const handleSelectPatient = (p: Patient) => {
     setCurrentPatient(p);
+    setRerouteVisitId(null);
     if (!permissions.canWrite) {
       setSelectedPatientForHistory(p);
       setActiveTab('historique');
     } else {
-      // Smart Rendez-vous Intercept: check if patient has a PENDING appointment scheduled today
+      // 1. Active Cycle Lock: Check if patient already has an ACTIF visit cycle
+      const pids = [p.id, p.patientId, (p as any).dmeId].filter(Boolean) as string[];
+      const existingActiveVisit = (activeVisits || []).find(
+        v => v.status === 'ACTIF' && (pids.includes(v.patientId) || (v.dmeId && pids.includes(v.dmeId)))
+      );
+      if (existingActiveVisit) {
+        setActiveCycleLockModal({ patient: p, visit: existingActiveVisit });
+        setSearchQuery('');
+        return;
+      }
+
+      // 2. Smart Rendez-vous Intercept: check if patient has a PENDING appointment scheduled today
       const todayStr = new Date().toISOString().split('T')[0];
       const fullNameNorm = `${p.lastName || ''} ${p.firstName || ''}`.trim().toLowerCase();
       const matchedRdv = (appointments || []).find((a: any) => {
@@ -1738,6 +1801,33 @@ const Reception: React.FC<ReceptionProps> = ({
         ? items.map(it => it.id === 'ITEM-CARNET' ? it : { ...it, unitPrice: 0, totalPrice: 0, name: `${it.name} (Suivi Gratuit)` })
         : items;
 
+      // Visit Cycle (Parcours Patient): Open new ACTIF cycle or append destination to existing ACTIF cycle
+      const visitDestMeta = {
+        service: selectedMotif?.serviceId || visitMotif || 'Consultation',
+        serviceId: selectedMotif?.serviceId || '',
+        motif: visitMotif || '',
+        motifLabel: selectedMotif?.label || visitMotif || '',
+        routedAt: new Date().toISOString(),
+        routedBy: user?.name || user?.username || 'Agent Accueil',
+      };
+      const existingActiveVisit = rerouteVisitId
+        ? { visite_id: rerouteVisitId, id: rerouteVisitId }
+        : await findActiveVisitForPatient([patientId, dmeId, finalPatient.id].filter(Boolean) as string[], activeTenantId);
+      let activeVisiteId = existingActiveVisit?.visite_id || existingActiveVisit?.id || '';
+      if (activeVisiteId) {
+        await appendDestinationToVisitCycle({ visiteId: activeVisiteId, destination: visitDestMeta });
+      } else {
+        const openedVisit = await openVisitCycle({
+          patientId,
+          dmeId,
+          patientName: `${finalPatient.lastName} ${finalPatient.firstName}`.trim(),
+          destination: visitDestMeta,
+          user,
+          establishment,
+        });
+        activeVisiteId = openedVisit.visite_id;
+      }
+
       let p5 = Promise.resolve();
       let reqIdForLog = '';
       let createdRequest: PaymentRequest | null = null;
@@ -1746,6 +1836,7 @@ const Reception: React.FC<ReceptionProps> = ({
           id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
           patientId: patientId,
           patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
+          visite_id: activeVisiteId,
           requestingService: 'Accueil',
           sourceModule: 'Reception',
           type: reqType,
@@ -1881,6 +1972,7 @@ const Reception: React.FC<ReceptionProps> = ({
       const visitDocRef = doc(collection(db, 'reception_visits'));
       const visitData = stampTenantData({
         id: visitDocRef.id,
+        visite_id: activeVisiteId,
         patientId: patientId,
         patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
         date: todayStr,
@@ -1901,6 +1993,7 @@ const Reception: React.FC<ReceptionProps> = ({
         const triageDocRef = doc(collection(db, 'triage_records'));
         p4 = setDoc(triageDocRef, sanitizeData(stampTenantData({
           id: triageDocRef.id,
+          visite_id: activeVisiteId,
           patientId: patientId,
           visitId: visitDocRef.id,
           vitals: finalPatient.vitals,
@@ -1929,6 +2022,7 @@ const Reception: React.FC<ReceptionProps> = ({
         const queueDocRef = doc(collection(db, 'service_queues'));
         queueEntry = stampTenantData({
           id: queueDocRef.id,
+          visite_id: activeVisiteId,
           patientId: patientId,
           dmeId: dmeId,
           firstName: finalPatient.firstName,
@@ -2159,6 +2253,7 @@ const Reception: React.FC<ReceptionProps> = ({
       alert(`Erreur d'enregistrement: ${err.message}`);
     } finally {
       setIsSaving(false);
+      setRerouteVisitId(null);
     }
   };
 
@@ -2356,6 +2451,7 @@ const Reception: React.FC<ReceptionProps> = ({
       const dischargeDocRef = doc(collection(db, 'discharges'));
       const dischargeData = stampTenantData({
         id: dischargeDocRef.id,
+        visite_id: (patient as any).visite_id || '',
         patientId: patient.id,
         patientName: patient.name,
         department: patient.department || 'Général',
@@ -2369,7 +2465,7 @@ const Reception: React.FC<ReceptionProps> = ({
 
       const notifDocRef = doc(collection(db, 'notifications'));
 
-      // Save database actions in parallel
+      // Save database actions in parallel + strictly close Visit Cycle (ACTIF -> CLOTURE)
       const p1 = setDoc(dischargeDocRef, sanitizeData(dischargeData));
       const p2 = deleteDoc(doc(db, 'discharges_waiting', patient.docId || patient.id));
       const p3 = setDoc(notifDocRef, sanitizeData(stampTenantData({
@@ -2379,9 +2475,16 @@ const Reception: React.FC<ReceptionProps> = ({
         targetModules: ['Cashier', 'Dashboard', 'Doctor'],
         createdAt: new Date().toISOString()
       }, user, establishment)));
-      const p4 = logAudit(`Sortie administrative validée`, { patientId: patient.id, patientName: patient.name });
+      const p4 = logAudit(`Sortie administrative validée`, { patientId: patient.id, patientName: patient.name, visiteId: (patient as any).visite_id || '' });
+      const p5 = closeVisitCycle({
+        visiteId: (patient as any).visite_id || undefined,
+        patientIds: targetPatientIds,
+        dischargeId: dischargeDocRef.id,
+        closedBy: user?.name || user?.username || 'Sortie Admin',
+        tenantId: activeTenantId,
+      });
 
-      await Promise.all([p1, p2, p3, p4]);
+      await Promise.all([p1, p2, p3, p4, p5]);
 
       // Local state sync
       setPatientsToDischarge(prev => prev.filter(p => p.id !== id));
@@ -4293,6 +4396,68 @@ const Reception: React.FC<ReceptionProps> = ({
           }}
           theme={theme}
         />
+      )}
+
+      {/* Active Cycle Lock Modal (Parcours Patient) */}
+      {activeCycleLockModal && (
+        <div className="fixed inset-0 z-[88] flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-6 bg-gradient-to-r from-amber-600 to-orange-600 text-white flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                <Lock size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-black tracking-tight">Cycle Patient Actif</h3>
+                <p className="text-[11px] font-bold text-amber-100">
+                  {activeCycleLockModal.patient.lastName} {activeCycleLockModal.patient.firstName} — Visite #{activeCycleLockModal.visit.visite_id.slice(-6).toUpperCase()}
+                </p>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm font-bold text-slate-800 leading-relaxed">
+                Ce patient est actuellement dans l&apos;hôpital (Cycle Actif). Voulez-vous le rediriger vers un autre service ?
+              </p>
+              <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 space-y-1.5 text-xs text-amber-900">
+                <div className="font-black uppercase tracking-wider text-[10px] text-amber-700">
+                  Cycle ouvert le {activeCycleLockModal.visit.openedDate} à {activeCycleLockModal.visit.openedTime}
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {(activeCycleLockModal.visit.destinations || []).map((dest, idx) => (
+                    <span key={idx} className="px-2 py-0.5 rounded-md bg-white border border-amber-200 font-bold text-[10px] text-amber-800">
+                      {dest.motifLabel || dest.service}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <p className="text-[11px] font-medium text-slate-500">
+                La création d&apos;une nouvelle visite est verrouillée jusqu&apos;à la clôture via <span className="font-black text-slate-700">Sortie Admin</span>.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+                <button
+                  onClick={() => {
+                    setRerouteVisitId(activeCycleLockModal.visit.visite_id);
+                    setActiveCycleLockModal(null);
+                    setStep('triage');
+                  }}
+                  className="flex-1 py-3 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-200 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                >
+                  <ArrowRightLeft size={15} />
+                  Rediriger
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveCycleLockModal(null);
+                    setRerouteVisitId(null);
+                    setStep('search');
+                  }}
+                  className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
+                >
+                  Annuler
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Smart Rendez-vous Intercept Modal */}

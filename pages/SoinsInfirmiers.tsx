@@ -14,6 +14,8 @@ import { useSettings } from '../hooks/useSettings';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
 import { UniversalHospitalisationModal } from '../components/common/UniversalHospitalisationModal';
 import { deductConsumablesForAct } from '../src/utils/consumablesStock';
+import { PaymentStatusBadge } from '../src/components/PaymentStatusBadge';
+import { resolvePaymentBadgeStatus } from '../src/utils/visitCycle';
 
 interface SoinsInfirmiersProps {
   user?: UserType;
@@ -873,13 +875,23 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                             : 'bg-slate-50 hover:bg-slate-100 border-slate-200/70'
                         }`}
                       >
-                        <div className="flex items-center justify-between mb-1">
-                          <p className="font-black text-slate-900 text-xs truncate max-w-[170px]">
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <p className="font-black text-slate-900 text-xs truncate max-w-[150px]">
                             {patient.lastName} {patient.firstName}
                           </p>
-                          <span className="text-[9px] font-bold text-slate-400">
+                          <span className="text-[9px] font-bold text-slate-400 shrink-0">
                             {patient.time || 'Aujourd\'hui'}
                           </span>
+                        </div>
+                        <div className="mb-1.5">
+                          <PaymentStatusBadge
+                            status={resolvePaymentBadgeStatus({
+                              item: patient,
+                              paymentRequests,
+                              patientIds: [patient.patientId, patient.dmeId, patient.id].filter(Boolean),
+                              visiteId: patient.visite_id,
+                            })}
+                          />
                         </div>
                         <p className="text-[11px] text-slate-500 font-medium truncate">
                           {patient.motifLabel || patient.motif || 'Consultation'}
@@ -903,7 +915,17 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                   {/* Selected Patient Banner */}
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-teal-50/80 border border-teal-200">
                     <div>
-                      <span className="text-[9px] font-black uppercase tracking-widest text-teal-700">Patient en cours d'évaluation</span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[9px] font-black uppercase tracking-widest text-teal-700">Patient en cours d'évaluation</span>
+                        <PaymentStatusBadge
+                          status={resolvePaymentBadgeStatus({
+                            item: activePatient,
+                            paymentRequests,
+                            patientIds: [activePatient.patientId, activePatient.dmeId, activePatient.id].filter(Boolean),
+                            visiteId: activePatient.visite_id,
+                          })}
+                        />
+                      </div>
                       <h3 className="text-xl font-black text-slate-900">{activePatient.lastName} {activePatient.firstName}</h3>
                       <p className="text-xs text-slate-600 font-medium">
                         {activePatient.age ? `${activePatient.age} ans • ` : ''}{activePatient.gender === 'F' ? 'Femme' : 'Homme'} • Motif: <strong>{activePatient.motifLabel || activePatient.motif}</strong>
@@ -1203,7 +1225,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                     ) : (
                       <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                         <div className="text-xs text-slate-500">
-                          <p>✅ En cliquant sur <strong>« Transférer au Médecin »</strong>, le dossier est instantanément envoyé dans la file de consultation du médecin avec ses constantes.</p>
+                          <p>✅ En cliquant sur <strong>« Valider le Triage »</strong>, le dossier est instantanément envoyé dans la file de consultation du médecin avec ses constantes.</p>
                         </div>
 
                         <button
@@ -1212,7 +1234,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                           className="w-full sm:w-auto px-8 py-4 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg hover:shadow-teal-600/30 flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
                         >
                           <CheckCircle size={18} />
-                          <span>{isSubmitting ? 'Transfert en cours...' : 'Transférer au Médecin'}</span>
+                          <span>{isSubmitting ? 'Validation en cours...' : 'Valider le Triage'}</span>
                           <ChevronRight size={18} />
                         </button>
                       </div>
@@ -1552,9 +1574,19 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
 
                             {/* Patient Column */}
                             <td className="py-4 px-4">
-                              <p className="font-black text-slate-900 dark:text-white text-sm">
-                                {act.patientName}
-                              </p>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-black text-slate-900 dark:text-white text-sm">
+                                  {act.patientName}
+                                </p>
+                                <PaymentStatusBadge
+                                  status={resolvePaymentBadgeStatus({
+                                    item: act,
+                                    paymentRequests,
+                                    patientIds: [act.patientId, act.dmeId].filter(Boolean),
+                                    visiteId: act.visite_id,
+                                  })}
+                                />
+                              </div>
                               {act.locationBadge && (
                                 <span className="inline-flex items-center gap-1 mt-0.5 mb-0.5 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-black uppercase">
                                   🛏️ {act.locationBadge}
@@ -1569,10 +1601,20 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
 
                             {/* Acte / Soin Prescrit Column */}
                             <td className="py-4 px-4 max-w-xs">
-                              <p className="font-black text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
-                                <Syringe size={13} className="text-indigo-600 shrink-0" />
-                                <span>{act.actType}</span>
-                              </p>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="font-black text-slate-900 dark:text-white text-xs flex items-center gap-1.5">
+                                  <Syringe size={13} className="text-indigo-600 shrink-0" />
+                                  <span>{act.actType}</span>
+                                </p>
+                                <PaymentStatusBadge
+                                  status={resolvePaymentBadgeStatus({
+                                    item: act,
+                                    paymentRequests,
+                                    patientIds: [act.patientId, act.dmeId].filter(Boolean),
+                                    visiteId: act.visite_id,
+                                  })}
+                                />
+                              </div>
                               {act.instructions ? (
                                 <p className="text-[11px] text-slate-500 dark:text-slate-400 font-medium truncate mt-0.5" title={act.instructions}>
                                   {act.instructions}

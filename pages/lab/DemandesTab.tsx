@@ -7,6 +7,7 @@ import { LabFilterToolbar, LabFilters } from '../../components/lab/LabFilterTool
 import { EmptyFilterState } from '../../components/common/EmptyFilterState';
 import { isStatusEnAttente } from '../../src/utils/labStatus';
 import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
+import { PaymentStatusBadge } from '../../src/components/PaymentStatusBadge';
 
 interface DemandesTabProps {
   requests: LabExamRequest[];
@@ -363,15 +364,15 @@ const DemandesTab: React.FC<DemandesTabProps> = ({ requests, updateRequests, pay
 
                     <div className="flex items-center justify-between text-[10px] pt-2 border-t border-slate-100/80">
                       <div className="flex items-center gap-1.5">
-                        <span className={`px-2 py-0.5 rounded-md font-bold text-[9px] uppercase ${
-                          actualBillingStatus === 'paid' 
-                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60' 
-                            : actualBillingStatus === 'exonéré' 
-                            ? 'bg-blue-50 text-blue-700 border border-blue-200/60' 
-                            : 'bg-amber-50 text-amber-700 border border-amber-200/60'
-                        }`}>
-                          {actualBillingStatus === 'paid' ? 'Payé' : actualBillingStatus === 'exonéré' ? 'Exonéré' : 'Non payé'}
-                        </span>
+                        <PaymentStatusBadge
+                          status={
+                            actualBillingStatus === 'paid'
+                              ? 'PAID'
+                              : actualBillingStatus === 'exonéré'
+                              ? 'EXONERE'
+                              : 'PENDING'
+                          }
+                        />
                         <span className={`px-1.5 py-0.5 rounded-md font-bold text-[9px] uppercase ${
                           req.status === 'prélèvement fait' ? 'bg-indigo-50 text-indigo-700' :
                           req.status === 'terminé' || req.status === 'validé' ? 'bg-emerald-50 text-emerald-700' :
@@ -410,6 +411,15 @@ const DemandesTab: React.FC<DemandesTabProps> = ({ requests, updateRequests, pay
                 <span className="font-bold text-amber-400">[{selectedRequest.patientId || selectedRequest.id}]</span>
                 <span className="text-slate-600">|</span>
                 <span className="font-bold text-white font-sans">{selectedRequest.patientName}</span>
+                <PaymentStatusBadge
+                  status={
+                    getActualBillingStatus(selectedRequest) === 'paid'
+                      ? 'PAID'
+                      : getActualBillingStatus(selectedRequest) === 'exonéré'
+                      ? 'EXONERE'
+                      : 'PENDING'
+                  }
+                />
                 <span className="text-slate-600">|</span>
                 <span>{selectedRequest.patientAge || (selectedRequest as any).age ? `${selectedRequest.patientAge || (selectedRequest as any).age} ans` : 'Âge -'}</span>
                 <span className="text-slate-600">|</span>
@@ -450,6 +460,15 @@ const DemandesTab: React.FC<DemandesTabProps> = ({ requests, updateRequests, pay
                         <p className="font-extrabold text-slate-900 text-xs">{examName}</p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
+                        <PaymentStatusBadge
+                          status={
+                            getActualBillingStatus(selectedRequest) === 'paid'
+                              ? 'PAID'
+                              : getActualBillingStatus(selectedRequest) === 'exonéré'
+                              ? 'EXONERE'
+                              : 'PENDING'
+                          }
+                        />
                         <span className="px-2.5 py-1 bg-blue-50 text-blue-600 text-[9px] font-black uppercase tracking-wider rounded-lg">{examCategory}</span>
                         {examSampleType && (
                           <span className="text-[9px] text-slate-400 font-bold bg-slate-100 px-2 py-1 rounded-lg">Tube: {examSampleType.split(' ')[0]}</span>

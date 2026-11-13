@@ -391,6 +391,7 @@ export interface PaymentRequestItem {
 
 export interface PaymentRequest {
   id: string;
+  visite_id?: string;
   patientId: string;
   patientName: string;
   requestingService: string;

@@ -1425,6 +1425,7 @@ const Consultation: React.FC<ConsultationProps> = ({
       batch.set(dischargeDocRef, sanitizeData(stampTenantData({
         id: dischargeId,
         docId: dischargeId,
+        visite_id: (activePatient as any).visite_id || '',
         patientId: targetPid,
         dmeId: targetDmeId,
         name: `${activePatient.lastName || ''} ${activePatient.firstName || ''}`.trim(),
@@ -2095,7 +2096,7 @@ const Consultation: React.FC<ConsultationProps> = ({
 
     // Patients waiting for doctor consultation must have finished nurse triage (status === 'waiting')
     // Patients with status === 'waiting_triage' are currently at Soins Infirmiers (Nurse Triage)
-    return p.status === 'waiting' || !p.status;
+    return p.status === 'waiting';
   });
 
   const uniqueWaitingMap = new Map<string, any>();
