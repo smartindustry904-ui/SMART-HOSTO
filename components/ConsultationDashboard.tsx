@@ -49,10 +49,15 @@ const ConsultationDashboard: React.FC<ConsultationDashboardProps> = ({
     }
     return false;
   };
+  const validatedAppointments = useMemo(
+    () => (appointments || []).filter(a => a.status === 'CHECKED_IN' || a.status === 'IN_PROGRESS' || a.status === 'COMPLETED' || Boolean(a.checkedInAt)),
+    [appointments]
+  );
+
   const stats = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     const queueCount = waitingQueue.length;
-    const todayApps = appointments.filter(a => a.date === today).length;
+    const todayApps = validatedAppointments.filter(a => a.date === today).length;
     const inProgressCount = waitingQueue.filter(q => q.status === 'in_consultation').length;
 
     return [
@@ -192,7 +197,7 @@ const ConsultationDashboard: React.FC<ConsultationDashboardProps> = ({
               </button>
             </div>
             <div className="space-y-4">
-                {appointments.filter(a => a.date === new Date().toISOString().split('T')[0]).slice(0, 5).map((a, i) => (
+                {validatedAppointments.filter(a => a.date === new Date().toISOString().split('T')[0]).slice(0, 5).map((a, i) => (
                     <div 
                       key={i} 
                       onClick={() => onNavigateMenu?.('APPOINTMENTS')}
@@ -208,14 +213,14 @@ const ConsultationDashboard: React.FC<ConsultationDashboardProps> = ({
                             </div>
                         </div>
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
-                            (a.status === 'PENDING' || a.status === 'IN_PROGRESS') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 text-slate-500'
+                            (a.status === 'CHECKED_IN' || a.status === 'IN_PROGRESS') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-slate-500/10 text-slate-500'
                         }`}>
-                            {a.status}
+                            {a.status === 'CHECKED_IN' ? 'Validé Accueil' : a.status}
                         </span>
                     </div>
                 ))}
-                {appointments.length === 0 && (
-                    <p className="text-center py-10 text-slate-400 font-bold uppercase text-xs">Aucun rendez-vous</p>
+                {validatedAppointments.filter(a => a.date === new Date().toISOString().split('T')[0]).length === 0 && (
+                    <p className="text-center py-10 text-slate-400 font-bold uppercase text-xs">Aucun rendez-vous validé</p>
                 )}
             </div>
         </div>

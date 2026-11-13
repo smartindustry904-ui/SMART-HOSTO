@@ -7,6 +7,7 @@ import { MicroHeader } from '../components/common/MicroHeader';
 import { Avatar } from '../components/common/Avatar';
 import { ImageUpload } from '../components/common/ImageUpload';
 import { sanitizeData } from '../src/firebase';
+import { getActiveTenantId, belongsToTenant } from '../src/utils/tenant';
 
 interface PersonnelProps {
   onBackToDashboard?: () => void;
@@ -38,10 +39,13 @@ const Personnel: React.FC<PersonnelProps> = ({ onBackToDashboard, user }) => {
   };
 
   useEffect(() => {
+    const activeTenantId = getActiveTenantId(user);
     const unsubStaff = onSnapshot(collection(db, 'staff'), (snapshot) => {
-      const staffList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      if (staffList.length === 0) {
-        // Fallback to defaults if DB is empty (first run)
+      const staffList = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter(s => belongsToTenant(s, activeTenantId));
+      if (staffList.length === 0 && activeTenantId === 'default_hospital') {
+        // Fallback to defaults only for default_hospital (first run)
         const defaults = [
           { id: 'staff_1', name: 'Dr. Sarr Ousmane', role: 'Médecin Chef', specialty: 'Gynécologie', actions: 124, fees: '185,000', rate: '20%', profile_image_url: '' },
           { id: 'staff_2', name: 'Dr. Keita Ibrahim', role: 'Médecin', specialty: 'Pédiatrie', actions: 89, fees: '95,000', rate: '15%', profile_image_url: '' },
@@ -55,15 +59,20 @@ const Personnel: React.FC<PersonnelProps> = ({ onBackToDashboard, user }) => {
       setIsLoading(false);
     });
 
-    const unsubLogs = onSnapshot(query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(10)), (snapshot) => {
-      setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    const unsubLogs = onSnapshot(query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'), limit(30)), (snapshot) => {
+      setLogs(
+        snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter(l => belongsToTenant(l, activeTenantId))
+          .slice(0, 10)
+      );
     });
 
     return () => {
       unsubStaff();
       unsubLogs();
     };
-  }, []);
+  }, [user]);
 
   const handleOpenAddModal = () => {
     setEditingStaff(null);

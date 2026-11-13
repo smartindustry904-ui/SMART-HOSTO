@@ -2219,7 +2219,7 @@ const Consultation: React.FC<ConsultationProps> = ({
                 { id: 'dashboard', label: 'Dashboard' },
                 { id: 'WAITING_ROOM', label: `Attente (${consultationWaitingQueue.length})` },
                 { id: 'PATIENT_DIRECTORY', label: 'Annuaire Patients' },
-                { id: 'APPOINTMENTS', label: `RDV (${appointments.filter(a => a.date === new Date().toISOString().split('T')[0]).length})` },
+                { id: 'APPOINTMENTS', label: `RDV (${appointments.filter(a => a.date === new Date().toISOString().split('T')[0] && (a.status === 'CHECKED_IN' || a.status === 'IN_PROGRESS' || a.status === 'COMPLETED' || Boolean(a.checkedInAt))).length})` },
                 { id: 'HISTORY', label: 'Archives & Historique' }
               ].map(tab => (
                 <button
@@ -2246,7 +2246,7 @@ const Consultation: React.FC<ConsultationProps> = ({
             <ConsultationDashboard 
               theme={theme} 
               waitingQueue={consultationWaitingQueue} 
-              appointments={appointments} 
+              appointments={appointments.filter(a => a.status === 'CHECKED_IN' || a.status === 'IN_PROGRESS' || a.status === 'COMPLETED' || Boolean(a.checkedInAt))} 
               hospitalizedCount={hospitalizedPatients.length}
               paymentRequests={paymentRequests}
               onNavigateMenu={(menu) => setActiveMenu(menu as any)}
@@ -2600,6 +2600,7 @@ const Consultation: React.FC<ConsultationProps> = ({
           {activeMenu === 'APPOINTMENTS' && (
             <Appointments 
               user={user} 
+              establishment={establishment}
               initialPatient={planningPatient} 
               onStartConsultation={handleStartConsultationFromAppointment}
             />

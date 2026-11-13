@@ -7,7 +7,7 @@ import {
 import { db, sanitizeData } from '../../src/firebase';
 import { collection, doc, setDoc, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { User as UserType } from '../../types';
-import { stampTenantData } from '../../src/utils/tenant';
+import { stampTenantData, getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface PrescriptionSoinsTabProps {
   patient: any;
@@ -84,9 +84,12 @@ export const PrescriptionSoinsTab: React.FC<PrescriptionSoinsTabProps> = ({
     let unsubActs: () => void = () => {};
 
     try {
+      const activeTenantId = getActiveTenantId(user);
       unsubProtocols = onSnapshot(collection(db, 'hospital_protocols'), (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const list = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(p => belongsToTenant(p, activeTenantId));
+        if (list.length > 0 || (activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL')) {
           const careList = list.filter((p: any) => 
             p.category === 'CARE' || 
             p.category === 'THERAPEUTIC' || 
@@ -111,8 +114,10 @@ export const PrescriptionSoinsTab: React.FC<PrescriptionSoinsTabProps> = ({
       });
 
       unsubActs = onSnapshot(collection(db, 'medical_acts'), (snapshot) => {
-        if (!snapshot.empty) {
-          const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const list = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(a => belongsToTenant(a, activeTenantId));
+        if (list.length > 0 || (activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL')) {
           const actsList = list.filter((a: any) => 
             a.category === 'soin' || 
             a.category === 'soins' || 

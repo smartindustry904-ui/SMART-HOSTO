@@ -309,7 +309,7 @@ export const useMedicalActs = () => {
     : 'hospital_medical_acts';
 
   const [acts, setActs] = useState<MedicalAct[]>(() => {
-    const saved = localStorage.getItem(storageKey) || localStorage.getItem('hospital_medical_acts');
+    const saved = localStorage.getItem(storageKey);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -507,7 +507,7 @@ export const useHospitalServices = () => {
     : 'hospital_services';
 
   const [services, setServices] = useState<Service[]>(() => {
-    const saved = localStorage.getItem(storageKey) || localStorage.getItem('hospital_services');
+    const saved = localStorage.getItem(storageKey);
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -870,7 +870,7 @@ export const useSettings = () => {
     : 'hospital_cashier_config';
 
   const [establishment, setEstablishment] = useState<EstablishmentConfig>(() => {
-    const saved = localStorage.getItem(configKey) || localStorage.getItem('hospital_config');
+    const saved = localStorage.getItem(configKey);
     const defaults: EstablishmentConfig = {
       name: 'SmartHosto SIH',
       address: 'Avenue de l\'Indépendance, Yaoundé, Cameroun',
@@ -909,7 +909,7 @@ export const useSettings = () => {
   });
 
   const [cashierSettings, setCashierSettings] = useState<ParametresCaisse>(() => {
-    const saved = localStorage.getItem(cashierKey) || localStorage.getItem('hospital_cashier_config');
+    const saved = localStorage.getItem(cashierKey);
     const defaults: ParametresCaisse = {
       detteAutorisee: true,
       seuilDetteMax: 50000,
@@ -1038,7 +1038,7 @@ export const useSettings = () => {
       const key = currentTenant && currentTenant !== 'default_hospital' && currentTenant !== 'ALL'
         ? `hospital_config_${currentTenant}`
         : 'hospital_config';
-      const savedConfig = localStorage.getItem(key) || localStorage.getItem('hospital_config');
+      const savedConfig = localStorage.getItem(key);
       if (savedConfig) {
         try {
           const parsed = JSON.parse(savedConfig);
@@ -1054,7 +1054,7 @@ export const useSettings = () => {
       const cKey = currentTenant && currentTenant !== 'default_hospital' && currentTenant !== 'ALL'
         ? `hospital_cashier_config_${currentTenant}`
         : 'hospital_cashier_config';
-      const savedCashier = localStorage.getItem(cKey) || localStorage.getItem('hospital_cashier_config');
+      const savedCashier = localStorage.getItem(cKey);
       if (savedCashier) {
         try {
           setCashierSettings(JSON.parse(savedCashier));

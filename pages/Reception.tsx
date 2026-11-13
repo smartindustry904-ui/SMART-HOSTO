@@ -74,8 +74,8 @@ export const buildMotifsFromMedicalActsAndServices = (
   medicalActs: MedicalAct[] = [],
   servicesList: Service[] = []
 ): MotifPriseEnCharge[] => {
-  const actsToUse = medicalActs && medicalActs.length > 0 ? medicalActs : getDefaultMedicalActs();
-  const servicesToUse = servicesList && servicesList.length > 0 ? servicesList : getDefaultServices();
+  const actsToUse = Array.isArray(medicalActs) ? medicalActs : [];
+  const servicesToUse = Array.isArray(servicesList) ? servicesList : [];
 
   // Index services by ID and by normalized name
   const serviceById = new Map<string, Service>();

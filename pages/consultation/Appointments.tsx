@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, User, Plus, Search, Edit2, X, Trash2, Calendar, Activity, RefreshCw, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
 import { db } from '../../src/firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs, limit } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs } from 'firebase/firestore';
 import { AvatarPlaceholder } from '../../components/common/AvatarPlaceholder';
+import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
 
 interface AppointmentsProps {
   user?: {
@@ -10,12 +11,19 @@ interface AppointmentsProps {
     name?: string;
     role?: string;
     email?: string;
+    tenantId?: string;
+    clinicId?: string;
+    hospital_id?: string;
+    structureId?: string;
+    structureName?: string;
   };
+  establishment?: any;
   initialPatient?: any;
   onStartConsultation?: (appointment: any) => void;
 }
 
-const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onStartConsultation }) => {
+const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initialPatient, onStartConsultation }) => {
+  const activeTenantId = getActiveTenantId(user as any, establishment);
   const [appointments, setAppointments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -71,19 +79,17 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
       }
       setIsSearchingPatient(true);
       try {
-        const q = query(
-          collection(db, 'patients'),
-          limit(40)
-        );
-        const snapshot = await getDocs(q);
+        const snapshot = await getDocs(collection(db, 'patients'));
         const term = patientSearch.trim().toLowerCase();
         const results = snapshot.docs
           .map(doc => ({ id: doc.id, ...doc.data() }))
+          .filter((p: any) => belongsToTenant(p, activeTenantId))
           .filter((p: any) => 
             (p.lastName && p.lastName.toLowerCase().includes(term)) ||
             (p.firstName && p.firstName.toLowerCase().includes(term)) ||
             (p.id && p.id.toLowerCase().includes(term))
-          );
+          )
+          .slice(0, 40);
         setPatientResults(results);
       } catch (err) {
         console.error("Error searching patients:", err);
@@ -138,11 +144,13 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
     return false;
   };
 
-  // Subscribe to real-time appointments collection in Firestore
+  // Subscribe to real-time appointments collection in Firestore (strict active session isolation)
   useEffect(() => {
     const q = query(collection(db, 'appointments'), orderBy('date', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const list: any[] = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const list: any[] = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .filter((a: any) => belongsToTenant(a, activeTenantId));
       
       // Sort unified list by date and time
       list.sort((a: any, b: any) => {
@@ -159,7 +167,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [activeTenantId]);
 
   const getStatusBadge = (rdv: any) => {
     const isPast = isAppointmentPast(rdv.date, rdv.time);
@@ -173,6 +181,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
     }
 
     switch (status) {
+      case 'CHECKED_IN': return 'bg-emerald-100 text-emerald-800 border-emerald-300';
       case 'PENDING': return 'bg-blue-100 text-blue-800 border-blue-300';
       case 'IN_PROGRESS': return 'bg-indigo-50 text-indigo-600 border-indigo-100';
       case 'COMPLETED': return 'bg-emerald-50 text-emerald-600 border-emerald-100';
@@ -317,9 +326,9 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
         createdAt: today.toISOString()
       };
 
-      await setDoc(doc(db, 'appointments', rdvId), payload);
+      await setDoc(doc(db, 'appointments', rdvId), stampTenantData(payload, user as any, establishment));
 
-      await setDoc(doc(collection(db, 'audit_logs')), {
+      await setDoc(doc(collection(db, 'audit_logs')), stampTenantData({
         user: user?.name || 'Docteur Orientation',
         role: 'DOCTOR',
         date: today.toLocaleDateString('fr-FR'),
@@ -328,7 +337,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
         action: `Plannification RDV - Patient: ${formData.patient}`,
         details: { rdvId, date: formData.date, time: formData.time },
         module: 'Consultation'
-      });
+      }, user as any, establishment));
 
       // Auto-dismiss form upon success
       setShowAddModal(false);
@@ -345,7 +354,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
       });
 
       window.dispatchEvent(new CustomEvent('app-notification', { 
-        detail: `Nouveau rendez-vous planifié avec succès pour ${formData.patient}.` 
+        detail: `Rendez-vous planifié pour ${formData.patient}. Il apparaîtra ici dès validation par l'Accueil.` 
       }));
     } catch (e) {
       console.error("Error creating appointment in Firestore: ", e);
@@ -398,9 +407,9 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
         status: formData.status
       };
 
-      await setDoc(doc(db, 'appointments', selectedAppointment.id), payload, { merge: true });
+      await setDoc(doc(db, 'appointments', selectedAppointment.id), stampTenantData(payload, user as any, establishment), { merge: true });
 
-      await setDoc(doc(collection(db, 'audit_logs')), {
+      await setDoc(doc(collection(db, 'audit_logs')), stampTenantData({
         user: user?.name || 'Docteur Orientation',
         role: 'DOCTOR',
         date: today.toLocaleDateString('fr-FR'),
@@ -409,7 +418,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
         action: `Rendez-vous modifié - ID: ${selectedAppointment.id}`,
         details: { id: selectedAppointment.id, patient: formData.patient },
         module: 'Consultation'
-      });
+      }, user as any, establishment));
 
       setShowEditModal(false);
       setSelectedAppointment(null);
@@ -424,25 +433,30 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
     }
   };
 
+  // Only show appointments validated through Accueil check-in
+  const isValidatedByAccueil = (rdv: any) =>
+    rdv.status === 'CHECKED_IN' ||
+    rdv.status === 'IN_PROGRESS' ||
+    rdv.status === 'COMPLETED' ||
+    Boolean(rdv.checkedInAt);
+
+  const validatedAppointments = appointments.filter(isValidatedByAccueil);
+
   // Filter & Search appointments
-  const filteredAppointments = appointments.filter(rdv => {
+  const filteredAppointments = validatedAppointments.filter(rdv => {
     const matchesSearch = (rdv.patient || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
                           (rdv.reason || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
                           (rdv.id || '').toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const isPast = isAppointmentPast(rdv.date, rdv.time);
 
     let matchesStatus = false;
     if (filterStatus === 'ALL') {
       matchesStatus = rdv.status !== 'CANCELLED' && rdv.status !== 'ABSENT';
-    } else if (filterStatus === 'PENDING') {
-      matchesStatus = rdv.status === 'PENDING' && !isPast;
-    } else if (filterStatus === 'MISSED' || filterStatus === 'PAST') {
-      matchesStatus = rdv.status === 'PENDING' && isPast;
+    } else if (filterStatus === 'CHECKED_IN' || filterStatus === 'PENDING') {
+      matchesStatus = rdv.status === 'CHECKED_IN' || rdv.status === 'IN_PROGRESS';
     } else if (filterStatus === 'COMPLETED') {
       matchesStatus = rdv.status === 'COMPLETED';
     } else if (filterStatus === 'HISTORY') {
-      matchesStatus = rdv.status === 'COMPLETED' || rdv.status === 'CANCELLED' || rdv.status === 'ABSENT' || (rdv.status === 'PENDING' && isPast);
+      matchesStatus = rdv.status === 'COMPLETED' || rdv.status === 'CANCELLED' || rdv.status === 'ABSENT';
     } else {
       matchesStatus = rdv.status === filterStatus;
     }
@@ -450,11 +464,10 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
     return matchesSearch && matchesStatus;
   });
 
-  // Calculate live statistics
-  const totalCount = appointments.length;
-  const upcomingCount = appointments.filter(a => a.status === 'PENDING' && !isAppointmentPast(a.date, a.time)).length;
-  const missedCount = appointments.filter(a => a.status === 'PENDING' && isAppointmentPast(a.date, a.time)).length;
-  const completedCount = appointments.filter(a => a.status === 'COMPLETED').length;
+  // Calculate live statistics (Accueil-validated only)
+  const totalCount = validatedAppointments.length;
+  const upcomingCount = validatedAppointments.filter(a => a.status === 'CHECKED_IN' || a.status === 'IN_PROGRESS').length;
+  const completedCount = validatedAppointments.filter(a => a.status === 'COMPLETED').length;
 
   return (
     <div className="animate-in fade-in slide-in-from-bottom-6 duration-700">
@@ -522,18 +535,11 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
                 <span className="text-sm font-black">{totalCount}</span>
               </div>
               <div 
-                onClick={() => setFilterStatus('PENDING')}
-                className={`flex justify-between items-center p-4 rounded-2xl border cursor-pointer transition-colors ${filterStatus === 'PENDING' ? 'bg-amber-600 border-amber-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
+                onClick={() => setFilterStatus('CHECKED_IN')}
+                className={`flex justify-between items-center p-4 rounded-2xl border cursor-pointer transition-colors ${filterStatus === 'CHECKED_IN' || filterStatus === 'PENDING' ? 'bg-amber-600 border-amber-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
               >
-                <span className="text-xs font-bold text-slate-300">En attente (À venir)</span>
+                <span className="text-xs font-bold text-slate-300">Validés Accueil (À consulter)</span>
                 <span className="text-sm font-black text-amber-400">{upcomingCount}</span>
-              </div>
-              <div 
-                onClick={() => setFilterStatus('MISSED')}
-                className={`flex justify-between items-center p-4 rounded-2xl border cursor-pointer transition-colors ${filterStatus === 'MISSED' || filterStatus === 'PAST' ? 'bg-rose-600 border-rose-500' : 'bg-white/5 border-white/10 hover:bg-white/10'}`}
-              >
-                <span className="text-xs font-bold text-slate-300">RDV Échus / Manqués</span>
-                <span className="text-sm font-black text-rose-300">{missedCount}</span>
               </div>
               <div 
                 onClick={() => setFilterStatus('COMPLETED')}
@@ -556,8 +562,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
               {[
                 { id: 'ALL', label: 'Tous' },
-                { id: 'PENDING', label: 'À venir' },
-                { id: 'MISSED', label: 'Échus / Manqués' },
+                { id: 'CHECKED_IN', label: 'Validés Accueil' },
                 { id: 'COMPLETED', label: 'Terminés' },
                 { id: 'HISTORY', label: 'Historique' }
               ].map((tab) => (
@@ -620,7 +625,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
                           </span>
                         ) : (
                           <div className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border shrink-0 ${getStatusBadge(rdv)}`}>
-                            {rdv.status === 'PENDING' ? (isPast ? 'Échu / Manqué' : 'À venir') : rdv.status === 'IN_PROGRESS' ? 'En cours' : rdv.status === 'COMPLETED' ? 'Terminé' : rdv.status === 'ABSENT' ? 'Absent' : rdv.status === 'CANCELLED' ? 'Annulé' : rdv.status === 'POSTPONED' ? 'Reporté' : rdv.status}
+                            {rdv.status === 'CHECKED_IN' ? 'Validé Accueil' : rdv.status === 'IN_PROGRESS' ? 'En cours' : rdv.status === 'COMPLETED' ? 'Terminé' : rdv.status === 'ABSENT' ? 'Absent' : rdv.status === 'CANCELLED' ? 'Annulé' : rdv.status === 'POSTPONED' ? 'Reporté' : rdv.status}
                           </div>
                         )}
                       </div>

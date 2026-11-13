@@ -7,6 +7,7 @@ import { isStatusPrelevementFait } from '../../src/utils/labStatus';
 
 import { db, sanitizeData } from '../../src/firebase';
 import { collection, onSnapshot, addDoc } from 'firebase/firestore';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface ResultatsTabProps {
   requests: LabExamRequest[];
@@ -43,9 +44,13 @@ const ResultatsTab: React.FC<ResultatsTabProps> = ({ requests, updateRequests, r
   };
 
   useEffect(() => {
+    const activeTenantId = getActiveTenantId();
     const unsub = onSnapshot(collection(db, 'medical_acts'), (snap) => {
-      if (!snap.empty) {
-        setMedicalActs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as MedicalAct)));
+      const list = snap.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as MedicalAct))
+        .filter(a => belongsToTenant(a, activeTenantId));
+      if (list.length > 0 || (activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL')) {
+        setMedicalActs(list);
       } else {
         const savedActs = localStorage.getItem('hospital_medical_acts');
         if (savedActs) {

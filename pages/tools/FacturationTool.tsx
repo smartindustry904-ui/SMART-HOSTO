@@ -6,6 +6,7 @@ import { PaymentRequest, LigneFacturation, TransactionFacturation, AvoirPatient,
 import { useSettings } from '../../hooks/useSettings';
 import { PrintReceiptModal, PrintableReceiptData } from '../../components/common/PrintReceiptModal';
 import { formatPatientFullName } from '../../src/patientUtils';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 export const formatDateTime = (dateInput?: string | number | Date): string => {
   if (!dateInput) return '-';
@@ -87,11 +88,16 @@ export const FacturationTool: React.FC<FacturationToolProps> = ({
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastTransaction, setLastTransaction] = useState<TransactionFacturation | null>(null);
 
-  // Historique patient
+  // Historique patient (strict active session isolation)
   const [patientsList, setPatientsList] = useState<Patient[]>([]);
   useEffect(() => {
+    const activeTenantId = getActiveTenantId();
     const unsub = onSnapshot(collection(db, 'patients'), snapshot => {
-      setPatientsList(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
+      setPatientsList(
+        snapshot.docs
+          .map(doc => ({ id: doc.id, ...doc.data() } as Patient))
+          .filter(p => belongsToTenant(p, activeTenantId))
+      );
     });
     return () => unsub();
   }, []);

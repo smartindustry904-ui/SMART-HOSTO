@@ -6,6 +6,7 @@ import { collection, getDocs, doc, updateDoc, writeBatch } from 'firebase/firest
 import { LabFilterToolbar, LabFilters } from '../../components/lab/LabFilterToolbar';
 import { EmptyFilterState } from '../../components/common/EmptyFilterState';
 import { isStatusEnAttente } from '../../src/utils/labStatus';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface DemandesTabProps {
   requests: LabExamRequest[];
@@ -176,11 +177,13 @@ const DemandesTab: React.FC<DemandesTabProps> = ({ requests, updateRequests, pay
             consumableQtyMap['alcool'] = 1;
           }
 
+          const activeTenantId = getActiveTenantId();
           const consSnap = await getDocs(collection(db, 'hospital_consumables'));
           const pharmSnap = await getDocs(collection(db, 'pharmacy_inventory'));
 
           consSnap.docs.forEach((docSnap) => {
             const data = docSnap.data();
+            if (!belongsToTenant(data, activeTenantId)) return;
             const name = (data.nom || data.name || '').toLowerCase();
             for (const [cName, qty] of Object.entries(consumableQtyMap)) {
               if (name.includes(cName) || cName.includes(name)) {
@@ -198,6 +201,7 @@ const DemandesTab: React.FC<DemandesTabProps> = ({ requests, updateRequests, pay
 
           pharmSnap.docs.forEach((docSnap) => {
             const data = docSnap.data();
+            if (!belongsToTenant(data, activeTenantId)) return;
             const name = (data.name || data.nomCommercial || data.nom || '').toLowerCase();
             for (const [cName, qty] of Object.entries(consumableQtyMap)) {
               if (name.includes(cName) || cName.includes(name)) {

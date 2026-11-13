@@ -5,7 +5,7 @@ import LabExamRequestForm from '../../components/LabExamRequestForm';
 import { Patient, User, LabExamRequest, ResultatLaboratoire } from '../../types';
 import { db } from '../../src/firebase';
 import { collection, query, onSnapshot, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
-import { stampTenantData } from '../../src/utils/tenant';
+import { stampTenantData, getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface ExamensTabProps {
   patient: Patient;
@@ -85,10 +85,12 @@ const ExamensTab: React.FC<ExamensTabProps> = ({ patient, user }) => {
         );
       };
 
+      const activeTenantId = getActiveTenantId(user);
       const unsubscribe = onSnapshot(collection(db, 'lab_results'), (snapshot) => {
         const resMap = new Map<string, ResultatLaboratoire>();
         snapshot.docs.forEach((docSnap) => {
           const data = docSnap.data() as ResultatLaboratoire;
+          if (!belongsToTenant(data, activeTenantId)) return;
           if (matchPatientId(data.patientId) || matchPatientId((data as any).dmeId)) {
             const key = data.id || docSnap.id;
             if (!resMap.has(key)) {

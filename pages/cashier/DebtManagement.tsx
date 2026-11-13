@@ -25,6 +25,7 @@ import { AvatarPlaceholder } from '../../components/common/AvatarPlaceholder';
 import { Avatar } from '../../components/common/Avatar';
 import { useSettings } from '../../hooks/useSettings';
 import { formatPatientFullName } from '../../src/patientUtils';
+import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 
 interface DebtManagementProps {
   user: UserType;
@@ -60,14 +61,19 @@ export const DebtManagement: React.FC<DebtManagementProps> = ({
   // Receipt Modal State
   const [printedReceipt, setPrintedReceipt] = useState<any | null>(null);
 
-  // Synchronize patients collection for robust name resolution
+  // Synchronize patients collection for robust name resolution (strict active session isolation)
   const [patientsList, setPatientsList] = useState<Patient[]>([]);
+  const activeTenantId = getActiveTenantId(user, establishment);
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'patients'), snap => {
-      setPatientsList(snap.docs.map(d => ({ id: d.id, ...d.data() } as Patient)));
+      setPatientsList(
+        snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Patient))
+          .filter(p => belongsToTenant(p, activeTenantId))
+      );
     });
     return () => unsub();
-  }, []);
+  }, [activeTenantId]);
 
   const patientsMap = useMemo(() => {
     const map = new Map<string, Patient>();
