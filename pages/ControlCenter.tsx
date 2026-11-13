@@ -306,6 +306,11 @@ export const ControlCenter: React.FC<ControlCenterProps> = ({ onBackToDashboard,
           activeUsers: Math.max(clinicStaffCount, c.usage?.activeUsers || 1)
         }
       };
+    }).sort((a, b) => {
+      const dateA = new Date(a.createdAt || 0).getTime() || 0;
+      const dateB = new Date(b.createdAt || 0).getTime() || 0;
+      if (dateB !== dateA) return dateB - dateA;
+      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
     });
   }, [rawClinics, hospitalUsers, plans]);
 
