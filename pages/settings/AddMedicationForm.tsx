@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { X, Save, Pill, AlertCircle, Loader2 } from 'lucide-react';
+import { Pill, CreditCard, ShieldCheck, FileCheck2 } from 'lucide-react';
+import { MultiStepForm, WizardStep } from '../../components/common/MultiStepForm';
 
 interface AddMedicationFormProps {
   initialData?: any;
@@ -25,7 +26,7 @@ const CATEGORY_OPTIONS = [
   'Anesthésie & Réanimation',
   'Solutés & Perfusions',
   'Vitamines & Suppléments',
-  'Autre'
+  'Autre',
 ];
 
 const UNIT_OPTIONS = [
@@ -37,289 +38,278 @@ const UNIT_OPTIONS = [
   'Tube',
   'Poche',
   'Flacon Sirop',
-  'Unité'
+  'Unité',
 ];
 
+const DARK_INPUT =
+  'w-full px-4 py-3 bg-[#0D1425] border border-slate-700/80 rounded-xl text-sm font-semibold text-white placeholder-slate-500 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/25 transition-all';
+const DARK_LABEL = 'block text-[11px] font-black uppercase tracking-wider text-slate-400 mb-2';
+
 const AddMedicationForm: React.FC<AddMedicationFormProps> = ({ initialData, onClose, onSave }) => {
-  const initialFam = initialData?.family || initialData?.classeTherapeutique || 'Antalgiques & Anti-pyrétiques';
+  const initialFam =
+    initialData?.family || initialData?.classeTherapeutique || 'Antalgiques & Anti-pyrétiques';
   const isCustomFam = initialFam && !CATEGORY_OPTIONS.includes(initialFam);
   const initialUnitVal = initialData?.unit || initialData?.typeConditionnement || 'Boîte';
   const isCustomUnitVal = initialUnitVal && !UNIT_OPTIONS.includes(initialUnitVal);
 
+  const [currentStep, setCurrentStep] = useState(0);
+  const [maxUnlockedStep, setMaxUnlockedStep] = useState(initialData ? 2 : 0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const [formData, setFormData] = useState({
     name: initialData?.name || initialData?.nomCommercial || initialData?.nom || '',
-    family: isCustomFam ? 'Autre' : (initialFam || 'Antalgiques & Anti-pyrétiques'),
+    family: isCustomFam ? 'Autre' : initialFam || 'Antalgiques & Anti-pyrétiques',
     customFamily: isCustomFam ? initialFam : '',
-    unit: isCustomUnitVal ? 'Autre' : (initialUnitVal || 'Boîte'),
+    unit: isCustomUnitVal ? 'Autre' : initialUnitVal || 'Boîte',
     customUnit: isCustomUnitVal ? initialUnitVal : '',
     price: (initialData?.price ?? initialData?.prixVente ?? '').toString(),
     seuilAlerte: (initialData?.seuilAlerte ?? '10').toString(),
-    requiresPrescription: Boolean(initialData?.requiresPrescription || initialData?.soumisOrdonnance)
+    requiresPrescription: Boolean(
+      initialData?.requiresPrescription || initialData?.soumisOrdonnance
+    ),
   });
 
-  const [errors, setErrors] = useState<Record<string, string>>({});
+  const selectedFamily = formData.family === 'Autre' ? formData.customFamily : formData.family;
+  const selectedUnit = formData.unit === 'Autre' ? formData.customUnit : formData.unit;
 
-  const validate = () => {
-    const newErrors: Record<string, string> = {};
-    if (!formData.name.trim()) {
-      newErrors.name = 'La désignation du médicament est obligatoire';
-    }
-    
-    const selectedFamily = formData.family === 'Autre' ? formData.customFamily : formData.family;
-    if (!selectedFamily.trim()) {
-      newErrors.family = 'La catégorie / famille est requise';
-    }
+  const isStep1Valid =
+    formData.name.trim().length > 0 &&
+    selectedFamily.trim().length > 0 &&
+    selectedUnit.trim().length > 0;
 
-    const selectedUnit = formData.unit === 'Autre' ? formData.customUnit : formData.unit;
-    if (!selectedUnit.trim()) {
-      newErrors.unit = "L'unité de mesure est requise";
-    }
+  const priceNum = parseFloat(formData.price);
+  const thresholdNum = parseInt(formData.seuilAlerte, 10);
+  const isStep2Valid =
+    formData.price !== '' &&
+    !isNaN(priceNum) &&
+    priceNum >= 0 &&
+    !isNaN(thresholdNum) &&
+    thresholdNum >= 1;
 
-    const priceNum = parseFloat(formData.price);
-    if (isNaN(priceNum) || priceNum < 0) {
-      newErrors.price = 'Veuillez saisir un prix de vente valide (≥ 0)';
-    }
+  const isStep3Valid = isStep1Valid && isStep2Valid;
 
-    const thresholdNum = parseInt(formData.seuilAlerte, 10);
-    if (isNaN(thresholdNum) || thresholdNum < 1) {
-      newErrors.seuilAlerte = "Veuillez saisir un seuil d'alerte valide (≥ 1)";
-    }
+  const steps: WizardStep[] = [
+    {
+      id: 'infos',
+      label: 'Informations Générales',
+      shortLabel: 'Infos',
+      isValid: isStep1Valid,
+      validationHint: 'Renseignez la désignation, la famille thérapeutique et le conditionnement.',
+    },
+    {
+      id: 'tarification',
+      label: 'Tarification & Alerte Stock',
+      shortLabel: 'Tarifs & Stock',
+      isValid: isStep2Valid,
+      validationHint: 'Saisissez un prix de vente (≥ 0) et un seuil d’alerte (≥ 1).',
+    },
+    {
+      id: 'validation',
+      label: 'Résumé & Validation',
+      shortLabel: 'Validation',
+      isValid: isStep3Valid,
+    },
+  ];
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+  const handleNext = () => {
+    if (!steps[currentStep]?.isValid) return;
+    const nextIdx = Math.min(steps.length - 1, currentStep + 1);
+    setCurrentStep(nextIdx);
+    setMaxUnlockedStep((prev) => Math.max(prev, nextIdx));
   };
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (isSubmitting) return;
-    if (validate()) {
-      const finalFamily = formData.family === 'Autre' ? formData.customFamily.trim() : formData.family;
-      const finalUnit = formData.unit === 'Autre' ? formData.customUnit.trim() : formData.unit;
-
-      setIsSubmitting(true);
-      try {
-        await onSave({
-          name: formData.name.trim(),
-          family: finalFamily,
-          unit: finalUnit,
-          price: parseFloat(formData.price),
-          seuilAlerte: parseInt(formData.seuilAlerte, 10),
-          requiresPrescription: formData.requiresPrescription
-        });
-      } finally {
-        setIsSubmitting(false);
-      }
+  const handleFinalSubmit = async () => {
+    if (isSubmitting || !isStep3Valid) return;
+    setIsSubmitting(true);
+    try {
+      await onSave({
+        name: formData.name.trim(),
+        family: selectedFamily.trim(),
+        unit: selectedUnit.trim(),
+        price: priceNum,
+        seuilAlerte: thresholdNum,
+        requiresPrescription: formData.requiresPrescription,
+      });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 border border-slate-100">
-        
-        {/* Header */}
-        <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/80 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20">
-              <Pill size={22} />
-            </div>
-            <div>
-              <h2 className="text-lg font-black text-slate-900">
-                {initialData ? 'Modifier le Médicament' : 'Nouveau Médicament'}
-              </h2>
-              <p className="text-xs text-slate-500 font-medium">
-                {initialData ? 'Mise à jour de la référence catalogue' : 'Ajout d\'une référence au catalogue'}
-              </p>
-            </div>
-          </div>
-          <button 
-            onClick={onClose} 
-            className="p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 rounded-xl transition-colors"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Form Body */}
-        <form id="med-form" onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
-          
-          {/* 1. Name */}
-          <div>
-            <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-1.5">
-              Désignation / Nom Commercial <span className="text-rose-500">*</span>
-            </label>
-            <input 
-              type="text"
-              value={formData.name}
-              onChange={(e) => {
-                setFormData(prev => ({ ...prev, name: e.target.value }));
-                if (errors.name) setErrors(prev => ({ ...prev, name: '' }));
-              }}
-              placeholder="Ex: Paracétamol 500mg"
-              className={`w-full p-3.5 bg-slate-50 border rounded-2xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none transition-all font-bold text-slate-900 text-sm ${
-                errors.name ? 'border-rose-300 ring-1 ring-rose-300' : 'border-slate-200'
-              }`}
-            />
-            {errors.name && <p className="text-xs text-rose-500 font-bold mt-1">{errors.name}</p>}
-          </div>
-
-          {/* 2. Category / Family */}
-          <div>
-            <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-1.5">
-              Catégorie / Famille <span className="text-rose-500">*</span>
-            </label>
-            <select
-              value={formData.family}
-              onChange={(e) => setFormData(prev => ({ ...prev, family: e.target.value }))}
-              className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 text-sm"
-            >
-              {CATEGORY_OPTIONS.map(cat => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-            {formData.family === 'Autre' && (
-              <input
-                type="text"
-                placeholder="Préciser la catégorie..."
-                value={formData.customFamily}
-                onChange={(e) => setFormData(prev => ({ ...prev, customFamily: e.target.value }))}
-                className="w-full mt-2 p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            )}
-            {errors.family && <p className="text-xs text-rose-500 font-bold mt-1">{errors.family}</p>}
-          </div>
-
-          {/* 3. Unit of Measurement */}
-          <div>
-            <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-1.5">
-              Unité de Mesure / Conditionnement <span className="text-rose-500">*</span>
-            </label>
-            <select
-              value={formData.unit}
-              onChange={(e) => setFormData(prev => ({ ...prev, unit: e.target.value }))}
-              className="w-full p-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 text-sm"
-            >
-              {UNIT_OPTIONS.map(u => (
-                <option key={u} value={u}>{u}</option>
-              ))}
-              <option value="Autre">Autre...</option>
-            </select>
-            {formData.unit === 'Autre' && (
-              <input
-                type="text"
-                placeholder="Ex: Flacon 100ml, Suppositoire..."
-                value={formData.customUnit}
-                onChange={(e) => setFormData(prev => ({ ...prev, customUnit: e.target.value }))}
-                className="w-full mt-2 p-3 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            )}
-            {errors.unit && <p className="text-xs text-rose-500 font-bold mt-1">{errors.unit}</p>}
-          </div>
-
-          {/* 4. Selling Price & 5. Alert Threshold */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-1.5">
-                Prix de Vente Unitaire <span className="text-rose-500">*</span>
+    <MultiStepForm
+      title={initialData ? 'Modifier le médicament' : 'Nouveau Médicament / Produit'}
+      subtitle="Référentiel Pharmacie & règles de dispensation"
+      icon={<Pill size={22} />}
+      steps={steps}
+      currentStep={currentStep}
+      maxUnlockedStep={maxUnlockedStep}
+      onStepChange={setCurrentStep}
+      onNext={handleNext}
+      onPrev={() => setCurrentStep((p) => Math.max(0, p - 1))}
+      onClose={onClose}
+      onSubmit={handleFinalSubmit}
+      isSubmitting={isSubmitting}
+      submitLabel={initialData ? 'Mettre à jour' : 'Enregistrer'}
+      maxWidthClass="max-w-3xl"
+    >
+      {currentStep === 0 && (
+        <div className="space-y-5 animate-in fade-in duration-200">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="md:col-span-2">
+              <label className={DARK_LABEL}>
+                Désignation / Nom commercial &amp; Dosage <span className="text-rose-400">*</span>
               </label>
-              <div className="relative">
-                <input 
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={formData.price}
-                  onChange={(e) => {
-                    setFormData(prev => ({ ...prev, price: e.target.value }));
-                    if (errors.price) setErrors(prev => ({ ...prev, price: '' }));
-                  }}
-                  placeholder="0"
-                  className={`w-full p-3.5 bg-slate-50 border rounded-2xl focus:bg-white focus:ring-2 focus:ring-blue-500 outline-none font-bold text-slate-900 text-sm pr-14 ${
-                    errors.price ? 'border-rose-300 ring-1 ring-rose-300' : 'border-slate-200'
-                  }`}
+              <input
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="Ex: Amoxicilline 500mg, Paracétamol 1g..."
+                className={DARK_INPUT}
+              />
+            </div>
+
+            <div>
+              <label className={DARK_LABEL}>
+                Famille thérapeutique <span className="text-rose-400">*</span>
+              </label>
+              <select
+                value={formData.family}
+                onChange={(e) => setFormData({ ...formData, family: e.target.value })}
+                className={DARK_INPUT}
+              >
+                {CATEGORY_OPTIONS.map((c) => (
+                  <option key={c} value={c} className="bg-[#0D1425]">
+                    {c}
+                  </option>
+                ))}
+              </select>
+              {formData.family === 'Autre' && (
+                <input
+                  type="text"
+                  value={formData.customFamily}
+                  onChange={(e) => setFormData({ ...formData, customFamily: e.target.value })}
+                  placeholder="Préciser la famille..."
+                  className={`${DARK_INPUT} mt-2`}
                 />
-                <span className="absolute right-3.5 top-1/2 -translate-y-1/2 font-black text-xs text-slate-400">FCFA</span>
-              </div>
-              {errors.price && <p className="text-xs text-rose-500 font-bold mt-1">{errors.price}</p>}
+              )}
             </div>
 
             <div>
-              <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-700 mb-1.5">
-                Seuil d'Alerte Stock <span className="text-rose-500">*</span>
+              <label className={DARK_LABEL}>
+                Conditionnement / Unité <span className="text-rose-400">*</span>
               </label>
-              <input 
-                type="number"
-                min="1"
-                value={formData.seuilAlerte}
-                onChange={(e) => {
-                  setFormData(prev => ({ ...prev, seuilAlerte: e.target.value }));
-                  if (errors.seuilAlerte) setErrors(prev => ({ ...prev, seuilAlerte: '' }));
-                }}
-                placeholder="10"
-                className={`w-full p-3.5 bg-orange-50/50 border rounded-2xl focus:bg-white focus:ring-2 focus:ring-orange-500 outline-none font-bold text-slate-900 text-sm ${
-                  errors.seuilAlerte ? 'border-rose-300 ring-1 ring-rose-300' : 'border-orange-200'
-                }`}
-              />
-              {errors.seuilAlerte && <p className="text-xs text-rose-500 font-bold mt-1">{errors.seuilAlerte}</p>}
+              <select
+                value={formData.unit}
+                onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
+                className={DARK_INPUT}
+              >
+                {UNIT_OPTIONS.map((u) => (
+                  <option key={u} value={u} className="bg-[#0D1425]">
+                    {u}
+                  </option>
+                ))}
+                <option value="Autre" className="bg-[#0D1425]">Autre</option>
+              </select>
+              {formData.unit === 'Autre' && (
+                <input
+                  type="text"
+                  value={formData.customUnit}
+                  onChange={(e) => setFormData({ ...formData, customUnit: e.target.value })}
+                  placeholder="Préciser l'unité..."
+                  className={`${DARK_INPUT} mt-2`}
+                />
+              )}
             </div>
           </div>
 
-          {/* 5. Medical Compliance: Soumis à ordonnance */}
-          <label className={`flex items-start gap-3 p-4 rounded-2xl border-2 cursor-pointer transition-all ${
-            formData.requiresPrescription
-              ? 'bg-rose-50/70 border-rose-300'
-              : 'bg-slate-50 border-slate-200 hover:border-slate-300'
-          }`}>
-            <input
-              type="checkbox"
-              checked={formData.requiresPrescription}
-              onChange={(e) => setFormData(prev => ({ ...prev, requiresPrescription: e.target.checked }))}
-              className="mt-0.5 w-4 h-4 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer"
-            />
-            <div>
-              <span className="text-xs font-black uppercase tracking-wider text-slate-900 block">
-                Soumis à ordonnance (Prescription obligatoire)
-              </span>
-              <span className="text-[11px] font-medium text-slate-500 block mt-0.5">
-                Bloque la vente libre en Pharmacie sans Nom du Prescripteur ou Numéro d'Ordre.
-              </span>
-            </div>
-          </label>
-
-          {/* Informational note */}
-          {!initialData && (
-            <div className="p-3.5 bg-blue-50/60 border border-blue-100 rounded-2xl flex items-start gap-2.5">
-              <AlertCircle size={18} className="text-blue-600 shrink-0 mt-0.5" />
-              <p className="text-xs font-semibold text-blue-900 leading-relaxed">
-                Le médicament sera créé avec un stock de <strong>0 unité</strong>. Vous pourrez réaliser un réapprovisionnement ultérieur pour spécifier le numéro de lot, la date de péremption et la quantité initiale.
-              </p>
-            </div>
-          )}
-
-        </form>
-
-        {/* Footer */}
-        <div className="p-5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3 shrink-0">
-          <button 
-            type="button"
-            onClick={onClose}
-            className="px-5 py-2.5 rounded-xl font-bold text-xs text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 transition-colors"
-          >
-            Annuler
-          </button>
-          <button 
-            type="submit"
-            form="med-form"
-            disabled={isSubmitting}
-            className="px-6 py-2.5 rounded-xl font-bold text-xs text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/20 cursor-pointer"
-          >
-            {isSubmitting ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-            {isSubmitting ? 'Enregistrement...' : (initialData ? 'Enregistrer les modifications' : 'Créer la référence')}
-          </button>
+          <div className="p-4 rounded-2xl bg-[#0B1222] border border-slate-800">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData.requiresPrescription}
+                onChange={(e) =>
+                  setFormData({ ...formData, requiresPrescription: e.target.checked })
+                }
+                className="mt-0.5 w-5 h-5 rounded-md border-slate-600 bg-slate-900 text-amber-500 cursor-pointer"
+              />
+              <div>
+                <span className="text-sm font-black text-amber-400 flex items-center gap-1.5">
+                  <ShieldCheck size={16} />
+                  Soumis à ordonnance obligatoire
+                </span>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Bloque la vente libre au comptoir Pharmacie sans Nom du Prescripteur ou Numéro d&apos;Ordre.
+                </p>
+              </div>
+            </label>
+          </div>
         </div>
+      )}
 
-      </div>
-    </div>
+      {currentStep === 1 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 animate-in fade-in duration-200">
+          <div className="p-5 rounded-2xl bg-[#0B1222] border border-slate-800 space-y-2">
+            <label className={DARK_LABEL}>
+              Prix de vente unitaire (FCFA) <span className="text-rose-400">*</span>
+            </label>
+            <div className="relative">
+              <CreditCard size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-emerald-400" />
+              <input
+                type="number"
+                min={0}
+                value={formData.price}
+                onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                placeholder="Ex: 1500"
+                className={`${DARK_INPUT} pl-10 text-base font-black text-emerald-400`}
+              />
+            </div>
+          </div>
+
+          <div className="p-5 rounded-2xl bg-[#0B1222] border border-slate-800 space-y-2">
+            <label className={DARK_LABEL}>
+              Seuil d&apos;alerte stock minimum <span className="text-rose-400">*</span>
+            </label>
+            <input
+              type="number"
+              min={1}
+              value={formData.seuilAlerte}
+              onChange={(e) => setFormData({ ...formData, seuilAlerte: e.target.value })}
+              placeholder="Ex: 10"
+              className={DARK_INPUT}
+            />
+          </div>
+        </div>
+      )}
+
+      {currentStep === 2 && (
+        <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3 text-emerald-300 text-xs font-bold">
+            <FileCheck2 size={18} className="shrink-0" />
+            Vérifiez les paramètres du produit avant d&apos;enregistrer.
+          </div>
+          <div className="p-5 rounded-2xl bg-[#0B1222] border border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+            <div>
+              <span className="text-slate-400 block">Désignation</span>
+              <span className="font-black text-white text-sm">{formData.name}</span>
+            </div>
+            <div>
+              <span className="text-slate-400 block">Famille &amp; Unité</span>
+              <span className="font-bold text-slate-200">{selectedFamily} ({selectedUnit})</span>
+            </div>
+            <div>
+              <span className="text-slate-400 block">Prix de vente</span>
+              <span className="font-black text-emerald-400 text-sm">{priceNum.toLocaleString()} FCFA</span>
+            </div>
+            <div>
+              <span className="text-slate-400 block">Seuil d&apos;alerte &amp; Ordonnance</span>
+              <span className="font-bold text-slate-200">
+                Seuil: {thresholdNum} • {formData.requiresPrescription ? 'Ordonnance requise' : 'Vente libre'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+    </MultiStepForm>
   );
 };
 
