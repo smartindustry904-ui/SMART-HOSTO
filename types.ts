@@ -854,6 +854,7 @@ export interface MedicalAct {
   necessiteConsentement?: boolean;
   requiresPrescription?: boolean;
   soumisOrdonnance?: boolean;
+  validite_jours?: number;
   
   modeTarification?: string;
   factureA?: string;
@@ -899,6 +900,7 @@ export interface Medication {
   alerts?: string[];
   requiresPrescription?: boolean;
   soumisOrdonnance?: boolean;
+  validite_jours?: number;
   
   // New fields from AddMedicationForm
   codeInterne?: string;

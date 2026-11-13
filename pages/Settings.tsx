@@ -2153,6 +2153,11 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                                       🔒 Ordonnance
                                     </span>
                                   )}
+                                  {(Number(a.validite_jours) || 0) > 0 && (
+                                    <span className="text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                      Validité : {a.validite_jours} j
+                                    </span>
+                                  )}
                                 </div>
                                 {a.codeInterne && (
                                   <span className="inline-block mt-0.5 text-[9px] font-mono font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
@@ -2913,6 +2918,7 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
                 price: Number(act.prixBase) || 0,
                 category: act.categorie || 'Non catégorisé',
                 ...act,
+                validite_jours: Math.max(0, Math.floor(Number(act.validite_jours) || 0)),
                 updatedAt: new Date().toISOString()
               };
               await setDoc(doc(db, 'medical_acts', actId), sanitizeData(stampTenantData(newAct, user, establishment)), { merge: true });

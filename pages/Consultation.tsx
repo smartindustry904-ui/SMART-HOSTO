@@ -2078,9 +2078,9 @@ const Consultation: React.FC<ConsultationProps> = ({
     ? allConsultationWaitingQueue
     : allConsultationWaitingQueue.filter(p => matchesSpecialty(p, selectedSpecialty));
 
-  // Map appointments that are IN_PROGRESS to queue format
+  // Map appointments that are IN_PROGRESS AND checked-in at Accueil to queue format
   const inProgressAppointmentPatients = (appointments || [])
-    .filter(a => a.status === 'IN_PROGRESS')
+    .filter(a => a.status === 'IN_PROGRESS' && Boolean(a.checkedInAt))
     .map(a => ({
       id: a.patientId || a.id,
       patientId: a.patientId || a.id,

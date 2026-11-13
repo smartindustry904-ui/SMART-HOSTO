@@ -67,6 +67,7 @@ export interface MotifPriseEnCharge {
   codeInterne?: string;
   description?: string;
   requiresPrescription?: boolean;
+  validite_jours?: number;
 }
 
 export const buildMotifsFromMedicalActsAndServices = (
@@ -285,7 +286,8 @@ export const buildMotifsFromMedicalActsAndServices = (
       actId: act.id,
       codeInterne: act.codeInterne || (act as any).code || '',
       description: act.description || matchedService?.description || '',
-      requiresPrescription: Boolean(act.requiresPrescription || act.soumisOrdonnance)
+      requiresPrescription: Boolean(act.requiresPrescription || act.soumisOrdonnance),
+      validite_jours: Math.max(0, Math.floor(Number(act.validite_jours ?? (act as any).validityDays ?? 0) || 0))
     } as any);
   }
 
@@ -661,6 +663,9 @@ const Reception: React.FC<ReceptionProps> = ({
   const [soinsPrescriberName, setSoinsPrescriberName] = useState('');
   const [soinsPrescriberLicense, setSoinsPrescriberLicense] = useState('');
   const [soinsSearchQuery, setSoinsSearchQuery] = useState('');
+  const [showRdvQueue, setShowRdvQueue] = useState(false);
+  const [rdvSearchQuery, setRdvSearchQuery] = useState('');
+  const [checkingInRdvId, setCheckingInRdvId] = useState<string | null>(null);
 
   const renderStepper = (activeStep: 1 | 2 | 3) => {
     const steps = [
@@ -1231,13 +1236,193 @@ const Reception: React.FC<ReceptionProps> = ({
     return assessPriority(currentPatient.vitals);
   }, [currentPatient.vitals]);
 
+  const checkConsultationValidity = (
+    patientObj: Partial<Patient> | null | undefined,
+    motif: MotifPriseEnCharge | null | undefined
+  ): { isFreeFollowUp: boolean; validiteJours: number; lastPaidDate?: Date; expiresAt?: Date; lastPaidInvoiceId?: string } => {
+    if (!patientObj || !motif) return { isFreeFollowUp: false, validiteJours: 0 };
+    const isConsultation = motif.category === 'CONSULTATIONS' || motif.serviceId === 'SRV-CONSULTATION';
+    const validiteJours = Math.max(0, Math.floor(Number(motif.validite_jours) || 0));
+    if (!isConsultation || validiteJours <= 0) return { isFreeFollowUp: false, validiteJours };
+
+    const pids = [patientObj.id, patientObj.patientId].filter(Boolean);
+    if (pids.length === 0) return { isFreeFollowUp: false, validiteJours };
+
+    const motifLabelLower = (motif.label || '').trim().toLowerCase();
+    const matchingPaid = (paymentRequests || [])
+      .filter(pr => {
+        const matchesPatient = pids.includes(pr.patientId) || pids.includes((pr as any).patientDme);
+        if (!matchesPatient) return false;
+        const st = String(pr.status || '').toUpperCase();
+        if (!['PAID', 'SOLDE', 'DELIVERED'].includes(st)) return false;
+        return (pr.items || []).some(item => {
+          const itemActId = (item as any).actId;
+          const itemNameLower = (item.name || '').trim().toLowerCase();
+          return (motif.actId && itemActId && itemActId === motif.actId) || itemNameLower === motifLabelLower;
+        });
+      })
+      .sort((a, b) => new Date((b as any).paidAt || b.createdAt || 0).getTime() - new Date((a as any).paidAt || a.createdAt || 0).getTime());
+
+    if (matchingPaid.length === 0) return { isFreeFollowUp: false, validiteJours };
+
+    const latest = matchingPaid[0];
+    const paidDate = new Date((latest as any).paidAt || latest.createdAt);
+    if (isNaN(paidDate.getTime())) return { isFreeFollowUp: false, validiteJours };
+
+    const expiresAt = new Date(paidDate);
+    expiresAt.setDate(expiresAt.getDate() + validiteJours);
+    expiresAt.setHours(23, 59, 59, 999);
+
+    const now = new Date();
+    if (now <= expiresAt) {
+      return { isFreeFollowUp: true, validiteJours, lastPaidDate: paidDate, expiresAt, lastPaidInvoiceId: latest.id };
+    }
+    return { isFreeFollowUp: false, validiteJours, lastPaidDate: paidDate, expiresAt };
+  };
+
+  const activeFollowUpCheck = useMemo(() => {
+    return checkConsultationValidity(currentPatient, selectedMotif);
+  }, [currentPatient, selectedMotif, paymentRequests]);
+
+  const todaysAppointments = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    return (appointments || [])
+      .filter(a => a.date === todayStr && a.status !== 'CANCELLED')
+      .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')));
+  }, [appointments]);
+
+  const handleCheckInAppointment = async (rdv: any) => {
+    if (!permissions.canWrite || checkingInRdvId) return;
+    setCheckingInRdvId(rdv.id);
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const timeStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const matchedPatient = patients.find(p => p.id === rdv.patientId || p.patientId === rdv.patientId) || {
+        id: rdv.patientId || `PAT-${Date.now()}`,
+        patientId: rdv.patientId || `PAT-${Date.now()}`,
+        firstName: rdv.firstName || '',
+        lastName: rdv.lastName || rdv.patient || 'Patient',
+        gender: rdv.gender || 'M',
+        birthDate: rdv.birthDate || '1990-01-01'
+      } as Patient;
+
+      const reasonStr = (rdv.reason || rdv.motif || rdv.service || 'Consultation').toLowerCase();
+      const matchedMotif = activeMotifs.find(m =>
+        (m.category === 'CONSULTATIONS' || m.serviceId === 'SRV-CONSULTATION') &&
+        ((m.label || '').toLowerCase() === reasonStr ||
+         (m.speciality || '').toLowerCase().includes(reasonStr) ||
+         reasonStr.includes((m.speciality || '').toLowerCase()))
+      ) || activeMotifs.find(m => m.category === 'CONSULTATIONS') || null;
+
+      const validity = checkConsultationValidity(matchedPatient, matchedMotif);
+      const fee = validity.isFreeFollowUp ? 0 : (matchedMotif?.fee || 10000);
+      const bypassCashier = validity.isFreeFollowUp || fee === 0;
+
+      const pid = matchedPatient.id || matchedPatient.patientId;
+      const fullName = `${matchedPatient.lastName || ''} ${matchedPatient.firstName || ''}`.trim() || rdv.patient || 'Patient';
+
+      let createdReq: PaymentRequest | null = null;
+      if (!bypassCashier) {
+        createdReq = {
+          id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+          patientId: pid,
+          patientName: fullName,
+          requestingService: 'Accueil',
+          sourceModule: 'Reception',
+          type: 'CONSULTATION',
+          items: [{
+            id: `ITEM-${Math.floor(Math.random() * 1000)}`,
+            name: matchedMotif?.label || rdv.reason || 'Consultation',
+            quantity: 1,
+            unitPrice: fee,
+            totalPrice: fee,
+            actId: matchedMotif?.actId || matchedMotif?.id,
+            codeInterne: matchedMotif?.codeInterne || '',
+            practitionerId: user?.id || '',
+            practitionerName: user?.name || user?.username || 'Agent Accueil',
+            practitionerRole: user?.role || 'RECEPTIONIST'
+          }],
+          totalAmount: fee,
+          amountPaid: 0,
+          status: 'PENDING',
+          createdAt: new Date().toISOString(),
+          createdBy: user?.name || user?.username || 'Agent Accueil',
+          createdById: user?.id || '',
+          requestedBy: user?.name || user?.username || 'Agent Accueil',
+          requestedById: user?.id || ''
+        };
+        await setDoc(doc(db, 'payment_requests', createdReq.id), sanitizeData(stampTenantData(createdReq, user, establishment)));
+      }
+
+      const queueDocRef = doc(collection(db, 'service_queues'));
+      const queueEntry = stampTenantData({
+        id: queueDocRef.id,
+        patientId: pid,
+        dmeId: pid,
+        firstName: matchedPatient.firstName || fullName,
+        lastName: matchedPatient.lastName || '',
+        age: calculateAge(matchedPatient.birthDate),
+        gender: matchedPatient.gender || 'M',
+        time: timeStr,
+        date: todayStr,
+        motif: 'CONSULTATION',
+        motifId: matchedMotif?.id || '',
+        motifLabel: matchedMotif?.label || rdv.reason || 'Consultation RDV',
+        speciality: matchedMotif?.speciality || rdv.service || 'Médecine générale',
+        queueName: matchedMotif?.queueName || 'Médecine Générale',
+        service: 'Consultation',
+        serviceId: matchedMotif?.serviceId || 'SRV-CONSULTATION',
+        status: 'waiting_triage',
+        paymentStatus: bypassCashier ? 'PAID' : 'AWAITING_PAYMENT',
+        paymentRequestId: createdReq?.id || '',
+        attente_module: bypassCashier ? 'SOINS' : 'CAISSE',
+        takenInCharge: false,
+        isFreeFollowUp: validity.isFreeFollowUp,
+        freeFollowUpRef: validity.lastPaidInvoiceId || '',
+        appointmentId: rdv.id,
+        priority: 'normal',
+        admittedBy: user?.name || user?.username || 'Agent Accueil',
+        admittedById: user?.id || '',
+        createdAt: new Date().toISOString()
+      }, user, establishment);
+
+      await Promise.all([
+        setDoc(queueDocRef, sanitizeData(queueEntry)),
+        setDoc(doc(db, 'appointments', rdv.id), sanitizeData({
+          status: 'CHECKED_IN',
+          checkedInAt: new Date().toISOString(),
+          checkedInBy: user?.name || user?.username || 'Agent Accueil',
+          isFreeFollowUp: validity.isFreeFollowUp,
+          paymentRequestId: createdReq?.id || ''
+        }), { merge: true }),
+        logAudit('Check-in Rendez-vous (Accueil)', {
+          rdvId: rdv.id,
+          patientId: pid,
+          isFreeFollowUp: validity.isFreeFollowUp,
+          bypassCashier
+        })
+      ]);
+
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: validity.isFreeFollowUp
+          ? `✓ Arrivée enregistrée pour ${fullName} — Suivi / Contrôle Gratuit (orienté sans passage Caisse)`
+          : `✓ Arrivée enregistrée pour ${fullName} — Facture ${fee.toLocaleString()} FCFA transmise à la Caisse`
+      }));
+    } catch (err) {
+      console.error('Erreur check-in RDV:', err);
+    } finally {
+      setCheckingInRdvId(null);
+    }
+  };
+
   const totalToPay = useMemo(() => {
     if (selectedMotif) {
-      return selectedMotif.fee + (notebookAdded ? 1000 : 0);
+      const baseFee = activeFollowUpCheck.isFreeFollowUp ? 0 : selectedMotif.fee;
+      return baseFee + (notebookAdded ? 1000 : 0);
     }
     if (!visitMotif) return 0;
     return getOrientationData(visitMotif).fee + (notebookAdded ? 1000 : 0);
-  }, [selectedMotif, visitMotif, notebookAdded]);
+  }, [selectedMotif, visitMotif, notebookAdded, activeFollowUpCheck.isFreeFollowUp]);
 
   const paymentStats = useMemo(() => {
     const received = parseFloat(amountReceived) || 0;
@@ -1526,35 +1711,43 @@ const Reception: React.FC<ReceptionProps> = ({
         }
       }
 
+      const isFreeFollowUpVisit = Boolean(activeFollowUpCheck.isFreeFollowUp);
+      const bypassCashier = isFreeFollowUpVisit && !notebookAdded;
+      const effectiveItems = isFreeFollowUpVisit
+        ? items.map(it => it.id === 'ITEM-CARNET' ? it : { ...it, unitPrice: 0, totalPrice: 0, name: `${it.name} (Suivi Gratuit)` })
+        : items;
+
       let p5 = Promise.resolve();
       let reqIdForLog = '';
       let createdRequest: PaymentRequest | null = null;
-      createdRequest = {
-        id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
-        patientId: patientId,
-        patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
-        requestingService: 'Accueil',
-        sourceModule: 'Reception',
-        type: reqType,
-        items: items,
-        totalAmount: totalToPay,
-        amountPaid: 0,
-        status: 'PENDING',
-        createdAt: new Date().toISOString(),
-        createdBy: user?.name || user?.username || 'Système',
-        createdById: user?.id || '',
-        practitionerId: user?.id || '',
-        practitionerName: user?.name || user?.username || 'Agent Accueil',
-        practitionerRole: user?.role || 'RECEPTIONIST',
-        requestedBy: user?.name || user?.username || 'Agent Accueil',
-        requestedById: user?.id || '',
-        prescriberName: soinsPrescriberName.trim() || undefined,
-        prescriberLicense: soinsPrescriberLicense.trim() || undefined,
-        requiresPrescription: Boolean(selectedMotif?.requiresPrescription)
-      };
-      reqIdForLog = createdRequest.id;
-      const tenantStampedRequest = stampTenantData(createdRequest, user, establishment);
-      p5 = setDoc(doc(db, 'payment_requests', createdRequest.id), sanitizeData(tenantStampedRequest));
+      if (!bypassCashier) {
+        createdRequest = {
+          id: `REQ-${Math.floor(Math.random() * 9000) + 1000}`,
+          patientId: patientId,
+          patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
+          requestingService: 'Accueil',
+          sourceModule: 'Reception',
+          type: reqType,
+          items: effectiveItems,
+          totalAmount: totalToPay,
+          amountPaid: 0,
+          status: 'PENDING',
+          createdAt: new Date().toISOString(),
+          createdBy: user?.name || user?.username || 'Système',
+          createdById: user?.id || '',
+          practitionerId: user?.id || '',
+          practitionerName: user?.name || user?.username || 'Agent Accueil',
+          practitionerRole: user?.role || 'RECEPTIONIST',
+          requestedBy: user?.name || user?.username || 'Agent Accueil',
+          requestedById: user?.id || '',
+          prescriberName: soinsPrescriberName.trim() || undefined,
+          prescriberLicense: soinsPrescriberLicense.trim() || undefined,
+          requiresPrescription: Boolean(selectedMotif?.requiresPrescription)
+        };
+        reqIdForLog = createdRequest.id;
+        const tenantStampedRequest = stampTenantData(createdRequest, user, establishment);
+        p5 = setDoc(doc(db, 'payment_requests', createdRequest.id), sanitizeData(tenantStampedRequest));
+      }
 
       // Calculate Routing Destination Service Name and Queue
       let targetQueue = 'Médecine Générale';
@@ -1742,10 +1935,12 @@ const Reception: React.FC<ReceptionProps> = ({
           service: isGynecoRecourse ? 'Consultation' : isMaternityService ? 'Maternité' : targetService,
           serviceId: targetSvcId,
           status: initialStatus,
-          paymentStatus: 'AWAITING_PAYMENT',
+          paymentStatus: bypassCashier ? 'PAID' : 'AWAITING_PAYMENT',
           paymentRequestId: createdRequest?.id || '',
-          attente_module: 'CAISSE',
+          attente_module: bypassCashier ? (effectiveSendToNurseTriage ? 'SOINS' : 'CONSULTATION') : 'CAISSE',
           takenInCharge: false,
+          isFreeFollowUp: isFreeFollowUpVisit,
+          freeFollowUpRef: activeFollowUpCheck.lastPaidInvoiceId || '',
           prescriberName: soinsPrescriberName.trim() || undefined,
           prescriberLicense: soinsPrescriberLicense.trim() || undefined,
           priority: effectiveSendToNurseTriage ? 'normal' : computedPriorityAndAlerts.priority,
@@ -2240,17 +2435,25 @@ const Reception: React.FC<ReceptionProps> = ({
             {[
               { id: 'dashboard', label: 'Dashboard' },
               { id: 'triage', label: `Admissions (${globalWaitingQueue.filter(q => q.status === 'waiting' || q.status === 'waiting_triage').length})` },
+              { id: 'rdv', label: `Rendez-vous du jour (${todaysAppointments.filter(a => a.status === 'PENDING').length})` },
               { id: 'sorties', label: `Sorties (${patientsToDischarge.length})` },
               { id: 'historique', label: 'Archives & Historique' }
-            ].map(tab => (
+            ].map(tab => {
+              const isTabActive = tab.id === 'rdv' ? showRdvQueue : (!showRdvQueue && activeTab === tab.id);
+              return (
               <button
                 key={tab.id}
                 onClick={() => {
+                  if (tab.id === 'rdv') {
+                    setShowRdvQueue(true);
+                    return;
+                  }
+                  setShowRdvQueue(false);
                   if (tab.id === 'historique') setSelectedPatientForHistory(null);
                   setActiveTab(tab.id as any);
                 }}
-                className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-all cursor-pointer ${
-                  activeTab === tab.id
+                className={`px-3 py-1.5 rounded-xl font-semibold text-xs transition-all cursor-pointer whitespace-nowrap ${
+                  isTabActive
                     ? 'bg-blue-600 text-white shadow-xs'
                     : theme === 'dark'
                     ? 'bg-slate-800/80 border border-slate-700/80 text-slate-300 hover:bg-slate-800'
@@ -2259,7 +2462,8 @@ const Reception: React.FC<ReceptionProps> = ({
               >
                 {tab.label}
               </button>
-            ))}
+              );
+            })}
           </div>
         }
       />
@@ -2275,7 +2479,121 @@ const Reception: React.FC<ReceptionProps> = ({
             </div>
           </div>
         )}
-      {activeTab === 'dashboard' && (
+      {showRdvQueue && (
+        <div className="p-4 sm:p-6 space-y-4 animate-in fade-in">
+          <div className={`p-5 sm:p-6 rounded-2xl border shadow-xs ${
+            theme === 'dark' ? 'bg-[#111827] border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-blue-600 text-white rounded-xl flex items-center justify-center shrink-0">
+                  <Calendar size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-black tracking-tight">Rendez-vous du jour — Check-in Accueil</h2>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Tout patient ayant rendez-vous doit être enregistré à l'Accueil avant d'apparaître dans la file du médecin.
+                  </p>
+                </div>
+              </div>
+              <div className="relative w-full sm:w-72">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+                <input
+                  type="text"
+                  value={rdvSearchQuery}
+                  onChange={(e) => setRdvSearchQuery(e.target.value)}
+                  placeholder="Rechercher patient, motif..."
+                  className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
+              {todaysAppointments
+                .filter(rdv => {
+                  if (!rdvSearchQuery.trim()) return true;
+                  const q = rdvSearchQuery.toLowerCase().trim();
+                  const pName = `${rdv.lastName || ''} ${rdv.firstName || ''} ${rdv.patient || ''}`.toLowerCase();
+                  return pName.includes(q) || (rdv.reason || rdv.motif || '').toLowerCase().includes(q) || (rdv.patientId || '').toLowerCase().includes(q);
+                })
+                .map((rdv, idx) => {
+                  const matchedPatient = patients.find(p => p.id === rdv.patientId || p.patientId === rdv.patientId) || {
+                    id: rdv.patientId,
+                    patientId: rdv.patientId
+                  } as Patient;
+                  const reasonStr = (rdv.reason || rdv.motif || rdv.service || 'Consultation').toLowerCase();
+                  const matchedMotif = activeMotifs.find(m =>
+                    (m.category === 'CONSULTATIONS' || m.serviceId === 'SRV-CONSULTATION') &&
+                    ((m.label || '').toLowerCase() === reasonStr ||
+                     (m.speciality || '').toLowerCase().includes(reasonStr) ||
+                     reasonStr.includes((m.speciality || '').toLowerCase()))
+                  ) || activeMotifs.find(m => m.category === 'CONSULTATIONS') || null;
+                  const validity = checkConsultationValidity(matchedPatient, matchedMotif);
+                  const isCheckedIn = rdv.status === 'CHECKED_IN' || rdv.status === 'IN_PROGRESS' || rdv.status === 'COMPLETED';
+                  const isProcessingRdv = checkingInRdvId === rdv.id;
+
+                  return (
+                    <div key={rdv.id || idx} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="px-2.5 py-1.5 bg-slate-100 rounded-lg text-xs font-black text-slate-700 font-mono shrink-0">
+                          {rdv.time || '--:--'}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-extrabold text-sm text-slate-900 dark:text-white truncate">
+                              {rdv.lastName || rdv.patient || 'Patient'} {rdv.firstName || ''}
+                            </p>
+                            {rdv.patientId && (
+                              <span className="text-[10px] font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">{rdv.patientId}</span>
+                            )}
+                            {validity.isFreeFollowUp ? (
+                              <span className="text-[10px] font-black uppercase bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
+                                ✓ Suivi / Contrôle Gratuit ({validity.validiteJours}j)
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full">
+                                Facturation : {(matchedMotif?.fee || 0).toLocaleString()} FCFA
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Motif : <strong className="text-slate-700 dark:text-slate-300">{rdv.reason || rdv.motif || 'Consultation'}</strong>
+                            {rdv.doctorName && <> • Médecin : <strong className="text-slate-700 dark:text-slate-300">{rdv.doctorName}</strong></>}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isCheckedIn ? (
+                          <span className="px-3.5 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-black flex items-center gap-1.5">
+                            <CheckCircle2 size={14} /> Arrivée Enregistrée
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={!permissions.canWrite || isProcessingRdv}
+                            onClick={() => handleCheckInAppointment(rdv)}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                          >
+                            {isProcessingRdv ? <Loader2 size={14} className="animate-spin" /> : <UserCheck size={14} />}
+                            <span>Enregistrer l'arrivée</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              {todaysAppointments.length === 0 && (
+                <div className="py-12 text-center text-slate-400 text-xs font-semibold">
+                  Aucun rendez-vous prévu pour aujourd'hui.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!showRdvQueue && activeTab === 'dashboard' && (
         <ReceptionDashboard 
           theme={theme}
           patients={patients}
@@ -2368,7 +2686,7 @@ const Reception: React.FC<ReceptionProps> = ({
         </ReceptionDashboard>
       )}
 
-      {activeTab === 'triage' && (
+      {!showRdvQueue && activeTab === 'triage' && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
             <div className="lg:col-span-8 space-y-4">
@@ -3041,9 +3359,20 @@ const Reception: React.FC<ReceptionProps> = ({
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
                               <h4 className="font-extrabold text-sm text-slate-900 truncate">{selectedMotif.label}</h4>
-                              <span className="text-xs font-black text-blue-600 bg-white px-2 py-0.5 rounded-md border border-blue-200 tabular-nums">
-                                {(selectedMotif.fee || 0).toLocaleString()} FCFA
-                              </span>
+                              {activeFollowUpCheck.isFreeFollowUp ? (
+                                <>
+                                  <span className="text-xs font-bold text-slate-400 line-through tabular-nums">
+                                    {(selectedMotif.fee || 0).toLocaleString()} FCFA
+                                  </span>
+                                  <span className="text-xs font-black text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-md border border-emerald-300 flex items-center gap-1">
+                                    <CheckCircle2 size={12} /> Suivi / Contrôle Gratuit (0 FCFA)
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-xs font-black text-blue-600 bg-white px-2 py-0.5 rounded-md border border-blue-200 tabular-nums">
+                                  {(selectedMotif.fee || 0).toLocaleString()} FCFA
+                                </span>
+                              )}
                               {requiresRx && (
                                 <span className="text-[10px] font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200 flex items-center gap-1">
                                   <Lock size={10} /> Soumis à ordonnance
@@ -3052,6 +3381,9 @@ const Reception: React.FC<ReceptionProps> = ({
                             </div>
                             <p className="text-xs text-slate-500 font-medium truncate">
                               File : <strong className="text-slate-700">{selectedMotif.queueName}</strong> • Spécialité : <strong className="text-slate-700">{selectedMotif.speciality}</strong>
+                              {activeFollowUpCheck.isFreeFollowUp && activeFollowUpCheck.expiresAt && (
+                                <span className="text-emerald-700 font-bold"> • Gratuité valide jusqu'au {activeFollowUpCheck.expiresAt.toLocaleDateString('fr-FR')}</span>
+                              )}
                             </p>
                           </div>
                         </div>
@@ -3077,7 +3409,13 @@ const Reception: React.FC<ReceptionProps> = ({
                             ) : (
                               <>
                                 <CheckCircle2 size={16} /> 
-                                <span>{!hasValidPrescriber ? 'Prescripteur Requis' : 'Valider Admission & Pro-forma'}</span>
+                                <span>
+                                  {!hasValidPrescriber
+                                    ? 'Prescripteur Requis'
+                                    : activeFollowUpCheck.isFreeFollowUp && !notebookAdded
+                                    ? 'Valider Suivi Gratuit (Sans Caisse)'
+                                    : 'Valider Admission & Pro-forma'}
+                                </span>
                               </>
                             )}
                           </button>
@@ -3199,7 +3537,7 @@ const Reception: React.FC<ReceptionProps> = ({
       </div>
     )}
 
-      {activeTab === 'sorties' && (
+      {!showRdvQueue && activeTab === 'sorties' && (
         <div className="animate-in fade-in duration-300 space-y-4">
           <div className={`p-5 sm:p-6 rounded-3xl shadow-sm border transition-all ${
             theme === 'dark' ? 'bg-[#111827] border-slate-800' : 'bg-white border-slate-200'
@@ -3634,7 +3972,7 @@ const Reception: React.FC<ReceptionProps> = ({
         </div>
       )}
 
-      {(activeTab === 'historique' || activeTab === 'demandes') && (
+      {!showRdvQueue && (activeTab === 'historique' || activeTab === 'demandes') && (
         <HistoriquePatient 
           user={user}
           establishment={establishment}

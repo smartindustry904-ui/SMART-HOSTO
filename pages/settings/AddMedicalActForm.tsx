@@ -91,6 +91,7 @@ const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, 
     necessiteConsentement: initialData?.necessiteConsentement || false,
     requiresPrescription: Boolean(initialData?.requiresPrescription || initialData?.soumisOrdonnance),
     soumisOrdonnance: Boolean(initialData?.requiresPrescription || initialData?.soumisOrdonnance),
+    validite_jours: Math.max(0, Math.floor(Number(initialData?.validite_jours ?? initialData?.validityDays ?? 0) || 0)),
 
     // Facturation
     prixBase: initialData?.price?.toString() || initialData?.prixBase?.toString() || '',
@@ -543,6 +544,32 @@ const AddMedicalActForm: React.FC<AddMedicalActFormProps> = ({ onClose, onSave, 
                       className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none min-h-[100px]"
                       placeholder="Description détaillée de la prestation, indications et contre-indications..."
                     />
+                  </div>
+
+                  {/* Validité / Période de gratuité (Consultations) */}
+                  <div className="p-4 rounded-2xl border border-emerald-200 bg-emerald-50/40 space-y-2">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <label className="block text-xs font-black uppercase tracking-wider text-slate-900">
+                          Période de gratuité (jours)
+                        </label>
+                        <p className="text-[11px] font-medium text-slate-500 mt-0.5">
+                          Pour les consultations : durée (en jours) durant laquelle le contrôle/suivi est gratuit après paiement (0 = aucune gratuité).
+                        </p>
+                      </div>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={formData.validite_jours}
+                        onChange={(e) => {
+                          const val = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                          setFormData(prev => ({ ...prev, validite_jours: val }));
+                        }}
+                        className="w-full sm:w-32 p-2.5 bg-white border border-emerald-300 rounded-xl font-black text-sm text-emerald-700 text-center focus:ring-2 focus:ring-emerald-500 outline-none shrink-0"
+                        placeholder="0"
+                      />
+                    </div>
                   </div>
 
                   {/* Conformité Médicale : Soumis à ordonnance */}

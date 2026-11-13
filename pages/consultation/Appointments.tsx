@@ -627,35 +627,21 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, initialPatient, onSta
 
                       {/* Action Buttons */}
                       <div className="flex flex-wrap items-center gap-2">
-                        {onStartConsultation && (rdv.status === 'PENDING' || rdv.status === 'IN_PROGRESS') && (
-                          <>
-                            {!isPast ? (
-                              <>
-                                <button 
-                                  disabled
-                                  title="Rendez-vous futur: consultation désactivée avant la date/heure prévue"
-                                  className="px-3 py-2 bg-slate-100 text-slate-400 border border-slate-200 rounded-xl font-black text-[9px] uppercase tracking-widest cursor-not-allowed flex items-center gap-1 opacity-70 whitespace-nowrap"
-                                >
-                                  <Activity size={13} /> Consulter
-                                </button>
-
-                                <button 
-                                  onClick={() => handleConsultNow(rdv)}
-                                  title="Avancer la date du rendez-vous à maintenant et démarrer la consultation"
-                                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[9px] uppercase tracking-widest shadow-md shadow-emerald-600/20 transition-all flex items-center gap-1.5 cursor-pointer hover:scale-105 active:scale-95 whitespace-nowrap"
-                                >
-                                  <Zap size={13} /> Consulter Maintenant
-                                </button>
-                              </>
-                            ) : (
-                              <button 
-                                onClick={() => onStartConsultation(rdv)}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-[9px] uppercase tracking-widest shadow-md shadow-blue-600/20 transition-all flex items-center gap-1.5 cursor-pointer hover:scale-105 active:scale-95 whitespace-nowrap"
-                              >
-                                <Activity size={13} /> Consulter
-                              </button>
-                            )}
-                          </>
+                        {rdv.status === 'PENDING' && (
+                          <span
+                            title="Le patient doit obligatoirement passer par l'Accueil (Enregistrer l'arrivée) avant la consultation."
+                            className="px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl font-black text-[9px] uppercase tracking-widest flex items-center gap-1.5 whitespace-nowrap"
+                          >
+                            <Clock size={12} /> Attente Check-in Accueil
+                          </span>
+                        )}
+                        {onStartConsultation && (rdv.status === 'CHECKED_IN' || rdv.status === 'IN_PROGRESS') && (
+                          <button 
+                            onClick={() => onStartConsultation(rdv)}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-[9px] uppercase tracking-widest shadow-md shadow-blue-600/20 transition-all flex items-center gap-1.5 cursor-pointer hover:scale-105 active:scale-95 whitespace-nowrap"
+                          >
+                            <Activity size={13} /> Consulter
+                          </button>
                         )}
 
                         <button 
