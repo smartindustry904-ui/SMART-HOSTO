@@ -350,12 +350,18 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         }
       }
 
+      const bodyText = isDone
+        ? (na.executionNotes && na.instructions && na.executionNotes !== na.instructions
+            ? `Observation : ${na.executionNotes}\nConsigne : ${na.instructions}`
+            : na.executionNotes || na.notes || na.instructions || '')
+        : (na.instructions || na.notes || '');
+
       items.push({
         id: `na-${na.id}`,
         category: 'SOINS',
         title: na.actName || na.actType || na.title || 'Soin prescrit',
         subtitle: subtitleText,
-        body: na.instructions || na.executionNotes || na.notes || '',
+        body: bodyText,
         actor: isDone
           ? na.executedBy || na.completedBy || 'Infirmier(ère)'
           : `Prescrit par ${na.prescribedBy || 'Médecin'}`,

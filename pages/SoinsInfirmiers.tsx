@@ -16,6 +16,7 @@ import { UniversalHospitalisationModal } from '../components/common/UniversalHos
 import { deductConsumablesForAct } from '../src/utils/consumablesStock';
 import { PaymentStatusBadge } from '../src/components/PaymentStatusBadge';
 import { resolvePaymentBadgeStatus } from '../src/utils/visitCycle';
+import { isBedOccupe } from '../src/utils/hospitalisation';
 
 interface SoinsInfirmiersProps {
   user?: UserType;
@@ -48,6 +49,12 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
   const [showHospitalisationModal, setShowHospitalisationModal] = useState(false);
   const [earlyExecModalAct, setEarlyExecModalAct] = useState<any | null>(null);
   const [earlyExecReason, setEarlyExecReason] = useState('');
+  const [validationModalAct, setValidationModalAct] = useState<any | null>(null);
+  const [validationExecTime, setValidationExecTime] = useState('');
+  const [validationNotes, setValidationNotes] = useState('');
+  const [validationEarlyReason, setValidationEarlyReason] = useState('');
+  const [occupiedBeds, setOccupiedBeds] = useState<any[]>([]);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [triageHistory, setTriageHistory] = useState<any[]>([]);
   const [historySearch, setHistorySearch] = useState('');
@@ -120,6 +127,25 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
     }
   }, [activeTenantId]);
 
+  // Listen to occupied beds so Soins Hospitalisation is strictly isolated to patients currently in an OCCUPÉ bed
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'beds'), (snapshot) => {
+      const list = snapshot.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter((b: any) => belongsToTenant(b, activeTenantId) && isBedOccupe(b.status));
+      setOccupiedBeds(list);
+    }, (err) => {
+      console.warn("Error listening to occupied beds:", err);
+    });
+    return () => unsubscribe();
+  }, [activeTenantId]);
+
+  // Refresh current time every 30s for live SLA color-coding
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Filter patients waiting for triage or direct nursing care
   const waitingTriageList = useMemo(() => {
     return (globalWaitingQueue || []).filter(q => {
@@ -179,12 +205,32 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
     return Number.MAX_SAFE_INTEGER;
   };
 
-  // Nursing care acts counters (strictly sorted ascending by Heure Prévue)
+  // Nursing care acts counters (strictly isolated to patients in OCCUPÉ beds, sorted ascending by Heure Prévue)
   const hospitalisationActs = useMemo(() => {
+    const occupiedBedIds = new Set(occupiedBeds.map((b: any) => b.id).filter(Boolean));
+    const occupiedPatientIds = new Set(occupiedBeds.map((b: any) => b.patientId).filter(Boolean));
+
     return nursingActs
-      .filter(a => a.source === 'HOSPITALISATION' || Boolean(a.bedId) || Boolean(a.locationBadge) || Boolean(a.hospitalizedOrigin))
+      .filter(a => {
+        const isNotWalkIn =
+          a.source !== 'URGENCES' &&
+          a.source !== 'ACCUEIL' &&
+          a.origin !== 'URGENCES' &&
+          a.origin !== 'ACCUEIL';
+        const isInpatientOrigin =
+          a.source === 'HOSPITALISATION' ||
+          Boolean(a.bedId) ||
+          Boolean(a.locationBadge) ||
+          Boolean(a.hospitalizedOrigin);
+        if (!isNotWalkIn || !isInpatientOrigin) return false;
+        // Strictly restrict to patients currently in an OCCUPÉ bed
+        return (
+          (a.bedId && occupiedBedIds.has(a.bedId)) ||
+          (a.patientId && occupiedPatientIds.has(a.patientId))
+        );
+      })
       .sort((a, b) => getActScheduledMs(a) - getActScheduledMs(b));
-  }, [nursingActs]);
+  }, [nursingActs, occupiedBeds]);
 
   const pendingHospActsCount = useMemo(() => {
     return hospitalisationActs.filter(a => a.status !== 'FAIT' && a.status !== 'REALISE').length;
@@ -597,9 +643,25 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
     return Date.now() < schedMs;
   };
 
+  const openValidationModal = (act: any) => {
+    const now = new Date();
+    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    setValidationModalAct(act);
+    setValidationExecTime(hhmm);
+    setValidationNotes('');
+    setValidationEarlyReason('');
+  };
+
   // Mark prescribed nursing care act as Done (FAIT) - Assigned to practitioner ONLY upon completion
-  const handleMarkActAsDone = async (act: any, overrideReason?: string) => {
+  const handleMarkActAsDone = async (
+    act: any,
+    options?: string | { overrideReason?: string; customExecTime?: string; clinicalNotes?: string }
+  ) => {
     if (!act?.id) return;
+
+    const overrideReason = typeof options === 'string' ? options : options?.overrideReason;
+    const customExecTime = typeof options === 'object' ? options?.customExecTime : undefined;
+    const clinicalNotes = typeof options === 'object' ? options?.clinicalNotes : undefined;
 
     // Logic Trap: intercept if executing before Heure Prévue without a justification reason
     if (overrideReason === undefined && isActBeforeScheduledTime(act)) {
@@ -616,9 +678,16 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
       const actRef = doc(db, 'nursing_acts', act.id);
 
       const cleanOverrideReason = typeof overrideReason === 'string' ? overrideReason.trim() : '';
-      const notesToSave = cleanOverrideReason || executionNotes.trim() || 'Soin réalisé conformément aux prescriptions médicales.';
+      const cleanClinicalNotes = typeof clinicalNotes === 'string' ? clinicalNotes.trim() : '';
+      const notesToSave =
+        cleanClinicalNotes ||
+        cleanOverrideReason ||
+        executionNotes.trim() ||
+        'Soin réalisé conformément aux prescriptions médicales.';
       const dateStr = today.toLocaleDateString('fr-FR');
-      const timeStr = today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const timeStr =
+        (customExecTime && customExecTime.trim()) ||
+        today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
       const isoNow = today.toISOString();
       const schedTimeSnapshot = act.scheduledTime || (act.scheduledAt ? new Date(act.scheduledAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '');
 
@@ -2032,28 +2101,28 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
 
       {/* SOINS HOSPITALISATION CHRONOLOGICAL TAB */}
       {activeTab === 'soins_hosp' && (
-        <div className="bg-white rounded-[28px] border border-slate-200 p-6 shadow-xs space-y-5 animate-in fade-in duration-200">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+        <div className="bg-white rounded-[28px] border border-slate-200 p-4 sm:p-5 shadow-xs space-y-4 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
-              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                <BedDouble size={20} className="text-indigo-600" />
-                <span>Chronologie des Soins Hospitalisation</span>
+              <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
+                <BedDouble size={18} className="text-indigo-600" />
+                <span>Soins Hospitalisation (Lits Occupés)</span>
               </h2>
-              <p className="text-xs text-slate-500 font-medium">
-                File infirmière triée chronologiquement par heure prévue — mise à jour en temps réel dans le dossier d'hospitalisation.
+              <p className="text-[11px] text-slate-500 font-medium">
+                Tri chronologique par heure prévue • Alertes SLA : <span className="text-rose-600 font-bold">En retard</span> • <span className="text-amber-600 font-bold">Imminent (≤30m)</span> • <span className="text-blue-600 font-bold">À venir</span>
               </p>
             </div>
-            <span className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-black">
+            <span className="px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-black shrink-0">
               {pendingHospActsCount} soin(s) à exécuter
             </span>
           </div>
 
           {hospitalisationActs.length === 0 ? (
-            <div className="py-12 text-center text-slate-400 text-xs font-bold">
-              Aucun soin d'hospitalisation planifié pour le moment.
+            <div className="py-10 text-center text-slate-400 text-xs font-bold">
+              Aucun soin planifié pour les patients actuellement en lit occupé.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-1.5">
               {hospitalisationActs.map((act) => {
                 const isDone = act.status === 'FAIT' || act.status === 'REALISE';
                 const schedTime = act.scheduledTime || (act.scheduledAt ? new Date(act.scheduledAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : (act.createdAt ? new Date(act.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--:--'));
@@ -2061,38 +2130,84 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                 const locationText = act.locationBadge || `${act.roomName || 'Chambre'} - ${act.bedName || 'Lit'}`;
                 const execTime = act.heure_execution || act.executionTime || '--:--';
                 const earlyMotif = act.earlyExecutionReason || act.motifAnticipation || '';
-                const isEarlyPending = !isDone && isActBeforeScheduledTime(act);
+
+                const schedMs = getActScheduledMs(act);
+                const diffMin = schedMs !== Number.MAX_SAFE_INTEGER ? (schedMs - nowMs) / 60000 : 999;
+                const slaState: 'DONE' | 'OVERDUE' | 'IMMINENT' | 'UPCOMING' = isDone
+                  ? 'DONE'
+                  : diffMin <= 0
+                  ? 'OVERDUE'
+                  : diffMin <= 30
+                  ? 'IMMINENT'
+                  : 'UPCOMING';
+
+                const rowStyle =
+                  slaState === 'DONE'
+                    ? 'bg-emerald-50/40 border-emerald-200 opacity-80'
+                    : slaState === 'OVERDUE'
+                    ? 'bg-rose-50/75 border-rose-300 shadow-xs'
+                    : slaState === 'IMMINENT'
+                    ? 'bg-amber-50/70 border-amber-300 shadow-xs'
+                    : 'bg-white border-slate-200 hover:border-blue-300';
+
+                const timeBadgeStyle =
+                  slaState === 'DONE'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                    : slaState === 'OVERDUE'
+                    ? 'bg-rose-600 text-white border-rose-600'
+                    : slaState === 'IMMINENT'
+                    ? 'bg-amber-500 text-white border-amber-500 animate-pulse'
+                    : 'bg-blue-50 text-blue-700 border-blue-200';
+
+                const slaLabel =
+                  slaState === 'OVERDUE'
+                    ? 'En retard'
+                    : slaState === 'IMMINENT'
+                    ? 'Imminent'
+                    : slaState === 'UPCOMING'
+                    ? 'À venir'
+                    : 'Exécuté';
+
                 return (
                   <div
                     key={act.id}
-                    className={`p-4 rounded-2xl border-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all ${
-                      isDone
-                        ? 'bg-emerald-50/40 border-emerald-200 opacity-85'
-                        : 'bg-white border-indigo-100 hover:border-indigo-300 shadow-xs'
-                    }`}
+                    className={`px-3 py-2 rounded-xl border flex items-center justify-between gap-3 transition-all ${rowStyle}`}
                   >
-                    <div className="flex items-start sm:items-center gap-4 min-w-0">
-                      <div className={`px-3.5 py-2.5 rounded-xl text-center shrink-0 border ${
-                        isDone ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-indigo-600 text-white border-indigo-600'
-                      }`}>
-                        <div className="text-sm font-black font-mono leading-none">[{schedTime}]</div>
-                        {schedDate && <div className="text-[9px] font-bold opacity-85 mt-1">{schedDate}</div>}
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <div className={`px-2.5 py-1 rounded-lg text-center shrink-0 border font-mono text-xs font-black leading-tight ${timeBadgeStyle}`}>
+                        {schedTime}
                       </div>
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2.5 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded-lg text-[10px] font-black uppercase tracking-wider">
-                            {locationText}
+
+                      <div className="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
+                        <span className="px-2 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded-md text-[10px] font-black uppercase tracking-tight shrink-0">
+                          {locationText}
+                        </span>
+                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-md text-[10px] font-black truncate max-w-[160px]">
+                          {act.patientName}
+                        </span>
+                        <span className="text-xs font-bold text-slate-800 truncate">
+                          {act.actName || act.actType || act.type}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                          📅 {schedTime}{schedDate ? ` (${schedDate})` : ''}
+                        </span>
+                        {!isDone && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shrink-0 ${
+                              slaState === 'OVERDUE'
+                                ? 'bg-rose-100 text-rose-700'
+                                : slaState === 'IMMINENT'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {slaLabel}
                           </span>
-                          <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-[10px] font-black">
-                            📅 Prévu pour : {schedTime}{schedDate ? ` (${schedDate})` : ''}
-                          </span>
-                          <span className="text-sm font-black text-slate-900 truncate">{act.patientName}</span>
-                        </div>
-                        <p className="text-xs font-bold text-slate-700">{act.actName || act.actType || act.type}</p>
+                        )}
                         {isDone && (
-                          <p className="text-[11px] font-bold text-emerald-700">
-                            ✓ Fait à {execTime} (Prévu à {schedTime}){earlyMotif ? ` - Motif: ${earlyMotif}` : ''} • par {act.executedBy || act.practitionerName || 'Infirmier(ère)'}
-                          </p>
+                          <span className="text-[10px] font-bold text-emerald-700 truncate">
+                            ✓ Fait à {execTime} (Prévu à {schedTime}){earlyMotif ? ` - Motif: ${earlyMotif}` : ''}
+                          </span>
                         )}
                       </div>
                     </div>
@@ -2102,20 +2217,21 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                         <button
                           type="button"
                           disabled={isExecutingAct}
-                          onClick={() => handleMarkActAsDone(act)}
-                          title={isEarlyPending ? 'Exécution anticipée : un motif sera demandé' : 'Marquer ce soin comme exécuté'}
-                          className={`px-4 py-2.5 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 shadow-sm cursor-pointer transition-colors ${
-                            isEarlyPending
+                          onClick={() => openValidationModal(act)}
+                          className={`px-3 py-1.5 disabled:opacity-50 text-white rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs cursor-pointer transition-colors ${
+                            slaState === 'OVERDUE'
+                              ? 'bg-rose-600 hover:bg-rose-700'
+                              : slaState === 'IMMINENT'
                               ? 'bg-amber-600 hover:bg-amber-700'
                               : 'bg-emerald-600 hover:bg-emerald-700'
                           }`}
                         >
-                          <Check size={15} />
+                          <Check size={13} />
                           <span>Exécuter</span>
                         </button>
                       ) : (
-                        <span className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
-                          <CheckCircle2 size={13} /> Exécuté
+                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                          <CheckCircle2 size={12} /> Fait
                         </span>
                       )}
                     </div>
@@ -2168,6 +2284,116 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
           setActivePatient(null);
         }}
       />
+
+      {/* VALIDATION DU SOIN MODAL (with Heure d'exécution & Notes cliniques) */}
+      {validationModalAct && (() => {
+        const isEarly = isActBeforeScheduledTime(validationModalAct);
+        const canSubmit = !isExecutingAct && (!isEarly || validationEarlyReason.trim().length > 0);
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-700 max-w-md w-full p-6 shadow-2xl space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <CheckCircle2 size={18} className="text-emerald-600" />
+                    <span>Validation du Soin</span>
+                  </h3>
+                  <p className="text-xs font-bold text-slate-500 mt-0.5">
+                    {validationModalAct.patientName} • {validationModalAct.locationBadge || `${validationModalAct.roomName || 'Chambre'} - ${validationModalAct.bedName || 'Lit'}`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setValidationModalAct(null)}
+                  className="p-1.5 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 text-xs space-y-0.5">
+                <p className="font-black text-slate-800 dark:text-slate-100">
+                  {validationModalAct.actName || validationModalAct.actType || validationModalAct.type}
+                </p>
+                <p className="font-bold text-slate-500">
+                  📅 Prévu pour : {validationModalAct.scheduledTime || '--:--'}
+                </p>
+              </div>
+
+              {isEarly && (
+                <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 space-y-2">
+                  <p className="text-xs font-bold text-amber-800">
+                    Vous exécutez ce soin avant l'heure prévue. Veuillez indiquer le motif de cette anticipation.
+                  </p>
+                  <input
+                    type="text"
+                    value={validationEarlyReason}
+                    onChange={(e) => setValidationEarlyReason(e.target.value)}
+                    placeholder="Motif d'anticipation obligatoire (ex: Patient en douleur)..."
+                    className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-amber-500/30"
+                    autoFocus
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                  Heure d'exécution
+                </label>
+                <input
+                  type="time"
+                  value={validationExecTime}
+                  onChange={(e) => setValidationExecTime(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-black text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-black uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                  Notes cliniques / Observations
+                </label>
+                <textarea
+                  rows={3}
+                  value={validationNotes}
+                  onChange={(e) => setValidationNotes(e.target.value)}
+                  placeholder="Ex : Patient a bien toléré l'injection, saignement léger observé..."
+                  className="w-full px-3.5 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-semibold text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-emerald-500/30"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setValidationModalAct(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-black uppercase tracking-wider cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="button"
+                  disabled={!canSubmit}
+                  onClick={() => {
+                    const targetAct = validationModalAct;
+                    const reason = validationEarlyReason.trim();
+                    const customTime = validationExecTime.trim();
+                    const notes = validationNotes.trim();
+                    setValidationModalAct(null);
+                    handleMarkActAsDone(targetAct, {
+                      overrideReason: isEarly ? reason : undefined,
+                      customExecTime: customTime,
+                      clinicalNotes: notes,
+                    });
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check size={14} />
+                  <span>Valider le Soin</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* MANDATORY EARLY EXECUTION CONFIRMATION MODAL */}
       {earlyExecModalAct && (
