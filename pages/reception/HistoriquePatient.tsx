@@ -10,6 +10,7 @@ import { db } from '../../src/firebase';
 import { collection, onSnapshot, query, orderBy, getDocs } from 'firebase/firestore';
 import { getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
 import { useSettings } from '../../hooks/useSettings';
+import { InpatientTrackingDashboard, InpatientStaySummary } from '../../components/inpatient/InpatientTrackingDashboard';
 
 export interface PatientHistoryEvent {
   id: string;
@@ -62,7 +63,9 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
   const [patientSearchTerm, setPatientSearchTerm] = useState('');
   const [allEvents, setAllEvents] = useState<PatientHistoryEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<'timeline' | 'table'>('timeline');
+  const [viewMode, setViewMode] = useState<'timeline' | 'table' | 'hospitalisations'>('timeline');
+  const [closedHospitalStays, setClosedHospitalStays] = useState<InpatientStaySummary[]>([]);
+  const [selectedArchivedStay, setSelectedArchivedStay] = useState<InpatientStaySummary | null>(null);
 
   // Filters
   const [selectedServiceType, setSelectedServiceType] = useState<string>('ALL');
@@ -85,6 +88,40 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
     }, (err) => console.error("Error fetching patients in Historique:", err));
 
     return () => unsubPatients();
+  }, [activeTenantId]);
+
+  // 1b. Listen to closed inpatient_records for Historique des Hospitalisations
+  useEffect(() => {
+    const unsubInpatient = onSnapshot(collection(db, 'inpatient_records'), (snap) => {
+      const list = snap.docs
+        .map((d) => ({ id: d.id, ...(d.data() as any) }))
+        .filter((r) => belongsToTenant(r, activeTenantId))
+        .filter((r) => {
+          const st = String(r.status || '').toUpperCase();
+          return st === 'DISCHARGED' || st === 'CLOTURE' || st === 'SORTI' || Boolean(r.dischargeDate);
+        })
+        .map((r): InpatientStaySummary => ({
+          id: r.id,
+          hospitalisation_id: r.hospitalisation_id || r.id,
+          visite_id: r.visite_id || '',
+          patientId: r.patientId || '',
+          patientName: r.patientName || 'Patient',
+          roomName: r.roomName || 'Chambre',
+          bedName: r.bedName || 'Lit',
+          wardName: r.wardName || '',
+          admissionDate: r.admissionDate || r.createdAt || '',
+          dischargeDate: r.dischargeDate || r.dischargedAt || r.updatedAt || '',
+          doctorName: r.doctorName || 'Médecin traitant',
+          reason: r.admissionReason || r.reason || 'Hospitalisation',
+          status: r.status || 'DISCHARGED',
+          vitals: r.vitals || [],
+          cares: r.cares || [],
+          observations: r.observations || [],
+        }))
+        .sort((a, b) => new Date(b.admissionDate || 0).getTime() - new Date(a.admissionDate || 0).getTime());
+      setClosedHospitalStays(list);
+    });
+    return () => unsubInpatient();
   }, [activeTenantId]);
 
   // Update selectedPatientId when prop changes
@@ -808,6 +845,13 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
               >
                 Tableau
               </button>
+              <button
+                onClick={() => setViewMode('hospitalisations')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-1.5 ${viewMode === 'hospitalisations' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                <BedDouble size={13} />
+                Historique des Hospitalisations
+              </button>
             </div>
 
             <button
@@ -1175,6 +1219,88 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Historique des Hospitalisations (Séjours Clôturés & Archive Read-Only) */}
+      {viewMode === 'hospitalisations' && (() => {
+        const visibleStays = closedHospitalStays.filter((s) => {
+          if (selectedPatientId === 'ALL') return true;
+          return s.patientId === selectedPatientId || s.patientId === currentActivePatient?.patientId;
+        });
+
+        return (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <BedDouble size={18} className="text-blue-600" />
+                <h3 className="font-black text-sm uppercase tracking-wider text-slate-800">
+                  Historique des Hospitalisations ({visibleStays.length})
+                </h3>
+              </div>
+              <span className="text-[11px] font-bold text-slate-400">
+                Cliquez sur un séjour clôturé pour consulter son dossier archivé en lecture seule
+              </span>
+            </div>
+
+            {visibleStays.length === 0 ? (
+              <div className="p-12 text-center space-y-2">
+                <BedDouble size={32} className="mx-auto text-slate-300" />
+                <p className="font-black text-sm text-slate-700">Aucun séjour d&apos;hospitalisation clôturé</p>
+                <p className="text-xs text-slate-400">
+                  Les séjours clôturés apparaîtront ici de manière permanente après la sortie du patient.
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {visibleStays.map((stay) => (
+                  <button
+                    key={stay.id}
+                    type="button"
+                    onClick={() => setSelectedArchivedStay(stay)}
+                    className="w-full p-5 text-left hover:bg-blue-50/40 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 cursor-pointer"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-sm text-slate-900">{stay.patientName}</span>
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[10px] font-mono font-bold">
+                          {stay.roomName} — {stay.bedName}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-black uppercase">
+                          Séjour Clôturé
+                        </span>
+                      </div>
+                      <p className="text-xs font-semibold text-slate-600">
+                        Motif : <strong className="text-slate-800">{stay.reason || 'Hospitalisation'}</strong> • Médecin : {stay.doctorName}
+                      </p>
+                      <p className="text-[11px] font-bold text-slate-400">
+                        Admission : {stay.admissionDate ? new Date(stay.admissionDate).toLocaleDateString('fr-FR') : '-'} • Sortie : {stay.dischargeDate ? new Date(stay.dischargeDate).toLocaleDateString('fr-FR') : '-'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs font-black text-blue-600 shrink-0">
+                      <Eye size={15} />
+                      <span>Ouvrir l&apos;archive</span>
+                      <ChevronRight size={15} />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* Read-Only Archive Modal rendering the exact same Fiche de Suivi */}
+      {selectedArchivedStay && (
+        <div className="fixed inset-0 z-[100] bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
+          <div className="bg-slate-100 rounded-3xl w-full max-w-6xl max-h-[94vh] overflow-y-auto p-4 sm:p-6 shadow-2xl border border-slate-300">
+            <InpatientTrackingDashboard
+              stay={selectedArchivedStay}
+              readOnly={true}
+              currentUser={user}
+              onClose={() => setSelectedArchivedStay(null)}
+            />
           </div>
         </div>
       )}

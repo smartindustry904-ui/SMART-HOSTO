@@ -17,6 +17,7 @@ import {
   InpatientCare, InpatientObservation, User as UserType 
 } from '../../types';
 import { VoiceNoteRecorder } from '../emergency/VoiceNoteRecorder';
+import { InpatientTrackingDashboard } from '../../components/inpatient/InpatientTrackingDashboard';
 
 interface PatientBedWorkspaceProps {
   bed: Bed;
@@ -35,7 +36,7 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
   onOpenDischargeModal,
   theme = 'light'
 }) => {
-  const [activeSection, setActiveSection] = useState<'vitals' | 'cares' | 'observations' | 'prescribe' | 'history'>('vitals');
+  const [activeSection, setActiveSection] = useState<'suivi' | 'vitals' | 'cares' | 'observations' | 'prescribe' | 'history'>('suivi');
   const [inpatientRecord, setInpatientRecord] = useState<InpatientRecord | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -271,6 +272,8 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
           price: unitPrice,
           source: 'HOSPITALISATION',
           origin: 'HOSPITALISATION',
+          hospitalisation_id: inpatientRecord.id,
+          visite_id: (inpatientRecord as any).visite_id || (bed as any).visite_id || '',
           inpatientRecordId: inpatientRecord.id,
           locationBadge,
           roomName: room?.name || (bed as any).roomName || '',
@@ -517,6 +520,18 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
       {/* Navigation Sub-Tabs */}
       <div className="flex items-center gap-2 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
         <button
+          onClick={() => setActiveSection('suivi')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
+            activeSection === 'suivi'
+              ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20'
+              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Clock size={16} />
+          <span>Fiche de Suivi (Timeline)</span>
+        </button>
+
+        <button
           onClick={() => setActiveSection('vitals')}
           className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${
             activeSection === 'vitals'
@@ -576,6 +591,34 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
           <span>Historique Global du Séjour</span>
         </button>
       </div>
+
+      {/* SECTION 0: FICHE DE SUIVI UNIFIÉE (TIMELINE CROSS-MODULE) */}
+      {activeSection === 'suivi' && (
+        <InpatientTrackingDashboard
+          stay={{
+            id: inpatientRecord?.id || bed.admissionId || bed.id,
+            hospitalisation_id: inpatientRecord?.id || bed.admissionId || '',
+            visite_id: (inpatientRecord as any)?.visite_id || (bed as any).visite_id || '',
+            patientId: bed.patientId || inpatientRecord?.patientId || '',
+            patientName: bed.patientName || inpatientRecord?.patientName || 'Patient Hospitalisé',
+            roomName: room?.name || (bed as any).roomName || 'Chambre',
+            bedName: bed.name,
+            admissionDate: inpatientRecord?.admissionDate || bed.admissionDate,
+            doctorName: inpatientRecord?.doctorName || (bed as any).doctorName || 'Médecin traitant',
+            reason: inpatientRecord?.admissionReason || (bed as any).reason || '',
+            status: inpatientRecord?.status || 'ADMITTED',
+            vitals: inpatientRecord?.vitals || [],
+            cares: inpatientRecord?.cares || [],
+            observations: inpatientRecord?.observations || [],
+          }}
+          currentUser={currentUser}
+          onAddVitalClick={() => { setActiveSection('vitals'); setShowVitalForm(true); }}
+          onAddCareClick={() => { setActiveSection('cares'); setShowCareForm(true); }}
+          onAddNoteClick={() => setActiveSection('observations')}
+          onPrescribeLabClick={() => setActiveSection('prescribe')}
+          onPrescribeMedClick={() => setActiveSection('prescribe')}
+        />
+      )}
 
       {/* SECTION 1: PARAMÈTRES / CONSTANTES */}
       {activeSection === 'vitals' && (
@@ -1462,6 +1505,8 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
                     const reqRef = doc(collection(db, 'lab_requests'));
                     await setDoc(reqRef, sanitizeData(stampTenantData({
                       id: reqRef.id,
+                      hospitalisation_id: inpatientRecord?.id || bed.admissionId || '',
+                      visite_id: (inpatientRecord as any)?.visite_id || (bed as any).visite_id || '',
                       patientId: bed.patientId || inpatientRecord?.patientId || '',
                       patientName: bed.patientName || inpatientRecord?.patientName || 'Patient Hospitalisé',
                       exams: [{ id: act?.id || reqRef.id, name: examName, price }],
@@ -1558,6 +1603,8 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
                     const rxRef = doc(collection(db, 'pending_prescriptions'));
                     await setDoc(rxRef, sanitizeData(stampTenantData({
                       id: rxRef.id,
+                      hospitalisation_id: inpatientRecord?.id || bed.admissionId || '',
+                      visite_id: (inpatientRecord as any)?.visite_id || (bed as any).visite_id || '',
                       patientId: bed.patientId || inpatientRecord?.patientId || '',
                       patient: bed.patientName || inpatientRecord?.patientName || 'Patient Hospitalisé',
                       patientName: bed.patientName || inpatientRecord?.patientName || 'Patient Hospitalisé',
