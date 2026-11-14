@@ -3431,6 +3431,102 @@ app.get(['/api/whatsapp/logs', '/whatsapp/logs'], async (_req, res) => {
 });
 
 // ==========================================
+// PRESCRIBED ITEMS GUARDED EDIT ENDPOINTS
+// ==========================================
+async function handleGuardedPrescribedItemUpdate(
+  req: express.Request,
+  res: express.Response,
+  colName: 'pending_prescriptions' | 'nursing_acts' | 'lab_requests'
+) {
+  try {
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({ error: 'ID manquant' });
+    }
+    const docRef = doc(db, colName, id);
+    const snap = await getDoc(docRef);
+    if (!snap.exists()) {
+      return res.status(404).json({ error: 'Élément introuvable' });
+    }
+
+    const current: any = snap.data() || {};
+    const paySt = String(current.payment_status || current.paymentStatus || '').toUpperCase().trim();
+    const billingSt = String(current.billingStatus || '').toLowerCase().trim();
+    let isPaid =
+      current.isPaid === true ||
+      ['PAYE', 'PAYÉ', 'PAID', 'SOLDE', 'SOLDÉ'].includes(paySt) ||
+      billingSt === 'paid' ||
+      billingSt === 'payé';
+
+    if (!isPaid && current.paymentRequestId) {
+      const prSnap = await getDoc(doc(db, 'payment_requests', String(current.paymentRequestId)));
+      if (prSnap.exists()) {
+        const prSt = String((prSnap.data() as any)?.status || '').toUpperCase().trim();
+        if (['PAYE', 'PAYÉ', 'PAID', 'SOLDE', 'SOLDÉ'].includes(prSt)) {
+          isPaid = true;
+        }
+      }
+    }
+
+    const rawClinical = String(current.clinical_status || current.clinicalStatus || current.status || 'PRESCRIT')
+      .toUpperCase()
+      .trim();
+    const allowedEditableClinical = new Set([
+      'PRESCRIT',
+      'EN_ATTENTE',
+      'EN ATTENTE',
+      'EN_ATTENTE_CAISSE',
+      'PENDING',
+      'PRÉVU',
+      'PREVU',
+    ]);
+    const isProgressed =
+      !allowedEditableClinical.has(rawClinical) ||
+      current.isDelivered === true ||
+      current.isAdministered === true ||
+      current.isCancelled === true;
+
+    if (isPaid || isProgressed) {
+      return res.status(403).json({ error: "L'élément ne peut plus être modifié." });
+    }
+
+    const allowedBody = { ...(req.body || {}) };
+    delete allowedBody.id;
+    delete allowedBody.paymentStatus;
+    delete allowedBody.payment_status;
+    delete allowedBody.isPaid;
+
+    await updateDoc(docRef, {
+      ...allowedBody,
+      updatedAt: new Date().toISOString(),
+    });
+
+    return res.json({ success: true, id });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'UPDATE_ERROR', message: err?.message });
+  }
+}
+
+app.put('/api/prescriptions/:id', (req, res) =>
+  handleGuardedPrescribedItemUpdate(req, res, 'pending_prescriptions')
+);
+app.patch('/api/prescriptions/:id', (req, res) =>
+  handleGuardedPrescribedItemUpdate(req, res, 'pending_prescriptions')
+);
+app.put('/api/soins/:id', (req, res) =>
+  handleGuardedPrescribedItemUpdate(req, res, 'nursing_acts')
+);
+app.patch('/api/soins/:id', (req, res) =>
+  handleGuardedPrescribedItemUpdate(req, res, 'nursing_acts')
+);
+app.put('/api/lab-requests/:id', (req, res) =>
+  handleGuardedPrescribedItemUpdate(req, res, 'lab_requests')
+);
+app.patch('/api/lab-requests/:id', (req, res) =>
+  handleGuardedPrescribedItemUpdate(req, res, 'lab_requests')
+);
+
+// ==========================================
 // SERVER INITIALIZATION & VITE SPA
 // ==========================================
 async function startServer() {

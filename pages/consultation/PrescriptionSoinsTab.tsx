@@ -2,12 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { 
   Syringe, Clock, CheckCircle2, AlertTriangle, ShieldAlert, 
   Send, User, FileText, Check, Activity, Droplets, HeartPulse, 
-  Sparkles, RefreshCw, X, AlertCircle, ChevronDown, Loader2
+  Sparkles, RefreshCw, X, AlertCircle, ChevronDown, Loader2, Edit3, Ban
 } from 'lucide-react';
 import { db, sanitizeData } from '../../src/firebase';
 import { collection, doc, setDoc, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { User as UserType } from '../../types';
 import { stampTenantData, getActiveTenantId, belongsToTenant } from '../../src/utils/tenant';
+import {
+  cancelPrescribedItemWithRefund,
+  evaluatePrescriptionGuardrails,
+} from '../../src/utils/prescriptionGuardrails';
+import { EditPrescribedItemModal } from '../../components/common/EditPrescribedItemModal';
 
 interface PrescriptionSoinsTabProps {
   patient: any;
@@ -73,6 +78,8 @@ export const PrescriptionSoinsTab: React.FC<PrescriptionSoinsTabProps> = ({
   const [timing, setTiming] = useState('Immédiat (STAT)');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [editingAct, setEditingAct] = useState<any | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   // Dynamic protocols and medical acts loaded from hospital settings in Paramètres
   const [settingsCareProtocols, setSettingsCareProtocols] = useState<any[]>([]);
@@ -644,13 +651,69 @@ export const PrescriptionSoinsTab: React.FC<PrescriptionSoinsTabProps> = ({
                       <span className="text-xs text-slate-400 font-medium">• {act.timing || 'Immédiat'}</span>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {(() => {
+                        const guard = evaluatePrescriptionGuardrails(act, 'SOIN');
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              disabled={!guard.editable}
+                              title={guard.editable ? 'Modifier ce soin' : guard.lockReason}
+                              onClick={() => {
+                                if (guard.editable) setEditingAct(act);
+                              }}
+                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[10px] font-black border transition-colors ${
+                                guard.editable
+                                  ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 cursor-pointer'
+                                  : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-70'
+                              }`}
+                            >
+                              <Edit3 size={11} />
+                              <span>Modifier</span>
+                            </button>
+                            {guard.canCancelForRefund && (
+                              <button
+                                type="button"
+                                disabled={cancellingId === act.id}
+                                onClick={async () => {
+                                  const reason = window.prompt(
+                                    "Motif d'annulation (alerte Avoir/Remboursement Caisse) :",
+                                    'Erreur de prescription'
+                                  );
+                                  if (reason === null) return;
+                                  setCancellingId(act.id);
+                                  try {
+                                    await cancelPrescribedItemWithRefund({
+                                      kind: 'SOIN',
+                                      docId: act.id,
+                                      item: act,
+                                      reason,
+                                      user,
+                                    });
+                                  } finally {
+                                    setCancellingId(null);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-black transition-colors cursor-pointer"
+                              >
+                                <Ban size={11} />
+                                <span>{cancellingId === act.id ? 'Annulation...' : 'Annuler (Avoir)'}</span>
+                              </button>
+                            )}
+                          </>
+                        );
+                      })()}
                       <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 ${
-                        isDone
+                        act.isCancelled || String(act.status || '').toUpperCase().includes('ANNUL')
+                          ? 'bg-rose-100 text-rose-800 border border-rose-300'
+                          : isDone
                           ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
                           : 'bg-amber-100 text-amber-800 border border-amber-300'
                       }`}>
-                        {isDone ? (
+                        {act.isCancelled || String(act.status || '').toUpperCase().includes('ANNUL') ? (
+                          <span>Annulé</span>
+                        ) : isDone ? (
                           <>
                             <CheckCircle2 size={13} className="text-emerald-600" />
                             <span>Exécuté / Fait</span>
@@ -701,6 +764,12 @@ export const PrescriptionSoinsTab: React.FC<PrescriptionSoinsTabProps> = ({
           </div>
         )}
       </div>
+
+      <EditPrescribedItemModal
+        target={editingAct ? { kind: 'SOIN', rawDoc: editingAct } : null}
+        onClose={() => setEditingAct(null)}
+        user={user}
+      />
     </div>
   );
 };

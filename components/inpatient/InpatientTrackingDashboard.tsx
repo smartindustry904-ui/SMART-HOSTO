@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
+  Ban,
   BedDouble,
   Beaker,
   Calendar,
   CheckCircle2,
   Clock,
+  Edit3,
   FileText,
   HeartPulse,
   Layers,
@@ -22,6 +24,12 @@ import { db } from '../../src/firebase';
 import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { belongsToTenant, getActiveTenantId } from '../../src/utils/tenant';
 import { resolvePaymentBadgeStatus, ResolvedPaymentBadge } from '../../src/utils/visitCycle';
+import {
+  cancelPrescribedItemWithRefund,
+  evaluatePrescriptionGuardrails,
+  PrescribedItemKind,
+} from '../../src/utils/prescriptionGuardrails';
+import { EditPrescribedItemModal } from '../common/EditPrescribedItemModal';
 import { User as UserType } from '../../types';
 
 export interface InpatientStaySummary {
@@ -58,6 +66,8 @@ interface TimelineFeedItem {
   financialBadge?: ResolvedPaymentBadge;
   rawDocId?: string;
   rawCollection?: 'pending_prescriptions' | 'nursing_acts' | 'lab_requests';
+  rawKind?: PrescribedItemKind;
+  rawDoc?: any;
   canMarkAdministered?: boolean;
   metaChips?: string[];
   resultsList?: Array<{ name: string; value: string; unit?: string; ref?: string }>;
@@ -116,6 +126,8 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
   const [paymentRequests, setPaymentRequests] = useState<any[]>([]);
   const [triageRecords, setTriageRecords] = useState<any[]>([]);
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [editingTarget, setEditingTarget] = useState<{ kind: PrescribedItemKind; rawDoc: any } | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const activeTenantId = useMemo(() => getActiveTenantId(currentUser), [currentUser]);
   const stayId = stay.hospitalisation_id || stay.id;
@@ -333,8 +345,9 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
     nursingActs.filter(belongsToCurrentStay).forEach((na: any) => {
       const ms = toMs(na.completedAt || na.executedAt || na.scheduledAt || na.createdAt);
       const { dateStr, timeStr } = formatDateTimeParts(ms, na.scheduledDate, na.scheduledTime);
-      const isDone = na.status === 'FAIT' || na.status === 'Fait' || na.clinicalStatus === 'Fait';
-      const isPrescribed = !isDone && (na.status === 'Prescrit' || na.clinicalStatus === 'Prescrit');
+      const isCancelled = na.isCancelled === true || String(na.status || '').toUpperCase().includes('ANNUL');
+      const isDone = !isCancelled && (na.status === 'FAIT' || na.status === 'Fait' || na.clinicalStatus === 'Fait');
+      const isPrescribed = !isCancelled && !isDone && (na.status === 'Prescrit' || na.clinicalStatus === 'Prescrit');
       const schedTime = na.scheduledTime || na.scheduledTimeSnapshot || '';
       const execTime = na.heure_execution || na.executionTime || timeStr;
       const earlyMotif = na.earlyExecutionReason || na.motifAnticipation || '';
@@ -369,10 +382,14 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         dateStr,
         timeStr,
         clinicalBadge: {
-          label: isDone ? 'Statut : Fait' : isPrescribed ? 'Statut : Prescrit' : 'Statut : En attente de soin',
-          tone: isDone ? 'emerald' : isPrescribed ? 'slate' : 'amber',
+          label: isCancelled ? 'Statut : Annulé' : isDone ? 'Statut : Fait' : isPrescribed ? 'Statut : Prescrit' : 'Statut : En attente de soin',
+          tone: isCancelled ? 'rose' : isDone ? 'emerald' : isPrescribed ? 'slate' : 'amber',
         },
         financialBadge: getFinBadge(na),
+        rawDocId: na.id,
+        rawCollection: 'nursing_acts',
+        rawKind: 'SOIN',
+        rawDoc: na,
       });
     });
 
@@ -406,8 +423,9 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
 
       const st = String(lr.status || '').toLowerCase();
       const cs = String(lr.clinicalStatus || '').toLowerCase();
-      const isDone = st.includes('termin') || st.includes('valid') || cs.includes('termin') || resultsList.length > 0;
-      const isInProgress = !isDone && (st.includes('cours') || st.includes('analyse') || cs.includes('cours'));
+      const isCancelled = lr.isCancelled === true || st.includes('annul') || cs.includes('annul');
+      const isDone = !isCancelled && (st.includes('termin') || st.includes('valid') || cs.includes('termin') || resultsList.length > 0);
+      const isInProgress = !isCancelled && !isDone && (st.includes('cours') || st.includes('analyse') || cs.includes('cours'));
 
       items.push({
         id: `lab-${lr.id}`,
@@ -420,14 +438,20 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         dateStr,
         timeStr,
         clinicalBadge: {
-          label: isDone
+          label: isCancelled
+            ? 'Statut : Annulé'
+            : isDone
             ? 'Statut : Terminé / Résultat Publié'
             : isInProgress
             ? "Statut : En cours d'analyse"
             : 'Statut : Prescrit',
-          tone: isDone ? 'emerald' : isInProgress ? 'blue' : 'slate',
+          tone: isCancelled ? 'rose' : isDone ? 'emerald' : isInProgress ? 'blue' : 'slate',
         },
         financialBadge: getFinBadge(lr),
+        rawDocId: lr.id,
+        rawCollection: 'lab_requests',
+        rawKind: 'LABO',
+        rawDoc: lr,
         resultsList: resultsList.length > 0 ? resultsList : undefined,
       });
     });
@@ -443,15 +467,19 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         .filter(Boolean);
       const st = String(po.status || '').toUpperCase();
       const cs = String(po.clinicalStatus || '').toLowerCase();
+      const isCancelled = po.isCancelled === true || st.includes('ANNUL') || cs.includes('annul');
       const isAdministered =
-        po.isAdministered === true || cs.includes('administr') || st === 'ADMINISTERED' || st === 'ADMINISTRÉ';
+        !isCancelled &&
+        (po.isAdministered === true || cs.includes('administr') || st === 'ADMINISTERED' || st === 'ADMINISTRÉ');
       const isDispensed =
+        !isCancelled &&
         !isAdministered &&
         (po.isDelivered === true ||
           ['DISPENSED', 'DELIVERED', 'DÉLIVRÉ', 'SERVI'].includes(st) ||
           cs.includes('délivr') ||
           cs.includes('dispens'));
       const isAwaitingDisp =
+        !isCancelled &&
         !isAdministered &&
         !isDispensed &&
         (st === 'PENDING' ||
@@ -459,14 +487,18 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
           po.isPaid === true ||
           String(po.paymentStatus || '').toUpperCase() === 'PAID');
 
-      const clinicalLabel = isAdministered
+      const clinicalLabel = isCancelled
+        ? 'Statut : Annulé'
+        : isAdministered
         ? 'Statut : Administré'
         : isDispensed
         ? 'Statut : Délivré'
         : isAwaitingDisp
         ? 'Statut : En attente de délivrance'
         : 'Statut : Prescrit';
-      const clinicalTone = isAdministered
+      const clinicalTone = isCancelled
+        ? 'rose'
+        : isAdministered
         ? 'emerald'
         : isDispensed
         ? 'blue'
@@ -490,7 +522,9 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         financialBadge: getFinBadge(po),
         rawDocId: po.id,
         rawCollection: 'pending_prescriptions',
-        canMarkAdministered: !readOnly && isDispensed && !isAdministered,
+        rawKind: 'PHARMA',
+        rawDoc: po,
+        canMarkAdministered: !readOnly && isDispensed && !isAdministered && !isCancelled,
       });
     });
 
@@ -712,17 +746,81 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
                     <User size={12} />
                     <span>{item.actor}</span>
                   </div>
-                  {item.canMarkAdministered && !readOnly && (
-                    <button
-                      type="button"
-                      disabled={markingId === item.id}
-                      onClick={() => handleMarkAdministered(item)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black transition-colors disabled:opacity-50"
-                    >
-                      <CheckCircle2 size={12} />
-                      {markingId === item.id ? 'Enregistrement...' : 'Marquer Administré'}
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {!readOnly && item.rawDoc && item.rawKind && (() => {
+                      const guard = evaluatePrescriptionGuardrails(item.rawDoc, item.rawKind, paymentRequests);
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            disabled={!guard.editable}
+                            title={guard.editable ? 'Modifier la prescription' : guard.lockReason}
+                            onClick={() => {
+                              if (guard.editable && item.rawKind && item.rawDoc) {
+                                setEditingTarget({ kind: item.rawKind, rawDoc: item.rawDoc });
+                              }
+                            }}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-black border transition-colors ${
+                              guard.editable
+                                ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200 cursor-pointer'
+                                : 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-70'
+                            }`}
+                          >
+                            <Edit3 size={11} />
+                            <span>Modifier</span>
+                          </button>
+                          {guard.canCancelForRefund && (
+                            <button
+                              type="button"
+                              disabled={cancellingId === item.id}
+                              onClick={async () => {
+                                const reason = window.prompt(
+                                  "Motif d'annulation (une alerte d'Avoir/Remboursement sera transmise à la Caisse) :",
+                                  'Erreur de prescription'
+                                );
+                                if (reason === null) return;
+                                setCancellingId(item.id);
+                                try {
+                                  await cancelPrescribedItemWithRefund({
+                                    kind: item.rawKind!,
+                                    docId: item.rawDoc.id,
+                                    item: item.rawDoc,
+                                    reason,
+                                    user: currentUser,
+                                  });
+                                  window.dispatchEvent(
+                                    new CustomEvent('app-notification', {
+                                      detail: {
+                                        message: 'Élément annulé et notification Avoir transmise à la Caisse.',
+                                        type: 'info',
+                                      },
+                                    })
+                                  );
+                                } finally {
+                                  setCancellingId(null);
+                                }
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-black transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              <Ban size={11} />
+                              <span>{cancellingId === item.id ? 'Annulation...' : 'Annuler (Avoir)'}</span>
+                            </button>
+                          )}
+                        </>
+                      );
+                    })()}
+                    {item.canMarkAdministered && !readOnly && (
+                      <button
+                        type="button"
+                        disabled={markingId === item.id}
+                        onClick={() => handleMarkAdministered(item)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black transition-colors disabled:opacity-50 cursor-pointer"
+                      >
+                        <CheckCircle2 size={12} />
+                        {markingId === item.id ? 'Enregistrement...' : 'Marquer Administré'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -922,6 +1020,13 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
           {renderFeedList(timelineItems.filter((i) => i.category === activeCategoryTab))}
         </div>
       )}
+
+      <EditPrescribedItemModal
+        target={editingTarget}
+        onClose={() => setEditingTarget(null)}
+        paymentRequests={paymentRequests}
+        user={currentUser}
+      />
     </div>
   );
 };
