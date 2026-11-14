@@ -19,8 +19,9 @@ import {
   X,
 } from 'lucide-react';
 import { db } from '../../src/firebase';
-import { collection, doc, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
 import { belongsToTenant, getActiveTenantId } from '../../src/utils/tenant';
+import { resolvePaymentBadgeStatus, ResolvedPaymentBadge } from '../../src/utils/visitCycle';
 import { User as UserType } from '../../types';
 
 export interface InpatientStaySummary {
@@ -53,7 +54,11 @@ interface TimelineFeedItem {
   timestampMs: number;
   dateStr: string;
   timeStr: string;
-  statusBadge?: { label: string; tone: 'emerald' | 'amber' | 'blue' | 'rose' | 'slate' };
+  clinicalBadge?: { label: string; tone: 'emerald' | 'amber' | 'blue' | 'rose' | 'slate' };
+  financialBadge?: ResolvedPaymentBadge;
+  rawDocId?: string;
+  rawCollection?: 'pending_prescriptions' | 'nursing_acts' | 'lab_requests';
+  canMarkAdministered?: boolean;
   metaChips?: string[];
   resultsList?: Array<{ name: string; value: string; unit?: string; ref?: string }>;
 }
@@ -107,7 +112,10 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
   const [nursingActs, setNursingActs] = useState<any[]>([]);
   const [labRequests, setLabRequests] = useState<any[]>([]);
   const [pharmacyOrders, setPharmacyOrders] = useState<any[]>([]);
+  const [pharmacySales, setPharmacySales] = useState<any[]>([]);
+  const [paymentRequests, setPaymentRequests] = useState<any[]>([]);
   const [triageRecords, setTriageRecords] = useState<any[]>([]);
+  const [markingId, setMarkingId] = useState<string | null>(null);
 
   const activeTenantId = useMemo(() => getActiveTenantId(currentUser), [currentUser]);
   const stayId = stay.hospitalisation_id || stay.id;
@@ -161,6 +169,28 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
       }
     );
 
+    const unsubPharmaSales = onSnapshot(
+      query(collection(db, 'pharmacy_sales'), where('patientId', '==', pid)),
+      (snap) => {
+        setPharmacySales(
+          snap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((x) => belongsToTenant(x, activeTenantId))
+        );
+      }
+    );
+
+    const unsubPayments = onSnapshot(
+      query(collection(db, 'payment_requests'), where('patientId', '==', pid)),
+      (snap) => {
+        setPaymentRequests(
+          snap.docs
+            .map((d) => ({ id: d.id, ...d.data() }))
+            .filter((x) => belongsToTenant(x, activeTenantId))
+        );
+      }
+    );
+
     const unsubTriage = onSnapshot(
       query(collection(db, 'triage_records'), where('patientId', '==', pid)),
       (snap) => {
@@ -176,6 +206,8 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
       unsubNursing();
       unsubLab();
       unsubPharma();
+      unsubPharmaSales();
+      unsubPayments();
       unsubTriage();
     };
   }, [stay.patientId, activeTenantId]);
@@ -217,6 +249,14 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
   const timelineItems: TimelineFeedItem[] = useMemo(() => {
     const items: TimelineFeedItem[] = [];
 
+    const getFinBadge = (rawItem: any): ResolvedPaymentBadge =>
+      resolvePaymentBadgeStatus({
+        item: rawItem,
+        paymentRequests,
+        patientIds: [stay.patientId],
+        visiteId: stay.visite_id,
+      });
+
     // A1. Inpatient Vitals
     (mergedStay.vitals || []).forEach((v: any, idx: number) => {
       const ms = toMs(v.timestamp || v.createdAt || `${v.date || ''}T${v.time || '00:00'}`);
@@ -235,7 +275,8 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         dateStr,
         timeStr,
         metaChips: chips,
-        statusBadge: { label: 'Constantes', tone: 'blue' },
+        clinicalBadge: { label: 'Statut : Fait', tone: 'emerald' },
+        financialBadge: v.paymentStatus || v.billingStatus ? getFinBadge(v) : { code: 'EXONERE', label: 'EXONÉRÉ / SUIVI' },
       });
     });
 
@@ -258,7 +299,8 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         dateStr,
         timeStr,
         metaChips: chips,
-        statusBadge: { label: 'Triage / Constantes', tone: 'blue' },
+        clinicalBadge: { label: 'Statut : Fait', tone: 'emerald' },
+        financialBadge: t.paymentStatus || t.billingStatus ? getFinBadge(t) : { code: 'EXONERE', label: 'EXONÉRÉ / SUIVI' },
       });
     });
 
@@ -266,6 +308,8 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
     (mergedStay.cares || []).forEach((c: any, idx: number) => {
       const ms = toMs(c.timestamp || c.createdAt || `${c.date || ''}T${c.time || '00:00'}`);
       const { dateStr, timeStr } = formatDateTimeParts(ms, c.date, c.time);
+      const isCareDone = c.status === 'Fait' || c.status === 'FAIT' || c.clinicalStatus === 'Fait';
+      const isCarePrescribed = c.status === 'Prescrit' || c.clinicalStatus === 'Prescrit';
       items.push({
         id: `care-${c.id || idx}`,
         category: 'SOINS',
@@ -275,17 +319,22 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         timestampMs: ms,
         dateStr,
         timeStr,
-        statusBadge: {
-          label: c.status === 'Fait' || c.status === 'FAIT' ? 'Fait' : c.status || 'Réalisé',
-          tone: c.status === 'En attente' ? 'amber' : 'emerald',
+        clinicalBadge: {
+          label: isCareDone ? 'Statut : Fait' : isCarePrescribed ? 'Statut : Prescrit' : 'Statut : En attente de soin',
+          tone: isCareDone ? 'emerald' : isCarePrescribed ? 'slate' : 'amber',
         },
+        financialBadge:
+          c.paymentStatus || c.billingStatus || c.paymentRequestId
+            ? getFinBadge(c)
+            : { code: 'EXONERE', label: 'EXONÉRÉ / SUIVI' },
       });
     });
 
     nursingActs.filter(belongsToCurrentStay).forEach((na: any) => {
       const ms = toMs(na.completedAt || na.scheduledAt || na.createdAt);
       const { dateStr, timeStr } = formatDateTimeParts(ms, na.scheduledDate, na.scheduledTime);
-      const isDone = na.status === 'FAIT' || na.status === 'Fait';
+      const isDone = na.status === 'FAIT' || na.status === 'Fait' || na.clinicalStatus === 'Fait';
+      const isPrescribed = !isDone && (na.status === 'Prescrit' || na.clinicalStatus === 'Prescrit');
       items.push({
         id: `na-${na.id}`,
         category: 'SOINS',
@@ -298,10 +347,11 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         timestampMs: ms,
         dateStr,
         timeStr,
-        statusBadge: {
-          label: isDone ? 'Fait' : 'En attente soin',
-          tone: isDone ? 'emerald' : 'amber',
+        clinicalBadge: {
+          label: isDone ? 'Statut : Fait' : isPrescribed ? 'Statut : Prescrit' : 'Statut : En attente de soin',
+          tone: isDone ? 'emerald' : isPrescribed ? 'slate' : 'amber',
         },
+        financialBadge: getFinBadge(na),
       });
     });
 
@@ -334,7 +384,9 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
       }
 
       const st = String(lr.status || '').toLowerCase();
-      const isDone = st.includes('termin') || st.includes('valid') || resultsList.length > 0;
+      const cs = String(lr.clinicalStatus || '').toLowerCase();
+      const isDone = st.includes('termin') || st.includes('valid') || cs.includes('termin') || resultsList.length > 0;
+      const isInProgress = !isDone && (st.includes('cours') || st.includes('analyse') || cs.includes('cours'));
 
       items.push({
         id: `lab-${lr.id}`,
@@ -346,39 +398,113 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         timestampMs: ms,
         dateStr,
         timeStr,
-        statusBadge: {
-          label: isDone ? 'Résultats publiés' : lr.status || 'En cours',
-          tone: isDone ? 'emerald' : 'blue',
+        clinicalBadge: {
+          label: isDone
+            ? 'Statut : Terminé / Résultat Publié'
+            : isInProgress
+            ? "Statut : En cours d'analyse"
+            : 'Statut : Prescrit',
+          tone: isDone ? 'emerald' : isInProgress ? 'blue' : 'slate',
         },
+        financialBadge: getFinBadge(lr),
         resultsList: resultsList.length > 0 ? resultsList : undefined,
       });
     });
 
-    // C. Pharmacie
+    // C. Pharmacie (pending_prescriptions + deduplicated pharmacy_sales)
+    const matchedOrderIds = new Set<string>();
     pharmacyOrders.filter(belongsToCurrentStay).forEach((po: any) => {
-      const ms = toMs(po.dispensedAt || po.updatedAt || po.createdAt);
+      matchedOrderIds.add(po.id);
+      const ms = toMs(po.administeredAt || po.dispensedAt || po.updatedAt || po.createdAt);
       const { dateStr, timeStr } = formatDateTimeParts(ms);
       const meds = (po.items || po.medications || [])
         .map((m: any) => `${m.name || m.nom} (x${m.quantity || m.qty || 1}${m.dosage ? ` • ${m.dosage}` : ''})`)
         .filter(Boolean);
       const st = String(po.status || '').toUpperCase();
-      const isDispensed = ['DISPENSED', 'DELIVERED', 'DÉLIVRÉ', 'SERVI'].includes(st);
+      const cs = String(po.clinicalStatus || '').toLowerCase();
+      const isAdministered =
+        po.isAdministered === true || cs.includes('administr') || st === 'ADMINISTERED' || st === 'ADMINISTRÉ';
+      const isDispensed =
+        !isAdministered &&
+        (po.isDelivered === true ||
+          ['DISPENSED', 'DELIVERED', 'DÉLIVRÉ', 'SERVI'].includes(st) ||
+          cs.includes('délivr') ||
+          cs.includes('dispens'));
+      const isAwaitingDisp =
+        !isAdministered &&
+        !isDispensed &&
+        (st === 'PENDING' ||
+          st === 'EN_ATTENTE' ||
+          po.isPaid === true ||
+          String(po.paymentStatus || '').toUpperCase() === 'PAID');
+
+      const clinicalLabel = isAdministered
+        ? 'Statut : Administré'
+        : isDispensed
+        ? 'Statut : Délivré'
+        : isAwaitingDisp
+        ? 'Statut : En attente de délivrance'
+        : 'Statut : Prescrit';
+      const clinicalTone = isAdministered
+        ? 'emerald'
+        : isDispensed
+        ? 'blue'
+        : isAwaitingDisp
+        ? 'amber'
+        : 'slate';
+
       items.push({
         id: `pharma-${po.id}`,
         category: 'PHARMA',
         title: `Pharmacie : ${meds.join(', ') || 'Ordonnance de service'}`,
-        actor: isDispensed
-          ? po.dispensedBy || 'Pharmacien'
+        actor: isAdministered
+          ? `Administré par ${po.administeredBy || 'Infirmier(ère)'}`
+          : isDispensed
+          ? `Délivré par ${po.dispensedBy || 'Pharmacien'}`
           : `Prescrit par ${po.prescriberName || po.doctorName || 'Médecin'}`,
         timestampMs: ms,
         dateStr,
         timeStr,
-        statusBadge: {
-          label: isDispensed ? 'Dispensé' : 'En attente Pharmacie',
-          tone: isDispensed ? 'emerald' : 'amber',
-        },
+        clinicalBadge: { label: clinicalLabel, tone: clinicalTone },
+        financialBadge: getFinBadge(po),
+        rawDocId: po.id,
+        rawCollection: 'pending_prescriptions',
+        canMarkAdministered: !readOnly && isDispensed && !isAdministered,
       });
     });
+
+    pharmacySales
+      .filter(belongsToCurrentStay)
+      .filter((ps: any) => !ps.prescriptionId || !matchedOrderIds.has(ps.prescriptionId))
+      .forEach((ps: any) => {
+        const ms = toMs(ps.administeredAt || ps.createdAt || ps.date);
+        const { dateStr, timeStr } = formatDateTimeParts(ms);
+        const meds = (ps.items || [])
+          .map((m: any) => `${m.name || m.nom} (x${m.quantity || m.qty || 1})`)
+          .filter(Boolean);
+        const isAdministered =
+          ps.isAdministered === true || String(ps.clinicalStatus || '').toLowerCase().includes('administr');
+        items.push({
+          id: `pharma-sale-${ps.id}`,
+          category: 'PHARMA',
+          title: `Pharmacie : ${meds.join(', ') || 'Délivrance pharmacie'}`,
+          actor: isAdministered
+            ? `Administré par ${ps.administeredBy || 'Infirmier(ère)'}`
+            : `Délivré par ${ps.cashierName || ps.dispensedBy || 'Pharmacien'}`,
+          timestampMs: ms,
+          dateStr,
+          timeStr,
+          clinicalBadge: {
+            label: isAdministered ? 'Statut : Administré' : 'Statut : Délivré',
+            tone: isAdministered ? 'emerald' : 'blue',
+          },
+          financialBadge: getFinBadge({
+            ...ps,
+            paymentStatus: ps.paymentStatus || 'PAID',
+            isPaid: ps.isPaid ?? true,
+          }),
+        });
+      });
 
     // D. Visites Médicales / Doctor Notes
     (mergedStay.observations || []).forEach((obs: any, idx: number) => {
@@ -393,12 +519,13 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
         timestampMs: ms,
         dateStr,
         timeStr,
-        statusBadge: { label: 'Note Médicale', tone: 'slate' },
+        clinicalBadge: { label: 'Statut : Fait', tone: 'emerald' },
+        financialBadge: { code: 'EXONERE', label: 'EXONÉRÉ / SUIVI' },
       });
     });
 
     return items.sort((a, b) => b.timestampMs - a.timestampMs);
-  }, [mergedStay, nursingActs, labRequests, pharmacyOrders, triageRecords]);
+  }, [mergedStay, nursingActs, labRequests, pharmacyOrders, pharmacySales, paymentRequests, triageRecords, stay.patientId, stay.visite_id, readOnly]);
 
   const counts = useMemo(
     () => ({
@@ -410,12 +537,41 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
     [timelineItems]
   );
 
+  const handleMarkAdministered = async (item: TimelineFeedItem) => {
+    if (readOnly || !item.rawDocId || item.rawCollection !== 'pending_prescriptions') return;
+    setMarkingId(item.id);
+    try {
+      await updateDoc(doc(db, 'pending_prescriptions', item.rawDocId), {
+        clinicalStatus: 'Administré',
+        isAdministered: true,
+        administeredAt: new Date().toISOString(),
+        administeredBy: currentUser?.name || 'Infirmier(ère)',
+      });
+    } catch (err) {
+      console.error('Error marking medication as administered:', err);
+    } finally {
+      setMarkingId(null);
+    }
+  };
+
   const badgeColors: Record<string, string> = {
     emerald: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     amber: 'bg-amber-50 text-amber-700 border-amber-200',
     blue: 'bg-blue-50 text-blue-700 border-blue-200',
     rose: 'bg-rose-50 text-rose-700 border-rose-200',
-    slate: 'bg-purple-50 text-purple-700 border-purple-200',
+    slate: 'bg-slate-100 text-slate-700 border-slate-300',
+  };
+
+  const financialBadgeColors: Record<'PAID' | 'EXONERE' | 'PENDING', string> = {
+    PAID: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    EXONERE: 'bg-blue-50 text-blue-700 border-blue-200',
+    PENDING: 'bg-rose-50 text-rose-700 border-rose-200',
+  };
+
+  const financialBadgeText: Record<'PAID' | 'EXONERE' | 'PENDING', string> = {
+    PAID: '💰 Payé',
+    EXONERE: '💰 Exonéré / Suivi',
+    PENDING: '💰 En attente Caisse',
   };
 
   const categoryIcon = (cat: TimelineFeedItem['category']) => {
@@ -461,13 +617,22 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="font-black text-slate-900 text-sm">{item.title}</h4>
-                    {item.statusBadge && (
+                    {item.clinicalBadge && (
                       <span
                         className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                          badgeColors[item.statusBadge.tone]
+                          badgeColors[item.clinicalBadge.tone]
                         }`}
                       >
-                        {item.statusBadge.label}
+                        {item.clinicalBadge.label}
+                      </span>
+                    )}
+                    {item.financialBadge && (
+                      <span
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
+                          financialBadgeColors[item.financialBadge.code]
+                        }`}
+                      >
+                        {financialBadgeText[item.financialBadge.code]}
                       </span>
                     )}
                   </div>
@@ -518,9 +683,22 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
                   </div>
                 )}
 
-                <div className="pt-1 flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
-                  <User size={12} />
-                  <span>{item.actor}</span>
+                <div className="pt-1 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-500">
+                    <User size={12} />
+                    <span>{item.actor}</span>
+                  </div>
+                  {item.canMarkAdministered && !readOnly && (
+                    <button
+                      type="button"
+                      disabled={markingId === item.id}
+                      onClick={() => handleMarkAdministered(item)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black transition-colors disabled:opacity-50"
+                    >
+                      <CheckCircle2 size={12} />
+                      {markingId === item.id ? 'Enregistrement...' : 'Marquer Administré'}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

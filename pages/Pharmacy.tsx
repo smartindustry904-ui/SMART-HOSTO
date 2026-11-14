@@ -521,14 +521,23 @@ const Pharmacy: React.FC<PharmacyProps> = ({
         }
       });
 
-      // 6. Remove from pending prescriptions queue if applicable (including all duplicate IDs)
+      // 6. Mark as DELIVERED in pending_prescriptions (never delete, so clinical timelines & archives preserve the record)
+      const deliveredPatch = {
+        status: 'DELIVERED',
+        clinicalStatus: 'Délivré',
+        isDelivered: true,
+        paymentStatus: 'PAID',
+        isPaid: true,
+        dispensedAt: new Date().toISOString(),
+        dispensedBy: user?.name || 'Pharmacien',
+      };
       if (presc) {
         if (Array.isArray(presc.allFirebaseIds) && presc.allFirebaseIds.length > 0) {
           presc.allFirebaseIds.forEach((fId: string) => {
-            batch.delete(doc(db, 'pending_prescriptions', fId));
+            batch.update(doc(db, 'pending_prescriptions', fId), deliveredPatch);
           });
         } else if (presc.firebaseId) {
-          batch.delete(doc(db, 'pending_prescriptions', presc.firebaseId));
+          batch.update(doc(db, 'pending_prescriptions', presc.firebaseId), deliveredPatch);
         }
       }
 
