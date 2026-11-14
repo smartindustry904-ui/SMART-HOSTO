@@ -23,6 +23,71 @@ export function isBedEnNettoyage(status?: BedStatus | string): boolean {
   return normalizeBedStatus(status) === 'EN NETTOYAGE';
 }
 
+export interface ActiveInpatientLocation {
+  bedId: string;
+  bedName: string;
+  roomName: string;
+  locationLabel: string;
+  inpatientId?: string;
+}
+
+/**
+ * Checks in-memory beds / rooms / inpatient_records to see if a patient is
+ * currently occupying a bed (status === 'OCCUPÉ').
+ */
+export function findActiveInpatientLocationFromLists(params: {
+  patientIds: string[];
+  beds: any[];
+  rooms?: any[];
+  inpatientRecords?: any[];
+}): ActiveInpatientLocation | null {
+  const cleanIds = Array.from(new Set((params.patientIds || []).filter(Boolean)));
+  if (cleanIds.length === 0) return null;
+
+  const occupiedBed = (params.beds || []).find((b) => {
+    if (!isBedOccupe(b.status)) return false;
+    return (
+      (b.patientId && cleanIds.includes(b.patientId)) ||
+      (b.patientDme && cleanIds.includes(b.patientDme))
+    );
+  });
+
+  if (occupiedBed) {
+    const roomObj = (params.rooms || []).find((r) => r.id === occupiedBed.roomId);
+    const roomName = occupiedBed.roomName || roomObj?.name || 'Chambre';
+    const bedName = occupiedBed.name || occupiedBed.bedNumber || 'Lit';
+    return {
+      bedId: occupiedBed.id,
+      bedName,
+      roomName,
+      locationLabel: `${roomName} - ${bedName}`,
+      inpatientId: occupiedBed.currentInpatientId || occupiedBed.inpatientId,
+    };
+  }
+
+  const activeInp = (params.inpatientRecords || []).find((r) => {
+    if (r.status !== 'admitted') return false;
+    return (
+      (r.patientId && cleanIds.includes(r.patientId)) ||
+      (r.patientDme && cleanIds.includes(r.patientDme))
+    );
+  });
+
+  if (activeInp) {
+    const roomName = activeInp.roomName || 'Chambre';
+    const bedName = activeInp.bedName || activeInp.bedNumber || 'Lit';
+    return {
+      bedId: activeInp.bedId || '',
+      bedName,
+      roomName,
+      locationLabel: `${roomName} - ${bedName}`,
+      inpatientId: activeInp.id,
+    };
+  }
+
+  return null;
+}
+
 export type CareFrequencyCode =
   | 'UNE_FOIS'
   | 'Q6H'

@@ -426,6 +426,15 @@ const Maternity: React.FC<MaternityProps> = ({
                 </button>
                 <button
                   onClick={() => {
+                    const pids = [selectedPatient.id, selectedPatient.patientId, (selectedPatient as any).dmeId].filter(Boolean) as string[];
+                    const occupiedBed = beds.find(
+                      b => !isBedLibre(b.status) && ((b.patientId && pids.includes(b.patientId)) || ((b as any).patientDme && pids.includes((b as any).patientDme)))
+                    );
+                    if (occupiedBed && String(occupiedBed.status || '').toUpperCase().includes('OCCUP')) {
+                      const rName = occupiedBed.roomName || rooms.find(r => r.id === occupiedBed.roomId)?.name || 'Chambre';
+                      alert(`❌ Ce patient est déjà hospitalisé (${rName} - ${occupiedBed.name}).`);
+                      return;
+                    }
                     setMaternityHospBedId('');
                     setShowMaternityHospModal(true);
                   }}

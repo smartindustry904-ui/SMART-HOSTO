@@ -372,7 +372,33 @@ export const PriseEnChargeTab: React.FC<PriseEnChargeTabProps> = ({
 
             <button
               type="button"
-              onClick={() => setShowHospitalisationModal(true)}
+              onClick={async () => {
+                try {
+                  const pids = [encounter.patientId, encounter.patientDme].filter(Boolean) as string[];
+                  const { getDocs, query, collection, where } = await import('firebase/firestore');
+                  const { db } = await import('../../src/firebase');
+                  const { isBedOccupe } = await import('../../src/utils/hospitalisation');
+                  const bedsSnap = await getDocs(collection(db, 'beds'));
+                  const occupied = bedsSnap.docs
+                    .map(d => ({ id: d.id, ...(d.data() as any) }))
+                    .find(b => isBedOccupe(b.status) && ((b.patientId && pids.includes(b.patientId)) || (b.patientDme && pids.includes(b.patientDme))));
+                  if (occupied) {
+                    const loc = `${occupied.roomName || 'Chambre'} - ${occupied.name || occupied.bedNumber || 'Lit'}`;
+                    alert(`❌ Ce patient est déjà hospitalisé (${loc}).`);
+                    return;
+                  }
+                  const inpSnap = await getDocs(query(collection(db, 'inpatient_records'), where('status', '==', 'admitted')));
+                  const activeInp = inpSnap.docs
+                    .map(d => ({ id: d.id, ...(d.data() as any) }))
+                    .find(r => (r.patientId && pids.includes(r.patientId)) || (r.patientDme && pids.includes(r.patientDme)));
+                  if (activeInp) {
+                    const loc = `${activeInp.roomName || 'Chambre'} - ${activeInp.bedName || activeInp.bedNumber || 'Lit'}`;
+                    alert(`❌ Ce patient est déjà hospitalisé (${loc}).`);
+                    return;
+                  }
+                } catch {}
+                setShowHospitalisationModal(true);
+              }}
               className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-2xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shadow-sm cursor-pointer"
             >
               <Bed size={14} />

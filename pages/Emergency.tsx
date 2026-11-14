@@ -6,7 +6,7 @@ import {
 import { db, sanitizeData, handleFirestoreError, OperationType } from '../src/firebase';
 import { deductConsumablesForAct } from '../src/utils/consumablesStock';
 import { 
-  collection, query, onSnapshot, orderBy, setDoc, doc, updateDoc 
+  collection, query, where, onSnapshot, orderBy, setDoc, doc, updateDoc 
 } from 'firebase/firestore';
 import { MicroHeader } from '../components/common/MicroHeader';
 import { 
@@ -38,12 +38,23 @@ const Emergency: React.FC<EmergencyProps> = ({
   onBackToDashboard, 
   theme = 'light' 
 }) => {
-  const [encounters, setEncounters] = useState<EmergencyEncounter[]>([]);
+  const [erEncounters, setErEncounters] = useState<EmergencyEncounter[]>([]);
+  const [visiteErEncounters, setVisiteErEncounters] = useState<EmergencyEncounter[]>([]);
+  const encounters = useMemo(() => {
+    const merged = [...erEncounters];
+    const existingPatientIds = new Set(erEncounters.map(e => e.patientId).filter(Boolean));
+    visiteErEncounters.forEach(ve => {
+      if (!existingPatientIds.has(ve.patientId)) {
+        merged.push(ve);
+      }
+    });
+    return merged;
+  }, [erEncounters, visiteErEncounters]);
   const [selectedEncounterId, setSelectedEncounterId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const activeTenantId = getActiveTenantId(user);
 
-  // Real-time listener for emergency encounters
+  // Real-time listener for emergency encounters + active visit cycles flagged for Urgences
   useEffect(() => {
     setIsLoading(true);
     const q = query(collection(db, 'emergency_patients'), orderBy('arrivalTimestamp', 'desc'));
@@ -141,7 +152,7 @@ const Emergency: React.FC<EmergencyProps> = ({
         };
       });
 
-      setEncounters(list);
+      setErEncounters(list);
       setIsLoading(false);
     }, (error) => {
       console.error("Emergency patients listener error:", error);
@@ -153,7 +164,68 @@ const Emergency: React.FC<EmergencyProps> = ({
       }
     });
 
-    return () => unsubscribe();
+    const qVisites = query(collection(db, 'visites'), where('status', '==', 'ACTIF'));
+    const unsubVisites = onSnapshot(qVisites, (snapshot) => {
+      const list: EmergencyEncounter[] = snapshot.docs
+        .filter(docSnap => {
+          const d = docSnap.data() as any;
+          return d.inUrgencesQueue === true && belongsToTenant(d, activeTenantId);
+        })
+        .map(docSnap => {
+          const d = docSnap.data() as any;
+          const ts = d.urgencesTransferredAt || d.openedAt || new Date().toISOString();
+          const nameParts = String(d.patientName || 'Patient').trim().split(/\s+/);
+          const lastName = nameParts[0] || 'Patient';
+          const firstName = nameParts.slice(1).join(' ');
+          const rawVitals = d.urgencesVitals;
+          const vitalsList: EmergencyVitalSign[] = Array.isArray(rawVitals)
+            ? rawVitals
+            : rawVitals
+            ? [{
+                id: 'vit_transfer',
+                timestamp: ts,
+                date: ts.split('T')[0],
+                time: new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+                bpSys: rawVitals.bpSys,
+                bpDia: rawVitals.bpDia,
+                heartRate: rawVitals.heartRate,
+                spo2: rawVitals.spo2,
+                temp: rawVitals.temp,
+                respRate: rawVitals.respRate,
+                measuredBy: d.urgencesTransferredBy || 'Consultation',
+                painScale: rawVitals.painScale || 0,
+              }]
+            : [];
+          return {
+            id: `visite_${docSnap.id}`,
+            patientId: d.patientId || docSnap.id,
+            patientDme: d.dmeId || d.patientId || docSnap.id,
+            patientName: d.patientName || 'Patient',
+            firstName,
+            lastName,
+            age: d.age || 30,
+            gender: d.gender || 'M',
+            arrivalDate: ts.split('T')[0],
+            arrivalTime: new Date(ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+            arrivalTimestamp: ts,
+            arrivalMotif: d.urgencesMotif || 'Transfert depuis Consultation',
+            orientationSource: d.urgencesSource || 'Consultation',
+            status: (d.urgencesStatus as EmergencyStatusV1) || 'En attente',
+            responsibleStaff: d.urgencesResponsibleStaff,
+            vitals: vitalsList,
+            cares: Array.isArray(d.urgencesCares) ? d.urgencesCares : [],
+            followUps: Array.isArray(d.urgencesFollowUps) ? d.urgencesFollowUps : [],
+            voiceNotes: [],
+            discharge: d.urgencesDischarge,
+          } as EmergencyEncounter;
+        });
+      setVisiteErEncounters(list);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubVisites();
+    };
   }, [activeTenantId]);
 
   // Selected encounter
@@ -171,6 +243,13 @@ const Emergency: React.FC<EmergencyProps> = ({
   // Handler: Quick update encounter status (e.g. En attente -> Pris en charge)
   const handleUpdateStatus = async (encounterId: string, newStatus: EmergencyStatusV1, assignedStaff?: string) => {
     try {
+      if (encounterId.startsWith('visite_')) {
+        const visiteId = encounterId.replace(/^visite_/, '');
+        const updates: any = { urgencesStatus: newStatus };
+        if (assignedStaff) updates.urgencesResponsibleStaff = assignedStaff;
+        await updateDoc(doc(db, 'visites', visiteId), sanitizeData(updates));
+        return;
+      }
       const docRef = doc(db, 'emergency_patients', encounterId);
       const updates: any = { status: newStatus };
       if (assignedStaff) {
@@ -190,6 +269,16 @@ const Emergency: React.FC<EmergencyProps> = ({
       if (!encounter) return false;
 
       const updatedVitals = [...(encounter.vitals || []), vitals];
+      if (encounterId.startsWith('visite_')) {
+        const visiteId = encounterId.replace(/^visite_/, '');
+        const vUpdates: any = { urgencesVitals: updatedVitals };
+        if (encounter.status === 'En attente') {
+          vUpdates.urgencesStatus = 'Pris en charge';
+          if (!encounter.responsibleStaff && user?.name) vUpdates.urgencesResponsibleStaff = user.name;
+        }
+        await updateDoc(doc(db, 'visites', visiteId), sanitizeData(vUpdates));
+        return true;
+      }
       const updates: any = { vitals: updatedVitals };
 
       // Auto upgrade status if it was waiting
@@ -358,12 +447,21 @@ const Emergency: React.FC<EmergencyProps> = ({
       const encounter = encounters.find(e => e.id === encounterId);
       if (!encounter) return false;
 
-      const updates: any = {
-        status: 'Sortie',
-        discharge
-      };
+      if (encounterId.startsWith('visite_')) {
+        const visiteId = encounterId.replace(/^visite_/, '');
+        await updateDoc(doc(db, 'visites', visiteId), sanitizeData({
+          urgencesStatus: 'Sortie',
+          urgencesDischarge: discharge,
+          inUrgencesQueue: false,
+        }));
+      } else {
+        const updates: any = {
+          status: 'Sortie',
+          discharge
+        };
 
-      await updateDoc(doc(db, 'emergency_patients', encounterId), sanitizeData(updates));
+        await updateDoc(doc(db, 'emergency_patients', encounterId), sanitizeData(updates));
+      }
 
       // If orientation is Hospitalisation, create request in hospitalisation_requests
       if (discharge.orientation === 'Hospitalisation') {

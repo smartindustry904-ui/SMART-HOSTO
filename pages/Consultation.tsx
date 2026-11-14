@@ -26,7 +26,8 @@ import { useHospitalServices, useSettings } from '../hooks/useSettings';
 import { db, sanitizeData } from '../src/firebase';
 import { collection, doc, setDoc, getDocs, query, where, updateDoc, onSnapshot, getDoc, writeBatch } from 'firebase/firestore';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
-import { isBedLibre } from '../src/utils/hospitalisation';
+import { isBedLibre, findActiveInpatientLocationFromLists } from '../src/utils/hospitalisation';
+import { findActiveVisitForPatient, flagActiveVisitForUrgences } from '../src/utils/visitCycle';
 import { deductConsumablesForAct } from '../src/utils/consumablesStock';
 
 interface ConsultationProps {
@@ -213,6 +214,7 @@ const Consultation: React.FC<ConsultationProps> = ({
   const [showReorientModal, setShowReorientModal] = useState(false);
   const [activePatientAppointments, setActivePatientAppointments] = useState<any[]>([]);
   const [isCurrentlyHospitalized, setIsCurrentlyHospitalized] = useState(false);
+  const [currentHospLocation, setCurrentHospLocation] = useState<string>('');
   const [appointments, setAppointments] = useState<any[]>([]);
   const [hospitalizedPatients, setHospitalizedPatients] = useState<any[]>([]);
   const [beds, setBeds] = useState<any[]>([]);
@@ -344,13 +346,28 @@ const Consultation: React.FC<ConsultationProps> = ({
       );
       const unsubscribe = onSnapshot(q, (snapshot) => {
         const matches = snapshot.docs.filter(d => belongsToTenant(d.data(), activeTenantId));
-        setIsCurrentlyHospitalized(matches.length > 0);
+        if (matches.length > 0) {
+          const rec = matches[0].data() as any;
+          const rName = rec.roomName || 'Chambre';
+          const bName = rec.bedName || rec.bedNumber || 'Lit';
+          setIsCurrentlyHospitalized(true);
+          setCurrentHospLocation(`${rName} - ${bName}`);
+        } else {
+          const bedLoc = findActiveInpatientLocationFromLists({
+            patientIds: [activePatient.id, activePatient.patientId, activePatient.dmeId].filter(Boolean),
+            beds,
+            rooms,
+          });
+          setIsCurrentlyHospitalized(Boolean(bedLoc));
+          setCurrentHospLocation(bedLoc?.locationLabel || '');
+        }
       });
       return () => unsubscribe();
     } else {
       setIsCurrentlyHospitalized(false);
+      setCurrentHospLocation('');
     }
-  }, [activePatient?.id, activeTenantId]);
+  }, [activePatient?.id, activeTenantId, beds, rooms]);
 
   const handleDischargeDirectly = async (patient: any) => {
     if (!patient) return;
@@ -777,6 +794,74 @@ const Consultation: React.FC<ConsultationProps> = ({
         details: { patientId: patient.id, targetService },
         module: 'Consultation'
       });
+
+      const isUrgencesTarget = targetService === 'Urgences' || targetService === 'Emergency';
+      if (isUrgencesTarget) {
+        // Inter-Module Transfer: Flag the existing active Visit Cycle to appear in Urgences triage queue
+        // without creating a new ER ticket or duplicate visit cycle.
+        const pids = [patient.id, patient.patientId, patient.dmeId].filter(Boolean) as string[];
+        const activeVisit = patient.visite_id
+          ? { visite_id: patient.visite_id }
+          : await findActiveVisitForPatient(pids, activeTenantId);
+
+        if (activeVisit?.visite_id) {
+          await flagActiveVisitForUrgences({
+            visiteId: activeVisit.visite_id,
+            sourceModule: 'Consultation',
+            motif: patient.motif || 'Transfert médical vers Urgences',
+            user,
+            vitals: patient.vitals,
+          });
+          fetch(`/api/visites/${encodeURIComponent(activeVisit.visite_id)}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              inUrgencesQueue: true,
+              urgencesStatus: 'En attente',
+              urgencesSource: 'Consultation',
+              urgencesMotif: patient.motif || 'Transfert médical vers Urgences',
+            }),
+          }).catch(() => {});
+        } else {
+          // Fallback if patient has no active visit cycle yet
+          const erRef = doc(collection(db, 'emergency_patients'));
+          await setDoc(erRef, sanitizeData(stampTenantData({
+            id: erRef.id,
+            patientId: patient.patientId || patient.id,
+            patientDme: patient.dmeId || patient.id,
+            firstName: patient.firstName || '',
+            lastName: patient.lastName || '',
+            patientName: `${patient.lastName || ''} ${patient.firstName || ''}`.trim(),
+            age: patient.age || 30,
+            gender: patient.gender || 'M',
+            arrivalDate: today.toISOString().split('T')[0],
+            arrivalTime: timeStr,
+            arrivalTimestamp: today.toISOString(),
+            arrivalMotif: patient.motif || 'Transfert depuis Consultation',
+            orientationSource: 'Consultation',
+            status: 'En attente',
+            vitals: patient.vitals ? [{ ...patient.vitals, id: `vit_${Date.now()}`, timestamp: today.toISOString(), date: today.toISOString().split('T')[0], time: timeStr, measuredBy: user?.name || 'Médecin' }] : [],
+          }, user)));
+        }
+
+        if (activePatient && activePatient.id === patient.id) {
+          const q = query(collection(db, 'service_queues'), where('patientId', '==', patient.id), where('status', '!=', 'waiting'));
+          const snaps = await getDocs(q);
+          for (const dSnap of snaps.docs) {
+            await updateDoc(doc(db, 'service_queues', dSnap.id), { status: 'reoriented' });
+          }
+          if (setWaitingQueue) {
+            setWaitingQueue(prev => prev.filter(p => p.id !== patient.id));
+          }
+          setActivePatient(null);
+          setActiveMenu('WAITING_ROOM');
+        }
+
+        window.dispatchEvent(new CustomEvent('app-notification', {
+          detail: `⚡ ${patient.lastName} ${patient.firstName} transféré aux Urgences sur son cycle actif (données cliniques & facturation conservées).`
+        }));
+        return;
+      }
 
       // 2. Create target queue document with strict multi-tenant isolation
       const queueDocRef = doc(collection(db, 'service_queues'));
@@ -1771,8 +1856,11 @@ const Consultation: React.FC<ConsultationProps> = ({
       const snapshot = await getDocs(q);
       
       if (!snapshot.empty) {
+        const existingRec = snapshot.docs[0].data() as any;
+        const locLabel = `${existingRec.roomName || 'Chambre'} - ${existingRec.bedName || existingRec.bedNumber || 'Lit'}`;
+        alert(`❌ Ce patient est déjà hospitalisé (${locLabel}).`);
         window.dispatchEvent(new CustomEvent('app-notification', { 
-          detail: `Erreur: ${activePatient.lastName} ${activePatient.firstName} est déjà hospitalisé.` 
+          detail: `❌ Ce patient est déjà hospitalisé (${locLabel}).` 
         }));
         setShowDirectAdmissionModal(false);
         return;
@@ -1870,8 +1958,10 @@ const Consultation: React.FC<ConsultationProps> = ({
   const handleHospitalize = (data?: any) => {
     if (!activePatient) return;
     if (isCurrentlyHospitalized || activePatient.hospitalizationStatus === 'en_cours' || activePatient.status === 'hospitalise') {
+      const locMsg = currentHospLocation ? ` (${currentHospLocation})` : '';
+      alert(`❌ Ce patient est déjà hospitalisé${locMsg}.`);
       window.dispatchEvent(new CustomEvent('app-notification', { 
-        detail: `Erreur: ${activePatient.lastName} ${activePatient.firstName} est déjà hospitalisé.` 
+        detail: `❌ Ce patient est déjà hospitalisé${locMsg}.` 
       }));
       return;
     }
@@ -2497,17 +2587,30 @@ const Consultation: React.FC<ConsultationProps> = ({
                             <button 
                               onClick={() => {
                                 setShowActionsDropdown(false);
-                                if (!isCurrentlyHospitalized) handleHospitalize();
+                                handleHospitalize();
                               }}
-                              disabled={isCurrentlyHospitalized}
-                              className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center gap-2 transition-colors ${
-                                isCurrentlyHospitalized ? 'text-slate-400 bg-slate-50 cursor-not-allowed' : 'text-slate-700 hover:bg-blue-50 hover:text-blue-700 cursor-pointer'
+                              className={`w-full px-3 py-2 text-left text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer ${
+                                isCurrentlyHospitalized ? 'text-rose-600 bg-rose-50/70 hover:bg-rose-100' : 'text-slate-700 hover:bg-blue-50 hover:text-blue-700'
                               }`}
                             >
-                              <div className="w-5 h-5 rounded-md bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
+                              <div className={`w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${isCurrentlyHospitalized ? 'bg-rose-100 text-rose-600' : 'bg-blue-100 text-blue-600'}`}>
                                 <Activity size={12} />
                               </div>
-                              {isCurrentlyHospitalized ? 'Patient Hospitalisé' : 'Hospitaliser (Transfert)'}
+                              {isCurrentlyHospitalized
+                                ? `Déjà Hospitalisé (${currentHospLocation || 'Lit Occupé'})`
+                                : 'Hospitaliser (Transfert)'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                setShowActionsDropdown(false);
+                                handleReorientPatient(activePatient, 'Urgences');
+                              }}
+                              className="w-full px-3 py-2 text-left text-xs font-bold text-rose-700 hover:bg-rose-50 flex items-center gap-2 transition-colors cursor-pointer"
+                            >
+                              <div className="w-5 h-5 rounded-md bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                                <AlertTriangle size={12} />
+                              </div>
+                              Transférer aux Urgences
                             </button>
                             <button 
                               onClick={() => {

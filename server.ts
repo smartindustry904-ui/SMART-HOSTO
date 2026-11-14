@@ -16,6 +16,8 @@ import {
   setDoc,
   updateDoc,
   query,
+  where,
+  arrayUnion,
   limit
 } from 'firebase/firestore';
 
@@ -3525,6 +3527,115 @@ app.put('/api/lab-requests/:id', (req, res) =>
 app.patch('/api/lab-requests/:id', (req, res) =>
   handleGuardedPrescribedItemUpdate(req, res, 'lab_requests')
 );
+
+// ==========================================
+// SINGLE ACTIVE VISIT CYCLE LOCK (POST /visites, PUT/PATCH /visites/:id)
+// ==========================================
+async function handleCreateVisitCycle(req: any, res: any) {
+  try {
+    if (!db) {
+      return res.status(503).json({ error: 'DB_UNAVAILABLE', message: 'Base de données indisponible.' });
+    }
+    const body = req.body || {};
+    const candidateIds = Array.from(
+      new Set([body.patientId, body.dmeId].filter((v: any) => typeof v === 'string' && v.trim().length > 0))
+    );
+    if (candidateIds.length === 0) {
+      return res.status(400).json({ error: 'PATIENT_ID_REQUIRED', message: 'patientId ou dmeId requis.' });
+    }
+
+    const activeSnap = await getDocs(query(collection(db, 'visites'), where('status', '==', 'ACTIF')));
+    for (const d of activeSnap.docs) {
+      const data: any = d.data() || {};
+      if (body.tenantId && data.tenantId && data.tenantId !== body.tenantId) continue;
+      const matches = candidateIds.includes(data.patientId) || (data.dmeId && candidateIds.includes(data.dmeId));
+      if (matches) {
+        const existingVisiteId = data.visite_id || d.id;
+        return res.status(409).json({
+          error: 'Cycle Actif Existant',
+          message: 'Cycle Actif Existant',
+          visite_id: existingVisiteId,
+          visit: { ...data, id: d.id, visite_id: existingVisiteId },
+        });
+      }
+    }
+
+    const docRef = doc(collection(db, 'visites'));
+    const now = new Date();
+    const newVisit = {
+      id: docRef.id,
+      visite_id: docRef.id,
+      patientId: body.patientId || candidateIds[0],
+      dmeId: body.dmeId || body.patientId || candidateIds[0],
+      patientName: body.patientName || 'Patient',
+      status: 'ACTIF',
+      openedAt: now.toISOString(),
+      openedDate: now.toISOString().split('T')[0],
+      openedTime: now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      openedBy: body.openedBy || 'Agent Accueil',
+      destinations: Array.isArray(body.destinations)
+        ? body.destinations
+        : body.destination
+        ? [body.destination]
+        : [],
+      ...(body.tenantId ? { tenantId: body.tenantId } : {}),
+      ...(body.hospitalId ? { hospitalId: body.hospitalId } : {}),
+    };
+
+    await setDoc(docRef, newVisit);
+    return res.status(201).json(newVisit);
+  } catch (err: any) {
+    return res.status(500).json({ error: 'CREATE_VISIT_ERROR', message: err?.message });
+  }
+}
+
+async function handleRerouteVisitCycle(req: any, res: any) {
+  try {
+    if (!db) {
+      return res.status(503).json({ error: 'DB_UNAVAILABLE', message: 'Base de données indisponible.' });
+    }
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : String(req.params.id || '');
+    const ref = doc(db, 'visites', id);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Visite introuvable.' });
+    }
+    const data: any = snap.data() || {};
+    if (String(data.status || data.statut || '').toUpperCase() !== 'ACTIF') {
+      return res.status(409).json({ error: 'VISIT_NOT_ACTIVE', message: 'Ce cycle de visite est déjà clôturé.' });
+    }
+
+    const body = req.body || {};
+    const updatePayload: any = {
+      updatedAt: new Date().toISOString(),
+    };
+    if (body.destination) {
+      updatePayload.destinations = arrayUnion({
+        ...body.destination,
+        isReroute: true,
+        routedAt: body.destination.routedAt || new Date().toISOString(),
+      });
+      if (body.destination.service) {
+        updatePayload.currentService = body.destination.service;
+      }
+    }
+    if (typeof body.inUrgencesQueue === 'boolean') {
+      updatePayload.inUrgencesQueue = body.inUrgencesQueue;
+    }
+    if (body.urgencesStatus) updatePayload.urgencesStatus = body.urgencesStatus;
+    if (body.urgencesMotif) updatePayload.urgencesMotif = body.urgencesMotif;
+    if (body.urgencesSource) updatePayload.urgencesSource = body.urgencesSource;
+
+    await updateDoc(ref, updatePayload);
+    return res.json({ success: true, visite_id: id });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'REROUTE_VISIT_ERROR', message: err?.message });
+  }
+}
+
+app.post(['/visites', '/api/visites'], handleCreateVisitCycle);
+app.put(['/visites/:id', '/api/visites/:id'], handleRerouteVisitCycle);
+app.patch(['/visites/:id', '/api/visites/:id'], handleRerouteVisitCycle);
 
 // ==========================================
 // SERVER INITIALIZATION & VITE SPA

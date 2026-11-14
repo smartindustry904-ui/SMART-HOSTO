@@ -25,6 +25,7 @@ import {
   closeVisitCycle,
   findActiveVisitForPatient,
   VisitCycle,
+  VisitCycleConflictError,
 } from '../src/utils/visitCycle';
 
 import { 
@@ -466,6 +467,8 @@ const Reception: React.FC<ReceptionProps> = ({
   const [activeVisits, setActiveVisits] = useState<VisitCycle[]>([]);
   const [activeCycleLockModal, setActiveCycleLockModal] = useState<{ patient: Patient; visit: VisitCycle } | null>(null);
   const [rerouteVisitId, setRerouteVisitId] = useState<string | null>(null);
+  const [rerouteTargetService, setRerouteTargetService] = useState<string>('Laboratoire');
+  const [isReroutingDirect, setIsReroutingDirect] = useState(false);
   const [patientsToDischarge, setPatientsToDischarge] = useState<any[]>([]);
   const [sortieLabRequests, setSortieLabRequests] = useState<any[]>([]);
   const [sortiePharmaOrders, setSortiePharmaOrders] = useState<any[]>([]);
@@ -1905,15 +1908,25 @@ const Reception: React.FC<ReceptionProps> = ({
       if (activeVisiteId) {
         await appendDestinationToVisitCycle({ visiteId: activeVisiteId, destination: visitDestMeta });
       } else {
-        const openedVisit = await openVisitCycle({
-          patientId,
-          dmeId,
-          patientName: `${finalPatient.lastName} ${finalPatient.firstName}`.trim(),
-          destination: visitDestMeta,
-          user,
-          establishment,
-        });
-        activeVisiteId = openedVisit.visite_id;
+        try {
+          const openedVisit = await openVisitCycle({
+            patientId,
+            dmeId,
+            patientName: `${finalPatient.lastName} ${finalPatient.firstName}`.trim(),
+            destination: visitDestMeta,
+            user,
+            establishment,
+          });
+          activeVisiteId = openedVisit.visite_id;
+        } catch (visitErr: any) {
+          if (visitErr instanceof VisitCycleConflictError || visitErr?.status === 409) {
+            const conflictVisit = visitErr.visit as VisitCycle;
+            setActiveCycleLockModal({ patient: finalPatient, visit: conflictVisit });
+            setIsSaving(false);
+            return;
+          }
+          throw visitErr;
+        }
       }
 
       let p5 = Promise.resolve();
@@ -4649,7 +4662,7 @@ const Reception: React.FC<ReceptionProps> = ({
             </div>
             <div className="p-6 space-y-4">
               <p className="text-sm font-bold text-slate-800 leading-relaxed">
-                Ce patient est actuellement dans l&apos;hôpital (Cycle Actif). Voulez-vous le rediriger vers un autre service ?
+                ⚠️ Ce patient est déjà actif dans l&apos;hôpital. Voulez-vous le rediriger vers un nouveau service ?
               </p>
               <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 space-y-1.5 text-xs text-amber-900">
                 <div className="font-black uppercase tracking-wider text-[10px] text-amber-700">
@@ -4663,20 +4676,98 @@ const Reception: React.FC<ReceptionProps> = ({
                   ))}
                 </div>
               </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1.5">
+                  Nouveau service de destination
+                </label>
+                <select
+                  value={rerouteTargetService}
+                  onChange={(e) => setRerouteTargetService(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 outline-none focus:border-amber-500"
+                >
+                  {['Laboratoire', 'Consultation', 'Urgences', 'Soins Infirmiers', 'Maternité', 'Pharmacie', 'Hospitalisation']
+                    .concat((hospitalServices || []).map((s: any) => s.name).filter((n: string) => n && !['Laboratoire', 'Consultation', 'Urgences', 'Soins Infirmiers', 'Maternité', 'Pharmacie', 'Hospitalisation'].includes(n)))
+                    .map((srvName: string) => (
+                      <option key={srvName} value={srvName}>{srvName}</option>
+                    ))}
+                </select>
+              </div>
               <p className="text-[11px] font-medium text-slate-500">
-                La création d&apos;une nouvelle visite est verrouillée jusqu&apos;à la clôture via <span className="font-black text-slate-700">Sortie Admin</span>.
+                La création d&apos;une nouvelle visite est verrouillée (409 Cycle Actif Existant) jusqu&apos;à la clôture via <span className="font-black text-slate-700">Sortie Admin</span>.
               </p>
-              <div className="flex flex-col sm:flex-row gap-2.5 pt-2">
+              <div className="flex flex-col sm:flex-row gap-2 pt-2">
+                <button
+                  disabled={isReroutingDirect}
+                  onClick={async () => {
+                    if (!activeCycleLockModal) return;
+                    setIsReroutingDirect(true);
+                    try {
+                      const targetVisit = activeCycleLockModal.visit;
+                      const pt = activeCycleLockModal.patient;
+                      const now = new Date();
+                      const queueDocRef = doc(collection(db, 'service_queues'));
+                      const destMeta = {
+                        service: rerouteTargetService,
+                        motif: 'REDIRECTION_ACCUEIL',
+                        motifLabel: `Redirection -> ${rerouteTargetService}`,
+                        queueId: queueDocRef.id,
+                        routedAt: now.toISOString(),
+                        routedBy: user?.name || user?.username || 'Agent Accueil',
+                        isReroute: true,
+                      };
+                      await appendDestinationToVisitCycle({
+                        visiteId: targetVisit.visite_id,
+                        destination: destMeta,
+                      });
+                      await setDoc(queueDocRef, sanitizeData(stampTenantData({
+                        id: queueDocRef.id,
+                        patientId: pt.patientId || pt.id,
+                        firstName: pt.firstName || '',
+                        lastName: pt.lastName || '',
+                        age: pt.age || 0,
+                        gender: pt.gender || 'M',
+                        visite_id: targetVisit.visite_id,
+                        service: rerouteTargetService,
+                        speciality: rerouteTargetService,
+                        queueName: rerouteTargetService,
+                        motif: `Redirection Accueil -> ${rerouteTargetService}`,
+                        status: 'waiting',
+                        time: now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+                        date: now.toLocaleDateString('fr-FR'),
+                        createdAt: now.toISOString(),
+                      }, user, establishment)));
+                      fetch(`/api/visites/${encodeURIComponent(targetVisit.visite_id)}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ destination: destMeta }),
+                      }).catch(() => {});
+                      window.dispatchEvent(new CustomEvent('app-notification', {
+                        detail: `✅ ${pt.lastName} ${pt.firstName} redirigé vers ${rerouteTargetService} (Cycle #${targetVisit.visite_id.slice(-6).toUpperCase()}).`
+                      }));
+                      setActiveCycleLockModal(null);
+                      setRerouteVisitId(null);
+                      setStep('search');
+                    } catch (err) {
+                      console.error('Direct reroute failed:', err);
+                    } finally {
+                      setIsReroutingDirect(false);
+                    }
+                  }}
+                  className="flex-1 py-3 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-200 transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                >
+                  <CheckCircle2 size={14} />
+                  OK (Rediriger)
+                </button>
                 <button
                   onClick={() => {
                     setRerouteVisitId(activeCycleLockModal.visit.visite_id);
                     setActiveCycleLockModal(null);
                     setStep('triage');
                   }}
-                  className="flex-1 py-3 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-200 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  className="py-3 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1"
                 >
-                  <ArrowRightLeft size={15} />
-                  Rediriger
+                  <ArrowRightLeft size={14} />
+                  Triage
                 </button>
                 <button
                   onClick={() => {
@@ -4684,7 +4775,7 @@ const Reception: React.FC<ReceptionProps> = ({
                     setRerouteVisitId(null);
                     setStep('search');
                   }}
-                  className="flex-1 py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
+                  className="py-3 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
                 >
                   Annuler
                 </button>

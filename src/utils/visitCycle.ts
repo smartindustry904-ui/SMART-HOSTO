@@ -107,8 +107,22 @@ export async function findActiveVisitForPatient(
   return null;
 }
 
+export class VisitCycleConflictError extends Error {
+  status = 409 as const;
+  visite_id: string;
+  visit: VisitCycle;
+
+  constructor(existingVisit: VisitCycle) {
+    super('Cycle Actif Existant');
+    this.name = 'VisitCycleConflictError';
+    this.visite_id = existingVisit.visite_id || existingVisit.id;
+    this.visit = existingVisit;
+  }
+}
+
 /**
  * Opens a brand new Visit Cycle (visites) with status 'ACTIF'.
+ * Enforces Single Active Cycle (409 Conflict: "Cycle Actif Existant") before creation.
  */
 export async function openVisitCycle(params: {
   patientId: string;
@@ -118,6 +132,15 @@ export async function openVisitCycle(params: {
   user?: User | null;
   establishment?: EstablishmentConfig | null;
 }): Promise<VisitCycle> {
+  const tenantId = getActiveTenantId(params.user, params.establishment);
+  const existing = await findActiveVisitForPatient(
+    [params.patientId, params.dmeId].filter(Boolean) as string[],
+    tenantId
+  );
+  if (existing) {
+    throw new VisitCycleConflictError(existing);
+  }
+
   const docRef = doc(collection(db, 'visites'));
   const now = new Date();
   const payload: VisitCycle = {
@@ -150,7 +173,44 @@ export async function appendDestinationToVisitCycle(params: {
   const ref = doc(db, 'visites', params.visiteId);
   await updateDoc(ref, {
     destinations: arrayUnion(sanitizeData({ ...params.destination, isReroute: true })),
+    currentService: params.destination.service,
     updatedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Flags an existing active Visit Cycle to appear directly in the Urgences triage queue
+ * without creating a new ER ticket or duplicate visit cycle.
+ */
+export async function flagActiveVisitForUrgences(params: {
+  visiteId: string;
+  sourceModule: string;
+  motif: string;
+  user?: User | null;
+  vitals?: any;
+}): Promise<void> {
+  if (!params.visiteId) return;
+  const nowIso = new Date().toISOString();
+  const ref = doc(db, 'visites', params.visiteId);
+  const dest: VisitDestination = {
+    service: 'Urgences',
+    motif: 'TRANSFERT_URGENCES',
+    motifLabel: `Transfert ${params.sourceModule} -> Urgences`,
+    routedAt: nowIso,
+    routedBy: params.user?.name || params.user?.username || 'Médecin',
+    isReroute: true,
+  };
+  await updateDoc(ref, {
+    inUrgencesQueue: true,
+    urgencesStatus: 'En attente',
+    urgencesSource: params.sourceModule,
+    urgencesMotif: params.motif,
+    urgencesTransferredAt: nowIso,
+    urgencesTransferredBy: params.user?.name || params.user?.username || 'Médecin',
+    ...(params.vitals ? { urgencesVitals: sanitizeData(params.vitals) } : {}),
+    currentService: 'Urgences',
+    destinations: arrayUnion(sanitizeData(dest)),
+    updatedAt: nowIso,
   });
 }
 

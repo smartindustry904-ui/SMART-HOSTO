@@ -4,7 +4,7 @@ import { db, sanitizeData } from '../../src/firebase';
 import { collection, onSnapshot, doc, getDoc, writeBatch } from 'firebase/firestore';
 import { Bed, Room, User as UserType, EstablishmentConfig } from '../../types';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
-import { isBedLibre, isBedOccupe, isBedEnNettoyage } from '../../src/utils/hospitalisation';
+import { isBedLibre, isBedOccupe, isBedEnNettoyage, findActiveInpatientLocationFromLists } from '../../src/utils/hospitalisation';
 
 export interface UniversalHospitalisationPatient {
   id: string;
@@ -98,6 +98,15 @@ export const UniversalHospitalisationModal: React.FC<UniversalHospitalisationMod
     });
   }, [beds, bedCategoryFilter]);
 
+  const activeCollision = useMemo(() => {
+    if (!patient) return null;
+    return findActiveInpatientLocationFromLists({
+      patientIds: [patient.id, patient.dossier].filter(Boolean) as string[],
+      beds,
+      rooms,
+    });
+  }, [patient, beds, rooms]);
+
   if (!isOpen || !patient) return null;
 
   const patientFullName =
@@ -107,6 +116,12 @@ export const UniversalHospitalisationModal: React.FC<UniversalHospitalisationMod
 
   const handleConfirm = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (activeCollision) {
+      const msg = `❌ Ce patient est déjà hospitalisé (${activeCollision.locationLabel}).`;
+      setErrorMsg(msg);
+      alert(msg);
+      return;
+    }
     if (!selectedBedId) {
       setErrorMsg('Veuillez sélectionner un lit libre.');
       return;
@@ -270,6 +285,18 @@ export const UniversalHospitalisationModal: React.FC<UniversalHospitalisationMod
         </div>
 
         <form onSubmit={handleConfirm} className="p-6 space-y-4">
+          {activeCollision && (
+            <div className="p-4 bg-rose-50 border-2 border-rose-300 rounded-2xl flex items-start gap-3 text-rose-800 text-xs font-black">
+              <AlertCircle size={18} className="shrink-0 text-rose-600 mt-0.5" />
+              <div>
+                <div>❌ Ce patient est déjà hospitalisé ({activeCollision.locationLabel}).</div>
+                <div className="text-[11px] font-semibold text-rose-600 mt-0.5">
+                  Impossible d&apos;assigner un deuxième lit. Utilisez un « Transfert de Lit » dans le module Hospitalisation.
+                </div>
+              </div>
+            </div>
+          )}
+
           {errorMsg && (
             <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-center gap-2.5 text-rose-700 text-xs font-bold">
               <AlertCircle size={16} className="shrink-0" />
@@ -354,7 +381,7 @@ export const UniversalHospitalisationModal: React.FC<UniversalHospitalisationMod
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || libreBeds.length === 0 || !selectedBedId}
+              disabled={Boolean(activeCollision) || isSubmitting || libreBeds.length === 0 || !selectedBedId}
               className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl font-black text-xs uppercase tracking-wider shadow-lg shadow-blue-500/20 flex items-center gap-2 cursor-pointer"
             >
               {isSubmitting ? <Loader2 size={15} className="animate-spin" /> : <CheckCircle2 size={15} />}
