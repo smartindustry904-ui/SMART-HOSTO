@@ -331,18 +331,33 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
     });
 
     nursingActs.filter(belongsToCurrentStay).forEach((na: any) => {
-      const ms = toMs(na.completedAt || na.scheduledAt || na.createdAt);
+      const ms = toMs(na.completedAt || na.executedAt || na.scheduledAt || na.createdAt);
       const { dateStr, timeStr } = formatDateTimeParts(ms, na.scheduledDate, na.scheduledTime);
       const isDone = na.status === 'FAIT' || na.status === 'Fait' || na.clinicalStatus === 'Fait';
       const isPrescribed = !isDone && (na.status === 'Prescrit' || na.clinicalStatus === 'Prescrit');
+      const schedTime = na.scheduledTime || na.scheduledTimeSnapshot || '';
+      const execTime = na.heure_execution || na.executionTime || timeStr;
+      const earlyMotif = na.earlyExecutionReason || na.motifAnticipation || '';
+
+      let subtitleText: string | undefined = na.timing || (schedTime ? `📅 Prévu pour : ${schedTime}` : undefined);
+      if (isDone) {
+        if (earlyMotif) {
+          subtitleText = `Fait à ${execTime}${schedTime ? ` (Prévu à ${schedTime})` : ''} - Motif: ${earlyMotif}`;
+        } else if (schedTime) {
+          subtitleText = `Fait à ${execTime} (Prévu à ${schedTime})`;
+        } else {
+          subtitleText = `Fait à ${execTime}`;
+        }
+      }
+
       items.push({
         id: `na-${na.id}`,
         category: 'SOINS',
-        title: na.actType || na.title || 'Soin prescrit',
-        subtitle: na.timing || (na.scheduledTime ? `Prévu à ${na.scheduledTime}` : undefined),
-        body: na.instructions || na.notes || '',
+        title: na.actName || na.actType || na.title || 'Soin prescrit',
+        subtitle: subtitleText,
+        body: na.instructions || na.executionNotes || na.notes || '',
         actor: isDone
-          ? na.completedBy || 'Infirmier(ère)'
+          ? na.executedBy || na.completedBy || 'Infirmier(ère)'
           : `Prescrit par ${na.prescribedBy || 'Médecin'}`,
         timestampMs: ms,
         dateStr,

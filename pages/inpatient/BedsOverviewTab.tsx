@@ -83,10 +83,23 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
         b.name.toLowerCase().includes(term) || 
         (b.patientName || '').toLowerCase().includes(term) || 
         (b.patientDossier || '').toLowerCase().includes(term) || 
+        (b.doctorName || '').toLowerCase().includes(term) ||
         (room?.name || '').toLowerCase().includes(term);
       return matchesRoom && matchesSearch;
     });
   }, [occupiedBeds, rooms, selectedRoomId, searchQuery]);
+
+  const filteredCleaning = useMemo(() => {
+    return cleaningBeds.filter(b => {
+      const room = rooms.find(r => r.id === b.roomId);
+      const matchesRoom = selectedRoomId === 'all' || b.roomId === selectedRoomId;
+      const term = searchQuery.toLowerCase().trim();
+      const matchesSearch = !term ||
+        b.name.toLowerCase().includes(term) ||
+        (room?.name || '').toLowerCase().includes(term);
+      return matchesRoom && matchesSearch;
+    });
+  }, [cleaningBeds, rooms, selectedRoomId, searchQuery]);
 
   // Overall occupancy rate
   const occupancyRate = hospitalBeds.length > 0
@@ -241,76 +254,15 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
         </div>
       )}
 
-      {/* CATEGORY 1: LITS DISPONIBLES (LIBRES) */}
-      {(filterView === 'all' || filterView === 'available') && hospitalBeds.length > 0 && (
+      {/* PRIMARY SECTION: LITS OCCUPÉS (PRIORITAIRE) */}
+      {(filterView === 'all' || filterView === 'occupied') && hospitalBeds.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-black text-slate-900 uppercase tracking-wider flex items-center gap-2.5">
-              <span className="w-3 h-3 rounded-full bg-emerald-500 inline-block shadow-xs shadow-emerald-500/50"></span>
-              <span>Lits Disponibles ({filteredAvailable.length})</span>
-            </h2>
-            <span className="text-xs font-bold text-slate-400">Prêts pour admission</span>
-          </div>
-
-          {filteredAvailable.length === 0 ? (
-            <div className="bg-white rounded-3xl border border-slate-200 p-8 text-center text-slate-400 text-xs font-bold">
-              Aucun lit libre correspondant aux filtres.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filteredAvailable.map(bed => {
-                const room = rooms.find(r => r.id === bed.roomId);
-                return (
-                  <div
-                    key={bed.id}
-                    className="bg-white rounded-3xl border border-slate-200 p-5 space-y-4 hover:border-emerald-300 hover:shadow-md transition-all group flex flex-col justify-between"
-                  >
-                    <div className="space-y-3">
-                      <div className="flex items-start justify-between">
-                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase rounded-xl">
-                          Libre
-                        </span>
-                        <span className="text-xs font-mono font-black text-slate-400">
-                          {bed.name}
-                        </span>
-                      </div>
-
-                      <div className="space-y-1">
-                        <h3 className="font-black text-slate-900 text-base">{bed.name}</h3>
-                        <p className="text-xs text-slate-500 font-bold flex items-center gap-1.5">
-                          <Building2 size={13} className="text-slate-400" />
-                          {room?.name || 'Chambre'} {room?.description ? `• ${room.description}` : ''}
-                        </p>
-                        <p className="text-[11px] text-slate-400 font-medium">
-                          {bed.service || 'Médecine Générale'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => onOpenAdmissionModal(bed.id)}
-                      className="w-full py-2.5 bg-slate-900 hover:bg-blue-600 text-white rounded-2xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs"
-                    >
-                      <Plus size={14} />
-                      <span>Occuper ce Lit</span>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* CATEGORY 2: LITS OCCUPÉS */}
-      {(filterView === 'all' || filterView === 'occupied') && hospitalBeds.length > 0 && (
-        <div className="space-y-4 pt-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-black text-slate-900 uppercase tracking-wider flex items-center gap-2.5">
-              <span className="w-3 h-3 rounded-full bg-blue-600 inline-block shadow-xs shadow-blue-500/50"></span>
+              <span className="w-3.5 h-3.5 rounded-full bg-blue-600 inline-block ring-4 ring-blue-500/20"></span>
               <span>Lits Occupés ({filteredOccupied.length})</span>
             </h2>
-            <span className="text-xs font-bold text-slate-400">Patients en cours de prise en charge</span>
+            <span className="text-xs font-bold text-blue-600">Cliquez sur une carte pour ouvrir la Fiche de Suivi</span>
           </div>
 
           {filteredOccupied.length === 0 ? (
@@ -318,23 +270,25 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
               Aucun lit occupé actuellement.
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredOccupied.map(bed => {
                 const room = rooms.find(r => r.id === bed.roomId);
+                const roomBedLabel = `${room?.name || bed.roomName || 'Chambre'} - ${bed.name}`;
+                const attendingDoctor = (bed as any).doctorName || (bed as any).attendingDoctor || (bed as any).prescriberName || 'Médecin traitant';
                 return (
                   <div
                     key={bed.id}
-                    className="bg-white rounded-3xl border-2 border-blue-100 p-6 space-y-5 hover:border-blue-400 hover:shadow-lg transition-all flex flex-col justify-between"
+                    onClick={() => onOpenPatientBed(bed)}
+                    className="bg-gradient-to-br from-white via-white to-blue-50/40 rounded-3xl border-2 border-blue-500/80 ring-4 ring-blue-500/15 p-6 space-y-5 shadow-lg shadow-blue-500/15 hover:shadow-xl hover:shadow-blue-500/25 hover:border-blue-600 transition-all flex flex-col justify-between cursor-pointer group"
                   >
-                    {/* Top status & Bed info */}
                     <div className="space-y-4">
-                      <div className="flex items-start justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-[10px] font-black uppercase rounded-xl">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-3 py-1 bg-blue-600 text-white text-[10px] font-black uppercase tracking-wider rounded-xl shadow-xs">
                             Occupé
                           </span>
                           {bed.priority && (
-                            <span className={`px-2 py-0.5 rounded-lg text-[9px] font-black uppercase ${
+                            <span className={`px-2.5 py-0.5 rounded-xl text-[9px] font-black uppercase ${
                               bed.priority === 'Critique' ? 'bg-rose-100 text-rose-700' :
                               bed.priority === 'Urgent' ? 'bg-amber-100 text-amber-700' :
                               'bg-slate-100 text-slate-700'
@@ -343,44 +297,46 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
                             </span>
                           )}
                         </div>
-                        <span className="text-xs font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-xl">
-                          {bed.name} • {room?.name || 'Chambre'}
+                        <span className="text-xs font-black text-blue-700 bg-blue-100/80 border border-blue-200 px-3 py-1 rounded-xl shrink-0">
+                          {roomBedLabel}
                         </span>
                       </div>
 
-                      {/* Patient permanent info */}
-                      <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl space-y-1">
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest block">Patient</span>
-                        <h3 className="font-black text-slate-900 text-base tracking-tight truncate">
+                      <div className="p-4 bg-white border border-blue-100 rounded-2xl space-y-1.5 shadow-2xs">
+                        <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest block">Patient Hospitalisé</span>
+                        <h3 className="font-black text-slate-900 text-lg tracking-tight truncate group-hover:text-blue-700 transition-colors">
                           {bed.patientName || 'Patient'}
                         </h3>
                         <p className="text-xs text-slate-500 font-bold font-mono">
-                          N° {bed.patientDossier || bed.patientId} • {bed.patientAge ? `${bed.patientAge} ans` : ''} • Sexe {bed.patientGender || 'M'}
+                          N° {bed.patientDossier || bed.patientId}{bed.patientAge ? ` • ${bed.patientAge} ans` : ''}{bed.patientGender ? ` • ${bed.patientGender}` : ''}
                         </p>
                       </div>
 
-                      {/* Admission date, time, origin */}
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Admission</span>
-                          <span className="font-bold text-slate-700 flex items-center gap-1 mt-0.5">
-                            <Calendar size={12} className="text-slate-400" />
-                            {bed.admissionDate || 'Aujourd\'hui'} {bed.admissionTime ? `à ${bed.admissionTime}` : ''}
+                      <div className="grid grid-cols-2 gap-3 text-xs">
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Date d'Admission</span>
+                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5">
+                            <Calendar size={12} className="text-blue-500 shrink-0" />
+                            <span className="truncate">{bed.admissionDate || "Aujourd'hui"}</span>
                           </span>
                         </div>
-                        <div>
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Origine / Service</span>
-                          <span className="font-bold text-slate-700 block truncate mt-0.5">
-                            {bed.admissionOrigin || 'Consultation'} ({bed.service || 'Général'})
+                        <div className="bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Médecin Traitant</span>
+                          <span className="font-bold text-slate-800 flex items-center gap-1 mt-0.5">
+                            <User size={12} className="text-blue-500 shrink-0" />
+                            <span className="truncate">{attendingDoctor}</span>
                           </span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Action buttons: Ouvrir le lit patient & Libérer le lit */}
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100">
+                    <div className="grid grid-cols-2 gap-2 pt-3 border-t border-blue-100/80">
                       <button
-                        onClick={() => onOpenDischargeModal(bed)}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenDischargeModal(bed);
+                        }}
                         className="py-2.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-[11px] uppercase tracking-wider transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                       >
                         <LogOut size={14} />
@@ -388,11 +344,15 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
                       </button>
 
                       <button
-                        onClick={() => onOpenPatientBed(bed)}
-                        className="py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-xs shadow-blue-500/20 cursor-pointer"
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenPatientBed(bed);
+                        }}
+                        className="py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-blue-500/25 cursor-pointer"
                       >
                         <ExternalLink size={14} />
-                        <span>Lit Patient</span>
+                        <span>Fiche de Suivi</span>
                       </button>
                     </div>
                   </div>
@@ -403,44 +363,92 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
         </div>
       )}
 
-      {/* CATEGORY 3: LITS EN NETTOYAGE */}
-      {(filterView === 'all' || filterView === 'cleaning') && cleaningBeds.length > 0 && (
-        <div className="space-y-4 pt-4">
+      {/* SECONDARY SECTION: LITS LIBRES & EN NETTOYAGE (COMPACT & DISCRET) */}
+      {(filterView === 'all' || filterView === 'available' || filterView === 'cleaning') && hospitalBeds.length > 0 && (
+        <div className="space-y-4 pt-4 border-t border-slate-200/80">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-black text-slate-900 uppercase tracking-wider flex items-center gap-2.5">
-              <span className="w-3 h-3 rounded-full bg-amber-500 inline-block shadow-xs shadow-amber-500/50"></span>
-              <span>Lits en Nettoyage ({cleaningBeds.length})</span>
+            <h2 className="text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span>
+              <span>
+                Lits Libres ({filteredAvailable.length}) &amp; En Nettoyage ({filteredCleaning.length})
+              </span>
             </h2>
-            <span className="text-xs font-bold text-slate-400">Désinfection post-sortie</span>
+            <span className="text-[11px] font-bold text-slate-400">Disponibilité &amp; Désinfection</span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {cleaningBeds.map(bed => {
-              const room = rooms.find(r => r.id === bed.roomId);
-              return (
-                <div
-                  key={bed.id}
-                  className="bg-amber-50/40 rounded-3xl border-2 border-amber-200 p-5 flex items-center justify-between gap-4"
-                >
-                  <div>
-                    <span className="px-2.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-black uppercase rounded-lg">
-                      EN NETTOYAGE
-                    </span>
-                    <h3 className="font-black text-slate-900 text-base mt-2">{bed.name}</h3>
-                    <p className="text-xs font-bold text-slate-500">{room?.name || bed.roomName || 'Chambre'}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleMarkBedLibre(bed)}
-                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-[11px] uppercase tracking-wider transition-all cursor-pointer shrink-0 flex items-center gap-1.5"
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+            {(filterView === 'all' || filterView === 'available') &&
+              filteredAvailable.map(bed => {
+                const room = rooms.find(r => r.id === bed.roomId);
+                return (
+                  <div
+                    key={bed.id}
+                    className="bg-slate-50/80 rounded-2xl border border-slate-200/80 p-3.5 space-y-2.5 hover:border-emerald-300 hover:bg-white transition-all flex flex-col justify-between"
                   >
-                    <CheckCircle2 size={14} />
-                    <span>Marquer Libre</span>
-                  </button>
-                </div>
-              );
-            })}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="px-2 py-0.5 bg-emerald-100/80 text-emerald-700 text-[9px] font-black uppercase rounded-lg">
+                          Libre
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400 truncate">
+                          {room?.name || 'Ch.'}
+                        </span>
+                      </div>
+                      <h3 className="font-black text-slate-700 text-xs truncate">{bed.name}</h3>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => onOpenAdmissionModal(bed.id)}
+                      className="w-full py-1.5 bg-slate-200/80 hover:bg-emerald-600 hover:text-white text-slate-700 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <Plus size={12} />
+                      <span>Occuper</span>
+                    </button>
+                  </div>
+                );
+              })}
+
+            {(filterView === 'all' || filterView === 'cleaning') &&
+              filteredCleaning.map(bed => {
+                const room = rooms.find(r => r.id === bed.roomId);
+                return (
+                  <div
+                    key={bed.id}
+                    className="bg-amber-50/30 rounded-2xl border border-amber-200/70 p-3.5 space-y-2.5 flex flex-col justify-between"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="px-2 py-0.5 bg-amber-100/80 text-amber-700 text-[9px] font-black uppercase rounded-lg">
+                          Nettoyage
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400 truncate">
+                          {room?.name || 'Ch.'}
+                        </span>
+                      </div>
+                      <h3 className="font-black text-slate-700 text-xs truncate">{bed.name}</h3>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleMarkBedLibre(bed)}
+                      className="w-full py-1.5 bg-amber-100/80 hover:bg-emerald-600 hover:text-white text-amber-800 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <CheckCircle2 size={12} />
+                      <span>Marquer Libre</span>
+                    </button>
+                  </div>
+                );
+              })}
           </div>
+
+          {((filterView === 'available' && filteredAvailable.length === 0) ||
+            (filterView === 'cleaning' && filteredCleaning.length === 0) ||
+            (filterView === 'all' && filteredAvailable.length === 0 && filteredCleaning.length === 0)) && (
+            <div className="bg-slate-50 rounded-2xl border border-slate-200 p-5 text-center text-slate-400 text-xs font-bold">
+              Aucun lit libre ou en nettoyage correspondant aux filtres.
+            </div>
+          )}
         </div>
       )}
 
