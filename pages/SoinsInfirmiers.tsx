@@ -54,6 +54,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
   const [validationNotes, setValidationNotes] = useState('');
   const [validationEarlyReason, setValidationEarlyReason] = useState('');
   const [occupiedBeds, setOccupiedBeds] = useState<any[]>([]);
+  const [collapsedBedGroups, setCollapsedBedGroups] = useState<Record<string, boolean>>({});
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [triageHistory, setTriageHistory] = useState<any[]>([]);
@@ -205,32 +206,108 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
     return Number.MAX_SAFE_INTEGER;
   };
 
-  // Nursing care acts counters (strictly isolated to patients in OCCUPÉ beds, sorted ascending by Heure Prévue)
+  // Nursing care acts counters (strictly isolated to active hospitalisation_id / OCCUPÉ beds, zero walk-in/triage leakage)
   const hospitalisationActs = useMemo(() => {
     const occupiedBedIds = new Set(occupiedBeds.map((b: any) => b.id).filter(Boolean));
     const occupiedPatientIds = new Set(occupiedBeds.map((b: any) => b.patientId).filter(Boolean));
+    const occupiedHospIds = new Set(
+      occupiedBeds.map((b: any) => b.hospitalisation_id || b.inpatientRecordId).filter(Boolean)
+    );
+    const blockedSources = new Set(['URGENCES', 'ACCUEIL', 'CONSULTATION', 'MATERNITE']);
 
     return nursingActs
       .filter(a => {
-        const isNotWalkIn =
-          a.source !== 'URGENCES' &&
-          a.source !== 'ACCUEIL' &&
-          a.origin !== 'URGENCES' &&
-          a.origin !== 'ACCUEIL';
+        const src = String(a.source || '').toUpperCase().trim();
+        const org = String(a.origin || '').toUpperCase().trim();
+        if (blockedSources.has(src) || blockedSources.has(org)) return false;
+
         const isInpatientOrigin =
-          a.source === 'HOSPITALISATION' ||
-          Boolean(a.bedId) ||
-          Boolean(a.locationBadge) ||
-          Boolean(a.hospitalizedOrigin);
-        if (!isNotWalkIn || !isInpatientOrigin) return false;
-        // Strictly restrict to patients currently in an OCCUPÉ bed
+          src === 'HOSPITALISATION' ||
+          org === 'HOSPITALISATION' ||
+          Boolean(a.hospitalisation_id) ||
+          Boolean(a.inpatientRecordId);
+        if (!isInpatientOrigin) return false;
+
+        const hospId = a.hospitalisation_id || a.inpatientRecordId;
         return (
           (a.bedId && occupiedBedIds.has(a.bedId)) ||
-          (a.patientId && occupiedPatientIds.has(a.patientId))
+          (a.patientId && occupiedPatientIds.has(a.patientId)) ||
+          (hospId && occupiedHospIds.has(hospId))
         );
       })
       .sort((a, b) => getActScheduledMs(a) - getActScheduledMs(b));
   }, [nursingActs, occupiedBeds]);
+
+  // Group Hospitalisation acts by Patient / Bed for "Patients par Lit" Accordion Cards
+  const groupedHospitalisationPatients = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        groupKey: string;
+        locationLabel: string;
+        patientName: string;
+        patientId: string;
+        pendingTasks: any[];
+        completedTodayTasks: any[];
+        overdueCount: number;
+        imminentCount: number;
+      }
+    >();
+
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    hospitalisationActs.forEach((act) => {
+      const matchedBed = occupiedBeds.find(
+        (b: any) =>
+          (act.bedId && b.id === act.bedId) ||
+          (act.patientId && b.patientId === act.patientId)
+      );
+      const roomLabel = matchedBed?.roomName || act.roomName || 'Chambre';
+      const bedLabel = matchedBed?.name || act.bedName || 'Lit';
+      const locationLabel = act.locationBadge || `${roomLabel} - ${bedLabel}`;
+      const patientName = matchedBed?.patientName || act.patientName || 'Patient Hospitalisé';
+      const groupKey = matchedBed?.id || act.bedId || act.patientId || locationLabel;
+
+      if (!groups.has(groupKey)) {
+        groups.set(groupKey, {
+          groupKey,
+          locationLabel,
+          patientName,
+          patientId: matchedBed?.patientId || act.patientId || '',
+          pendingTasks: [],
+          completedTodayTasks: [],
+          overdueCount: 0,
+          imminentCount: 0,
+        });
+      }
+
+      const grp = groups.get(groupKey)!;
+      const isDone = act.status === 'FAIT' || act.status === 'REALISE';
+      if (isDone) {
+        const execDay = String(act.completedAt || act.executedAt || act.updatedAt || '').split('T')[0];
+        if (!execDay || execDay === todayStr) {
+          grp.completedTodayTasks.push(act);
+        }
+      } else {
+        grp.pendingTasks.push(act);
+        const schedMs = getActScheduledMs(act);
+        const diffMin = schedMs !== Number.MAX_SAFE_INTEGER ? (schedMs - nowMs) / 60000 : 999;
+        if (diffMin <= 0) grp.overdueCount += 1;
+        else if (diffMin <= 30) grp.imminentCount += 1;
+      }
+    });
+
+    // Sort groups: rooms with overdue tasks first, then imminent, then by earliest pending task
+    return Array.from(groups.values())
+      .filter((g) => g.pendingTasks.length > 0 || g.completedTodayTasks.length > 0)
+      .sort((a, b) => {
+        if (b.overdueCount !== a.overdueCount) return b.overdueCount - a.overdueCount;
+        if (b.imminentCount !== a.imminentCount) return b.imminentCount - a.imminentCount;
+        const aNext = a.pendingTasks[0] ? getActScheduledMs(a.pendingTasks[0]) : Number.MAX_SAFE_INTEGER;
+        const bNext = b.pendingTasks[0] ? getActScheduledMs(b.pendingTasks[0]) : Number.MAX_SAFE_INTEGER;
+        return aNext - bNext;
+      });
+  }, [hospitalisationActs, occupiedBeds, nowMs]);
 
   const pendingHospActsCount = useMemo(() => {
     return hospitalisationActs.filter(a => a.status !== 'FAIT' && a.status !== 'REALISE').length;
@@ -2099,142 +2176,237 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
         </div>
       )}
 
-      {/* SOINS HOSPITALISATION CHRONOLOGICAL TAB */}
+      {/* SOINS HOSPITALISATION — GROUPED BY PATIENT / BED ("PATIENTS PAR LIT") */}
       {activeTab === 'soins_hosp' && (
         <div className="bg-white rounded-[28px] border border-slate-200 p-4 sm:p-5 shadow-xs space-y-4 animate-in fade-in duration-200">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
             <div>
               <h2 className="text-base font-black text-slate-900 flex items-center gap-2">
                 <BedDouble size={18} className="text-indigo-600" />
-                <span>Soins Hospitalisation (Lits Occupés)</span>
+                <span>Soins Hospitalisation — Patients par Lit</span>
               </h2>
               <p className="text-[11px] text-slate-500 font-medium">
-                Tri chronologique par heure prévue • Alertes SLA : <span className="text-rose-600 font-bold">En retard</span> • <span className="text-amber-600 font-bold">Imminent (≤30m)</span> • <span className="text-blue-600 font-bold">À venir</span>
+                Patients en lit OCCUPÉ uniquement • Alertes SLA : <span className="text-rose-600 font-bold">En retard</span> • <span className="text-amber-600 font-bold">Imminent (≤30m)</span> • <span className="text-slate-600 font-bold">À venir</span>
               </p>
             </div>
             <span className="px-3 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-black shrink-0">
-              {pendingHospActsCount} soin(s) à exécuter
+              {pendingHospActsCount} soin(s) à exécuter • {groupedHospitalisationPatients.length} patient(s)
             </span>
           </div>
 
-          {hospitalisationActs.length === 0 ? (
+          {groupedHospitalisationPatients.length === 0 ? (
             <div className="py-10 text-center text-slate-400 text-xs font-bold">
               Aucun soin planifié pour les patients actuellement en lit occupé.
             </div>
           ) : (
-            <div className="space-y-1.5">
-              {hospitalisationActs.map((act) => {
-                const isDone = act.status === 'FAIT' || act.status === 'REALISE';
-                const schedTime = act.scheduledTime || (act.scheduledAt ? new Date(act.scheduledAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : (act.createdAt ? new Date(act.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--:--'));
-                const schedDate = act.scheduledDate || act.date || '';
-                const locationText = act.locationBadge || `${act.roomName || 'Chambre'} - ${act.bedName || 'Lit'}`;
-                const execTime = act.heure_execution || act.executionTime || '--:--';
-                const earlyMotif = act.earlyExecutionReason || act.motifAnticipation || '';
+            <div className="space-y-3">
+              {groupedHospitalisationPatients.map((group) => {
+                const isCollapsed = Boolean(collapsedBedGroups[group.groupKey]);
+                const hasOverdue = group.overdueCount > 0;
+                const hasImminent = !hasOverdue && group.imminentCount > 0;
 
-                const schedMs = getActScheduledMs(act);
-                const diffMin = schedMs !== Number.MAX_SAFE_INTEGER ? (schedMs - nowMs) / 60000 : 999;
-                const slaState: 'DONE' | 'OVERDUE' | 'IMMINENT' | 'UPCOMING' = isDone
-                  ? 'DONE'
-                  : diffMin <= 0
-                  ? 'OVERDUE'
-                  : diffMin <= 30
-                  ? 'IMMINENT'
-                  : 'UPCOMING';
+                const cardBorderClass = hasOverdue
+                  ? 'border-2 border-rose-400 ring-4 ring-rose-500/15 shadow-md shadow-rose-500/10'
+                  : hasImminent
+                  ? 'border-2 border-amber-300 ring-2 ring-amber-400/15 shadow-xs'
+                  : 'border border-slate-200';
 
-                const rowStyle =
-                  slaState === 'DONE'
-                    ? 'bg-emerald-50/40 border-emerald-200 opacity-80'
-                    : slaState === 'OVERDUE'
-                    ? 'bg-rose-50/75 border-rose-300 shadow-xs'
-                    : slaState === 'IMMINENT'
-                    ? 'bg-amber-50/70 border-amber-300 shadow-xs'
-                    : 'bg-white border-slate-200 hover:border-blue-300';
-
-                const timeBadgeStyle =
-                  slaState === 'DONE'
-                    ? 'bg-emerald-100 text-emerald-800 border-emerald-200'
-                    : slaState === 'OVERDUE'
-                    ? 'bg-rose-600 text-white border-rose-600'
-                    : slaState === 'IMMINENT'
-                    ? 'bg-amber-500 text-white border-amber-500 animate-pulse'
-                    : 'bg-blue-50 text-blue-700 border-blue-200';
-
-                const slaLabel =
-                  slaState === 'OVERDUE'
-                    ? 'En retard'
-                    : slaState === 'IMMINENT'
-                    ? 'Imminent'
-                    : slaState === 'UPCOMING'
-                    ? 'À venir'
-                    : 'Exécuté';
+                const headerBgClass = hasOverdue
+                  ? 'bg-rose-50/80 hover:bg-rose-50'
+                  : hasImminent
+                  ? 'bg-amber-50/60 hover:bg-amber-50'
+                  : 'bg-slate-50/80 hover:bg-slate-100/70';
 
                 return (
                   <div
-                    key={act.id}
-                    className={`px-3 py-2 rounded-xl border flex items-center justify-between gap-3 transition-all ${rowStyle}`}
+                    key={group.groupKey}
+                    className={`rounded-2xl overflow-hidden bg-white transition-all ${cardBorderClass}`}
                   >
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <div className={`px-2.5 py-1 rounded-lg text-center shrink-0 border font-mono text-xs font-black leading-tight ${timeBadgeStyle}`}>
-                        {schedTime}
-                      </div>
-
-                      <div className="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
-                        <span className="px-2 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded-md text-[10px] font-black uppercase tracking-tight shrink-0">
-                          {locationText}
-                        </span>
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-800 border border-slate-200 rounded-md text-[10px] font-black truncate max-w-[160px]">
-                          {act.patientName}
-                        </span>
-                        <span className="text-xs font-bold text-slate-800 truncate">
-                          {act.actName || act.actType || act.type}
-                        </span>
-                        <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                          📅 {schedTime}{schedDate ? ` (${schedDate})` : ''}
-                        </span>
-                        {!isDone && (
+                    {/* Smart Header (Accordion Toggle + Overdue Roll-up) */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCollapsedBedGroups((prev) => ({
+                          ...prev,
+                          [group.groupKey]: !prev[group.groupKey],
+                        }))
+                      }
+                      className={`w-full px-4 py-3 flex items-center justify-between gap-3 text-left transition-colors cursor-pointer ${headerBgClass}`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+                        {hasOverdue && (
                           <span
-                            className={`px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shrink-0 ${
-                              slaState === 'OVERDUE'
-                                ? 'bg-rose-100 text-rose-700'
-                                : slaState === 'IMMINENT'
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
-                            {slaLabel}
+                            className="w-3 h-3 rounded-full bg-rose-600 animate-pulse ring-4 ring-rose-500/30 shrink-0"
+                            title="Soin(s) en retard"
+                          />
+                        )}
+                        {hasImminent && (
+                          <span
+                            className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse shrink-0"
+                            title="Soin(s) imminent(s)"
+                          />
+                        )}
+                        <span className="px-2.5 py-0.5 bg-purple-100 text-purple-800 border border-purple-200 rounded-lg text-[11px] font-black uppercase tracking-wide shrink-0">
+                          {group.locationLabel}
+                        </span>
+                        <span className="text-sm font-black text-slate-900 truncate">
+                          {group.patientName}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {hasOverdue && (
+                          <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white text-[10px] font-black uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                            <AlertTriangle size={11} />
+                            {group.overdueCount} en retard
                           </span>
                         )}
-                        {isDone && (
-                          <span className="text-[10px] font-bold text-emerald-700 truncate">
-                            ✓ Fait à {execTime} (Prévu à {schedTime}){earlyMotif ? ` - Motif: ${earlyMotif}` : ''}
+                        {group.imminentCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-black uppercase">
+                            {group.imminentCount} imminent(s)
                           </span>
+                        )}
+                        <span className="px-2.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-700 text-[10px] font-black">
+                          {group.pendingTasks.length} à faire
+                        </span>
+                        <ChevronRight
+                          size={16}
+                          className={`text-slate-500 transition-transform duration-150 ${
+                            isCollapsed ? '' : 'rotate-90'
+                          }`}
+                        />
+                      </div>
+                    </button>
+
+                    {/* Accordion Body: Pending Tasks (Ascending) + Completed Today Subsection */}
+                    {!isCollapsed && (
+                      <div className="p-3 space-y-3 border-t border-slate-100">
+                        {group.pendingTasks.length === 0 ? (
+                          <p className="text-xs font-bold text-emerald-700 bg-emerald-50/60 border border-emerald-200 rounded-xl px-3 py-2">
+                            ✓ Tous les soins prévus pour ce patient sont exécutés.
+                          </p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {group.pendingTasks.map((act) => {
+                              const schedTime =
+                                act.scheduledTime ||
+                                (act.scheduledAt
+                                  ? new Date(act.scheduledAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                                  : act.createdAt
+                                  ? new Date(act.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+                                  : '--:--');
+                              const schedDate = act.scheduledDate || act.date || '';
+                              const schedMs = getActScheduledMs(act);
+                              const diffMin = schedMs !== Number.MAX_SAFE_INTEGER ? (schedMs - nowMs) / 60000 : 999;
+                              const slaState: 'OVERDUE' | 'IMMINENT' | 'UPCOMING' =
+                                diffMin <= 0 ? 'OVERDUE' : diffMin <= 30 ? 'IMMINENT' : 'UPCOMING';
+
+                              const rowStyle =
+                                slaState === 'OVERDUE'
+                                  ? 'bg-rose-50/75 border-rose-300 shadow-2xs'
+                                  : slaState === 'IMMINENT'
+                                  ? 'bg-amber-50/70 border-amber-300 shadow-2xs'
+                                  : 'bg-slate-50/50 border-slate-200 hover:border-slate-300';
+
+                              const timeBadgeStyle =
+                                slaState === 'OVERDUE'
+                                  ? 'bg-rose-600 text-white border-rose-600'
+                                  : slaState === 'IMMINENT'
+                                  ? 'bg-amber-500 text-white border-amber-500 animate-pulse'
+                                  : 'bg-slate-200/80 text-slate-700 border-slate-300';
+
+                              const slaLabel =
+                                slaState === 'OVERDUE'
+                                  ? 'En retard'
+                                  : slaState === 'IMMINENT'
+                                  ? 'Imminent'
+                                  : 'À venir';
+
+                              return (
+                                <div
+                                  key={act.id}
+                                  className={`px-3 py-2 rounded-xl border flex items-center justify-between gap-3 transition-all ${rowStyle}`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <div className={`px-2.5 py-1 rounded-lg text-center shrink-0 border font-mono text-xs font-black leading-tight ${timeBadgeStyle}`}>
+                                      {schedTime}
+                                    </div>
+                                    <div className="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
+                                      <span className="text-xs font-bold text-slate-900 truncate">
+                                        {act.actName || act.actType || act.type}
+                                      </span>
+                                      <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                                        📅 {schedTime}{schedDate ? ` (${schedDate})` : ''}
+                                      </span>
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider shrink-0 ${
+                                          slaState === 'OVERDUE'
+                                            ? 'bg-rose-100 text-rose-700'
+                                            : slaState === 'IMMINENT'
+                                            ? 'bg-amber-100 text-amber-800'
+                                            : 'bg-slate-100 text-slate-600'
+                                        }`}
+                                      >
+                                        {slaLabel}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    disabled={isExecutingAct}
+                                    onClick={() => openValidationModal(act)}
+                                    className={`px-3 py-1.5 disabled:opacity-50 text-white rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs cursor-pointer shrink-0 transition-colors ${
+                                      slaState === 'OVERDUE'
+                                        ? 'bg-rose-600 hover:bg-rose-700'
+                                        : slaState === 'IMMINENT'
+                                        ? 'bg-amber-600 hover:bg-amber-700'
+                                        : 'bg-emerald-600 hover:bg-emerald-700'
+                                    }`}
+                                  >
+                                    <Check size={13} />
+                                    <span>Exécuter</span>
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Completed Today Subsection */}
+                        {group.completedTodayTasks.length > 0 && (
+                          <div className="pt-2 border-t border-slate-100 space-y-1">
+                            <p className="text-[10px] font-black uppercase tracking-wider text-emerald-700">
+                              Exécutés aujourd&apos;hui ({group.completedTodayTasks.length})
+                            </p>
+                            {group.completedTodayTasks.map((act) => {
+                              const schedTime = act.scheduledTime || '--:--';
+                              const execTime = act.heure_execution || act.executionTime || '--:--';
+                              const earlyMotif = act.earlyExecutionReason || act.motifAnticipation || '';
+                              return (
+                                <div
+                                  key={act.id}
+                                  className="px-3 py-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/40 opacity-75 flex items-center justify-between gap-2 text-xs"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                                    <span className="font-bold text-slate-700 truncate">
+                                      {act.actName || act.actType || act.type}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-emerald-700 truncate">
+                                      Fait à {execTime} (Prévu à {schedTime}){earlyMotif ? ` - Motif: ${earlyMotif}` : ''}
+                                    </span>
+                                  </div>
+                                  <span className="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-md text-[9px] font-black uppercase shrink-0">
+                                    FAIT
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0">
-                      {!isDone ? (
-                        <button
-                          type="button"
-                          disabled={isExecutingAct}
-                          onClick={() => openValidationModal(act)}
-                          className={`px-3 py-1.5 disabled:opacity-50 text-white rounded-lg text-[11px] font-black uppercase tracking-wider flex items-center gap-1 shadow-2xs cursor-pointer transition-colors ${
-                            slaState === 'OVERDUE'
-                              ? 'bg-rose-600 hover:bg-rose-700'
-                              : slaState === 'IMMINENT'
-                              ? 'bg-amber-600 hover:bg-amber-700'
-                              : 'bg-emerald-600 hover:bg-emerald-700'
-                          }`}
-                        >
-                          <Check size={13} />
-                          <span>Exécuter</span>
-                        </button>
-                      ) : (
-                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
-                          <CheckCircle2 size={12} /> Fait
-                        </span>
-                      )}
-                    </div>
+                    )}
                   </div>
                 );
               })}
