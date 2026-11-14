@@ -58,8 +58,8 @@ export interface ScheduledCareSlot {
 }
 
 /**
- * Generates chronological, time-stamped nursing task slots from a frequency & duration (in days).
- * For example, 'Q6H' for 1 day generates 4 tasks at 08:00, 14:00, 20:00, and 02:00 (next morning).
+ * Generates chronological, time-stamped nursing task slots starting from NOW() (or a chosen future time).
+ * Subsequent doses are strictly calculated as t0 + interval (never in the past).
  */
 export function generateCareScheduleTasks(
   frequency: CareFrequencyCode,
@@ -69,46 +69,43 @@ export function generateCareScheduleTasks(
   const safeDays = Math.max(1, Math.min(30, Math.floor(Number(durationDays) || 1)));
   const slots: ScheduledCareSlot[] = [];
 
-  if (frequency === 'UNE_FOIS') {
-    const hh = String(baseDate.getHours()).padStart(2, '0');
-    const mm = String(baseDate.getMinutes()).padStart(2, '0');
-    const dateStr = baseDate.toISOString().split('T')[0];
-    slots.push({
-      scheduledDate: dateStr,
+  // Base time t0 MUST never be in the past
+  const nowMs = Date.now();
+  const requestedMs = baseDate instanceof Date && !isNaN(baseDate.getTime()) ? baseDate.getTime() : nowMs;
+  const t0Ms = Math.max(nowMs, requestedMs);
+
+  const formatLocalSlot = (ms: number, dayNumber: number, slotIndex: number): ScheduledCareSlot => {
+    const dt = new Date(ms);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    const hh = String(dt.getHours()).padStart(2, '0');
+    const mm = String(dt.getMinutes()).padStart(2, '0');
+    return {
+      scheduledDate: `${y}-${m}-${d}`,
       scheduledTime: `${hh}:${mm}`,
-      scheduledAt: baseDate.toISOString(),
-      dayNumber: 1,
-      slotIndex: 0
-    });
+      scheduledAt: dt.toISOString(),
+      dayNumber,
+      slotIndex,
+    };
+  };
+
+  if (frequency === 'UNE_FOIS') {
+    slots.push(formatLocalSlot(t0Ms, 1, 0));
     return slots;
   }
 
   const opt = CARE_FREQUENCY_OPTIONS.find(o => o.code === frequency) || CARE_FREQUENCY_OPTIONS[1];
-  const times = opt.times;
+  const dosesPerDay = Math.max(1, opt.times.length || 1);
+  const intervalHours = 24 / dosesPerDay;
+  const intervalMs = intervalHours * 60 * 60 * 1000;
+  const totalSlots = dosesPerDay * safeDays;
 
-  for (let day = 0; day < safeDays; day++) {
-    for (let idx = 0; idx < times.length; idx++) {
-      const timeStr = times[idx];
-      const [hStr, mStr] = timeStr.split(':');
-      const hour = Number(hStr);
-      const minute = Number(mStr);
-
-      // Hours like 00:00 or 02:00 in a 08:00-start cycle belong to the night/early morning of (day + 1)
-      const dayOffset = hour < 6 ? day + 1 : day;
-      const slotDate = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + dayOffset, hour, minute, 0, 0);
-      const y = slotDate.getFullYear();
-      const m = String(slotDate.getMonth() + 1).padStart(2, '0');
-      const d = String(slotDate.getDate()).padStart(2, '0');
-
-      slots.push({
-        scheduledDate: `${y}-${m}-${d}`,
-        scheduledTime: timeStr,
-        scheduledAt: slotDate.toISOString(),
-        dayNumber: day + 1,
-        slotIndex: idx
-      });
-    }
+  for (let i = 0; i < totalSlots; i++) {
+    const slotMs = t0Ms + i * intervalMs;
+    const dayNumber = Math.floor(i / dosesPerDay) + 1;
+    slots.push(formatLocalSlot(slotMs, dayNumber, i));
   }
 
-  return slots.sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+  return slots;
 }

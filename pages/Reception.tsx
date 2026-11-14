@@ -10,7 +10,7 @@ import {
   User as UserIcon, ArrowRightLeft,
   Scale, Thermometer, Info, Award, Settings,
   TrendingUp, Home, Loader2, ArrowLeft, History,
-  Bed, Syringe, Sparkles, Lock, Mail, Phone, Shield, Key, Edit3
+  Bed, Syringe, Sparkles, Lock, Mail, Phone, Shield, ShieldCheck, Key, Edit3
 } from 'lucide-react';
 import { Patient, VisitMotif, Role, User as UserType, PatientStatus, LabExamRequest, PaymentRequest, Service, MedicalAct } from '../types';
 import LabExamRequestForm from '../components/LabExamRequestForm';
@@ -467,6 +467,8 @@ const Reception: React.FC<ReceptionProps> = ({
   const [activeCycleLockModal, setActiveCycleLockModal] = useState<{ patient: Patient; visit: VisitCycle } | null>(null);
   const [rerouteVisitId, setRerouteVisitId] = useState<string | null>(null);
   const [patientsToDischarge, setPatientsToDischarge] = useState<any[]>([]);
+  const [sortieLabRequests, setSortieLabRequests] = useState<any[]>([]);
+  const [sortiePharmaOrders, setSortiePharmaOrders] = useState<any[]>([]);
   const [dischargeError, setDischargeError] = useState<{ patientId: string; message: string } | null>(null);
   const [isProcessingDischarge, setIsProcessingDischarge] = useState<string | null>(null);
   const [selectedPatientForHistory, setSelectedPatientForHistory] = useState<Patient | null>(null);
@@ -529,7 +531,47 @@ const Reception: React.FC<ReceptionProps> = ({
   }, [patientsToDischarge]);
 
   const enrichedPatientsToDischarge = useMemo(() => {
-    return patientsToDischarge.map(patient => {
+    const mergedMap = new Map<string, any>();
+
+    // 1. Seed with discharges_waiting records
+    patientsToDischarge.forEach(p => {
+      const key = p.patientId || p.id;
+      mergedMap.set(key, { ...p, fromDischargeQueue: true });
+    });
+
+    // 2. Merge ALL active Visit Cycles (visites where statut === 'ACTIF') so every patient inside the hospital is visible
+    activeVisits.forEach(v => {
+      const key = v.patientId || v.dmeId || v.id;
+      if (!key) return;
+      if (!mergedMap.has(key)) {
+        const lastDest = Array.isArray(v.destinations) && v.destinations.length > 0
+          ? v.destinations[v.destinations.length - 1]
+          : null;
+        mergedMap.set(key, {
+          id: key,
+          patientId: v.patientId || key,
+          dmeId: v.dmeId || key,
+          visite_id: v.visite_id || v.id,
+          name: v.patientName || 'Patient',
+          patientName: v.patientName || 'Patient',
+          department: lastDest?.service || 'Parcours Actif',
+          service: lastDest?.service || 'Parcours Actif',
+          admissionDate: v.openedAt ? String(v.openedAt).split('T')[0] : new Date().toISOString().split('T')[0],
+          createdAt: v.openedAt || v.createdAt || new Date().toISOString(),
+          medicalClearance: true,
+          hospitalizationClosed: true,
+          financialClearance: true,
+          fromActiveVisit: true,
+        });
+      } else {
+        const existing = mergedMap.get(key);
+        if (!existing.visite_id && (v.visite_id || v.id)) {
+          mergedMap.set(key, { ...existing, visite_id: v.visite_id || v.id });
+        }
+      }
+    });
+
+    return Array.from(mergedMap.values()).map(patient => {
       const pids = [patient.patientId, patient.id, patient.dmeId].filter(Boolean);
       const unpaidReqs = paymentRequests.filter(pr => {
         const matchesPatient = pids.includes(pr.patientId) || pids.includes((pr as any).patientDme);
@@ -558,14 +600,39 @@ const Reception: React.FC<ReceptionProps> = ({
       const hasDebtLock = Boolean((patient as any).hasOutstandingEmergencyDebt || (patient as any).isLockedForDischarge);
       const effectiveFinancialClearance = Boolean(patient.financialClearance) && totalUnpaidAmount === 0 && !hasDebtLock;
 
+      // Clearance Matrix: Labo & Pharmacie
+      const pendingLabs = sortieLabRequests.filter(lr => {
+        const matchesPt = pids.includes(lr.patientId) || pids.includes(lr.patientDme);
+        if (!matchesPt) return false;
+        const st = String(lr.status || '').toLowerCase();
+        const cs = String(lr.clinicalStatus || '').toLowerCase();
+        if (lr.isCancelled || st.includes('annul') || cs.includes('annul')) return false;
+        const isPublished = st.includes('termin') || st.includes('valid') || cs.includes('termin') || (Array.isArray(lr.results) && lr.results.length > 0);
+        return !isPublished;
+      });
+
+      const pendingPharmas = sortiePharmaOrders.filter(po => {
+        const matchesPt = pids.includes(po.patientId) || pids.includes(po.patientDme);
+        if (!matchesPt) return false;
+        const st = String(po.status || '').toUpperCase();
+        const cs = String(po.clinicalStatus || '').toLowerCase();
+        if (po.isCancelled || st.includes('ANNUL') || cs.includes('annul')) return false;
+        const isClear = po.isDelivered === true || po.isAdministered === true || ['DELIVERED', 'DISPENSED', 'DÉLIVRÉ', 'SERVI', 'ADMINISTERED'].includes(st);
+        return !isClear;
+      });
+
       return {
         ...patient,
         financialClearance: effectiveFinancialClearance,
         unpaidItems,
-        totalUnpaidAmount
+        totalUnpaidAmount,
+        pendingLabCount: pendingLabs.length,
+        laboClear: pendingLabs.length === 0,
+        pendingPharmaCount: pendingPharmas.length,
+        pharmaClear: pendingPharmas.length === 0,
       };
     });
-  }, [patientsToDischarge, paymentRequests]);
+  }, [patientsToDischarge, activeVisits, paymentRequests, sortieLabRequests, sortiePharmaOrders]);
 
   const sortieStats = useMemo(() => {
     const total = enrichedPatientsToDischarge.length;
@@ -767,6 +834,23 @@ const Reception: React.FC<ReceptionProps> = ({
         }
       });
 
+      // 2b. Synchronize ALL active Visit Cycles (status/statut === 'ACTIF') + Lab/Pharma clearance for Sortie Admin
+      const unsubSortieLabs = onSnapshot(collection(db, 'lab_requests'), (snap) => {
+        setSortieLabRequests(
+          snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(x => belongsToTenant(x, activeTenantId))
+        );
+      }, () => {});
+
+      const unsubSortiePharma = onSnapshot(collection(db, 'pending_prescriptions'), (snap) => {
+        setSortiePharmaOrders(
+          snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(x => belongsToTenant(x, activeTenantId))
+        );
+      }, () => {});
+
       const unsubApps = onSnapshot(collection(db, 'appointments'), (snapshot) => {
         const rawList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         const list = rawList.filter(a => belongsToTenant(a, activeTenantId));
@@ -774,10 +858,13 @@ const Reception: React.FC<ReceptionProps> = ({
       });
 
       const unsubVisites = onSnapshot(
-        query(collection(db, 'visites'), where('status', '==', 'ACTIF')),
+        collection(db, 'visites'),
         (snapshot) => {
           const rawList = snapshot.docs.map(doc => ({ ...(doc.data() as any), id: doc.id, visite_id: (doc.data() as any).visite_id || doc.id }));
-          const list = rawList.filter(v => belongsToTenant(v, activeTenantId)) as VisitCycle[];
+          const list = rawList.filter(v =>
+            (String(v.status || v.statut || '').toUpperCase() === 'ACTIF') &&
+            belongsToTenant(v, activeTenantId)
+          ) as VisitCycle[];
           setActiveVisits(list);
         },
         (err) => {
@@ -785,7 +872,7 @@ const Reception: React.FC<ReceptionProps> = ({
         }
       );
 
-      unsubs = [unsubPatients, unsubDischarges, unsubApps, unsubVisites];
+      unsubs = [unsubPatients, unsubDischarges, unsubSortieLabs, unsubSortiePharma, unsubApps, unsubVisites];
     };
 
     const unsubscribeAuth = auth.onAuthStateChanged((firebaseUser) => {
@@ -2469,7 +2556,7 @@ const Reception: React.FC<ReceptionProps> = ({
 
       // Save database actions in parallel + strictly close Visit Cycle (ACTIF -> CLOTURE)
       const p1 = setDoc(dischargeDocRef, sanitizeData(dischargeData));
-      const p2 = deleteDoc(doc(db, 'discharges_waiting', patient.docId || patient.id));
+      const p2 = deleteDoc(doc(db, 'discharges_waiting', patient.docId || patient.id)).catch(() => {});
       const p3 = setDoc(notifDocRef, sanitizeData(stampTenantData({
         id: notifDocRef.id,
         message: `Sortie administrative validée pour ${patient.name} (${patient.id})`,
@@ -3828,7 +3915,130 @@ const Reception: React.FC<ReceptionProps> = ({
               </div>
             </div>
 
-            {/* 3. Patients to Discharge Cards Grid */}
+            {/* 3. Global Active Cycles Clearance Matrix Table */}
+            {filteredAndSortedPatientsToDischarge.length > 0 && (
+              <div className={`rounded-2xl border overflow-hidden shadow-xs mt-3 ${
+                theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
+              }`}>
+                <div className={`px-4 py-3 border-b flex items-center justify-between ${
+                  theme === 'dark' ? 'bg-slate-800/60 border-slate-800' : 'bg-slate-50 border-slate-200'
+                }`}>
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck size={16} className="text-blue-600" />
+                    <h3 className={`text-xs font-black uppercase tracking-wider ${
+                      theme === 'dark' ? 'text-slate-100' : 'text-slate-800'
+                    }`}>
+                      Matrice Globale des Cycles Actifs (statut === 'ACTIF')
+                    </h3>
+                  </div>
+                  <span className="text-[11px] font-bold text-slate-500">
+                    {filteredAndSortedPatientsToDischarge.length} patient(s) à l'intérieur de l'hôpital
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className={`text-[10px] font-black uppercase tracking-wider border-b ${
+                        theme === 'dark'
+                          ? 'bg-slate-900/80 border-slate-800 text-slate-400'
+                          : 'bg-slate-50/70 border-slate-200 text-slate-500'
+                      }`}>
+                        <th className="py-2.5 px-4">Patient / DME</th>
+                        <th className="py-2.5 px-3">Service</th>
+                        <th className="py-2.5 px-3">Caisse / Finances</th>
+                        <th className="py-2.5 px-3">Labo</th>
+                        <th className="py-2.5 px-3">Pharmacie</th>
+                        <th className="py-2.5 px-4 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className={`divide-y text-xs ${
+                      theme === 'dark' ? 'divide-slate-800' : 'divide-slate-100'
+                    }`}>
+                      {filteredAndSortedPatientsToDischarge.map((patient, idx) => {
+                        const ptName = patient.name || patient.patientName || 'Patient';
+                        const ptId = patient.patientId || patient.id;
+                        const unpaidTotal = Number(patient.totalUnpaidAmount || 0);
+                        const caisseGreen = Boolean(patient.financialClearance) && unpaidTotal === 0;
+                        const laboGreen = patient.laboClear !== false;
+                        const pharmaGreen = patient.pharmaClear !== false;
+                        const isProc = isProcessingDischarge === patient.id;
+
+                        return (
+                          <tr
+                            key={`matrix-${patient.id || idx}`}
+                            className={`transition-colors ${
+                              theme === 'dark' ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50/80'
+                            }`}
+                          >
+                            <td className="py-2.5 px-4">
+                              <div className={`font-extrabold ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                                {ptName}
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-500">{ptId}</div>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className="text-[11px] font-bold text-blue-600 dark:text-blue-400">
+                                {patient.department || patient.service || 'Parcours Actif'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {caisseGreen ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800">
+                                  <CheckCircle2 size={11} /> 0 FCFA (Soldé)
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800">
+                                  <AlertCircle size={11} /> {unpaidTotal > 0 ? `${unpaidTotal.toLocaleString()} FCFA dû` : 'Impayé'}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {laboGreen ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800">
+                                  <CheckCircle2 size={11} /> Publié / Ras
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800">
+                                  <Clock size={11} /> {patient.pendingLabCount || 1} en attente
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              {pharmaGreen ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800">
+                                  <CheckCircle2 size={11} /> Délivré / Ras
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800">
+                                  <Clock size={11} /> {patient.pendingPharmaCount || 1} non retiré(s)
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-4 text-right">
+                              <button
+                                onClick={() => handleDischarge(patient.id)}
+                                disabled={!caisseGreen || isProc || !permissions.canWrite}
+                                title={!caisseGreen ? 'Sortie bloquée : solde Caisse non nul' : !permissions.canWrite ? 'Action verrouillée en lecture seule' : undefined}
+                                className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider transition-all inline-flex items-center gap-1.5 ${
+                                  caisseGreen && permissions.canWrite
+                                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer shadow-xs'
+                                    : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500 cursor-not-allowed'
+                                } disabled:opacity-50 disabled:cursor-not-allowed`}
+                              >
+                                {isProc ? <Loader2 size={12} className="animate-spin" /> : !caisseGreen ? <Lock size={12} /> : <CheckCircle size={12} />}
+                                Valider la Sortie
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* 4. Patients to Discharge Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 pt-3">
               {filteredAndSortedPatientsToDischarge.map((patient, pIdx) => {
                 const isReady = Boolean(patient.medicalClearance && patient.hospitalizationClosed && patient.financialClearance);
@@ -3917,8 +4127,53 @@ const Reception: React.FC<ReceptionProps> = ({
                         )}
                       </div>
 
-                      {/* 3-Column Criteria Strip */}
-                      <div className="grid grid-cols-3 gap-2 mb-3">
+                      {/* 4-Column Clearance Strip */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                        {/* Caisse / Finance */}
+                        <div className={`p-2 rounded-xl border text-center transition-all ${
+                          patient.financialClearance 
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300' 
+                            : 'bg-rose-50/80 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800/60 dark:text-rose-300'
+                        }`}>
+                          <div className="flex items-center justify-center gap-1 mb-0.5">
+                            {patient.financialClearance ? <CheckCircle2 size={12} /> : <CreditCard size={12} />}
+                            <span className="text-[9.5px] font-black uppercase tracking-wider">Caisse</span>
+                          </div>
+                          <p className="text-[10.5px] font-extrabold truncate">
+                            {patient.financialClearance ? "0 F (Soldé)" : `${(patient.totalUnpaidAmount || 0).toLocaleString()} F`}
+                          </p>
+                        </div>
+
+                        {/* Labo */}
+                        <div className={`p-2 rounded-xl border text-center transition-all ${
+                          patient.laboClear !== false
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300' 
+                            : 'bg-rose-50/80 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800/60 dark:text-rose-300'
+                        }`}>
+                          <div className="flex items-center justify-center gap-1 mb-0.5">
+                            {patient.laboClear !== false ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                            <span className="text-[9.5px] font-black uppercase tracking-wider">Labo</span>
+                          </div>
+                          <p className="text-[10.5px] font-extrabold truncate">
+                            {patient.laboClear !== false ? "Publié" : `${patient.pendingLabCount || 1} attente`}
+                          </p>
+                        </div>
+
+                        {/* Pharmacie */}
+                        <div className={`p-2 rounded-xl border text-center transition-all ${
+                          patient.pharmaClear !== false
+                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300' 
+                            : 'bg-rose-50/80 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800/60 dark:text-rose-300'
+                        }`}>
+                          <div className="flex items-center justify-center gap-1 mb-0.5">
+                            {patient.pharmaClear !== false ? <CheckCircle2 size={12} /> : <Clock size={12} />}
+                            <span className="text-[9.5px] font-black uppercase tracking-wider">Pharmacie</span>
+                          </div>
+                          <p className="text-[10.5px] font-extrabold truncate">
+                            {patient.pharmaClear !== false ? "Délivré" : `${patient.pendingPharmaCount || 1} non retiré`}
+                          </p>
+                        </div>
+
                         {/* Médical */}
                         <div className={`p-2 rounded-xl border text-center transition-all ${
                           patient.medicalClearance 
@@ -3931,36 +4186,6 @@ const Reception: React.FC<ReceptionProps> = ({
                           </div>
                           <p className="text-[10.5px] font-extrabold truncate">
                             {patient.medicalClearance ? "Accordé" : "En attente"}
-                          </p>
-                        </div>
-
-                        {/* Séjour / Hospitalisation */}
-                        <div className={`p-2 rounded-xl border text-center transition-all ${
-                          patient.hospitalizationClosed 
-                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300' 
-                            : 'bg-amber-50/70 border-amber-200 text-amber-800 dark:bg-amber-950/40 dark:border-amber-800/60 dark:text-amber-300'
-                        }`}>
-                          <div className="flex items-center justify-center gap-1 mb-0.5">
-                            {patient.hospitalizationClosed ? <CheckCircle2 size={12} /> : <Activity size={12} />}
-                            <span className="text-[9.5px] font-black uppercase tracking-wider">Séjour</span>
-                          </div>
-                          <p className="text-[10.5px] font-extrabold truncate">
-                            {patient.hospitalizationClosed ? "Clôturé" : "Actif"}
-                          </p>
-                        </div>
-
-                        {/* Caisse / Finance */}
-                        <div className={`p-2 rounded-xl border text-center transition-all ${
-                          patient.financialClearance 
-                            ? 'bg-emerald-50/80 border-emerald-200 text-emerald-800 dark:bg-emerald-950/40 dark:border-emerald-800/60 dark:text-emerald-300' 
-                            : 'bg-rose-50/80 border-rose-200 text-rose-800 dark:bg-rose-950/40 dark:border-rose-800/60 dark:text-rose-300'
-                        }`}>
-                          <div className="flex items-center justify-center gap-1 mb-0.5">
-                            {patient.financialClearance ? <CheckCircle2 size={12} /> : <CreditCard size={12} />}
-                            <span className="text-[9.5px] font-black uppercase tracking-wider">Caisse</span>
-                          </div>
-                          <p className="text-[10.5px] font-extrabold truncate">
-                            {patient.financialClearance ? "Soldée" : "À régler"}
                           </p>
                         </div>
                       </div>
@@ -4007,8 +4232,8 @@ const Reception: React.FC<ReceptionProps> = ({
                     <div className="pt-3 border-t border-slate-100 dark:border-slate-800/80 flex items-center gap-2">
                       <button 
                         onClick={() => handleDischarge(patient.id)}
-                        disabled={isProcessing || !permissions.canWrite}
-                        title={!permissions.canWrite ? "Action verrouillée en lecture seule" : undefined}
+                        disabled={!patient.financialClearance || isProcessing || !permissions.canWrite}
+                        title={!patient.financialClearance ? "Sortie bloquée : solde Caisse non nul" : !permissions.canWrite ? "Action verrouillée en lecture seule" : undefined}
                         className={`flex-1 py-2.5 px-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
                           isReady && permissions.canWrite
                             ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 active:scale-[0.98]'

@@ -55,6 +55,9 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
   const [validationEarlyReason, setValidationEarlyReason] = useState('');
   const [occupiedBeds, setOccupiedBeds] = useState<any[]>([]);
   const [collapsedBedGroups, setCollapsedBedGroups] = useState<Record<string, boolean>>({});
+  const [hospSearchQuery, setHospSearchQuery] = useState('');
+  const [hospSlaFilter, setHospSlaFilter] = useState<'ALL' | 'OVERDUE' | 'IMMINENT'>('ALL');
+  const [hospTimeFilter, setHospTimeFilter] = useState('');
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [triageHistory, setTriageHistory] = useState<any[]>([]);
@@ -247,6 +250,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
         locationLabel: string;
         patientName: string;
         patientId: string;
+        patientDme: string;
         pendingTasks: any[];
         completedTodayTasks: any[];
         overdueCount: number;
@@ -266,6 +270,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
       const bedLabel = matchedBed?.name || act.bedName || 'Lit';
       const locationLabel = act.locationBadge || `${roomLabel} - ${bedLabel}`;
       const patientName = matchedBed?.patientName || act.patientName || 'Patient Hospitalisé';
+      const patientDme = matchedBed?.patientDossier || act.patientDme || act.dmeId || act.patientId || '';
       const groupKey = matchedBed?.id || act.bedId || act.patientId || locationLabel;
 
       if (!groups.has(groupKey)) {
@@ -274,6 +279,7 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
           locationLabel,
           patientName,
           patientId: matchedBed?.patientId || act.patientId || '',
+          patientDme,
           pendingTasks: [],
           completedTodayTasks: [],
           overdueCount: 0,
@@ -308,6 +314,31 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
         return aNext - bNext;
       });
   }, [hospitalisationActs, occupiedBeds, nowMs]);
+
+  const filteredHospitalisationPatients = useMemo(() => {
+    const term = hospSearchQuery.trim().toLowerCase();
+    const timeFilter = hospTimeFilter.trim();
+    return groupedHospitalisationPatients.filter((g) => {
+      if (term) {
+        const matchesTerm =
+          g.patientName.toLowerCase().includes(term) ||
+          g.patientDme.toLowerCase().includes(term) ||
+          g.patientId.toLowerCase().includes(term) ||
+          g.locationLabel.toLowerCase().includes(term);
+        if (!matchesTerm) return false;
+      }
+      if (hospSlaFilter === 'OVERDUE' && g.overdueCount === 0) return false;
+      if (hospSlaFilter === 'IMMINENT' && g.imminentCount === 0) return false;
+      if (timeFilter) {
+        const hasMatchingTime = g.pendingTasks.some((act) => {
+          const st = String(act.scheduledTime || '').trim();
+          return st === timeFilter || st.startsWith(timeFilter.slice(0, 2) + ':');
+        });
+        if (!hasMatchingTime) return false;
+      }
+      return true;
+    });
+  }, [groupedHospitalisationPatients, hospSearchQuery, hospSlaFilter, hospTimeFilter]);
 
   const pendingHospActsCount = useMemo(() => {
     return hospitalisationActs.filter(a => a.status !== 'FAIT' && a.status !== 'REALISE').length;
@@ -2194,13 +2225,92 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
             </span>
           </div>
 
-          {groupedHospitalisationPatients.length === 0 ? (
+          {/* Search & SLA Quick Filters Control Bar */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 bg-slate-50/80 p-3 rounded-2xl border border-slate-200/80">
+            <div className="relative flex-1 min-w-[220px]">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                value={hospSearchQuery}
+                onChange={(e) => setHospSearchQuery(e.target.value)}
+                placeholder="Rechercher Patient, N° DME, Chambre ou Lit (ex: Lit 12, Paul)..."
+                className="w-full pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-indigo-500"
+              />
+              {hospSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setHospSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setHospSlaFilter('ALL')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
+                  hospSlaFilter === 'ALL'
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                Voir Tout ({groupedHospitalisationPatients.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHospSlaFilter('OVERDUE')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
+                  hospSlaFilter === 'OVERDUE'
+                    ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                    : 'bg-white text-rose-700 border-rose-200 hover:bg-rose-50'
+                }`}
+              >
+                🔴 En retard ({groupedHospitalisationPatients.filter(g => g.overdueCount > 0).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setHospSlaFilter('IMMINENT')}
+                className={`px-3 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-wider border transition-all cursor-pointer ${
+                  hospSlaFilter === 'IMMINENT'
+                    ? 'bg-amber-500 text-white border-amber-500 shadow-xs'
+                    : 'bg-white text-amber-700 border-amber-200 hover:bg-amber-50'
+                }`}
+              >
+                🟡 Imminent ({groupedHospitalisationPatients.filter(g => g.imminentCount > 0).length})
+              </button>
+
+              <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl px-2 py-1">
+                <Clock size={12} className="text-slate-400" />
+                <input
+                  type="time"
+                  value={hospTimeFilter}
+                  onChange={(e) => setHospTimeFilter(e.target.value)}
+                  title="Filtrer par heure prévue"
+                  className="text-[11px] font-bold text-slate-700 outline-none bg-transparent"
+                />
+                {hospTimeFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setHospTimeFilter('')}
+                    className="text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {filteredHospitalisationPatients.length === 0 ? (
             <div className="py-10 text-center text-slate-400 text-xs font-bold">
-              Aucun soin planifié pour les patients actuellement en lit occupé.
+              Aucun patient en lit occupé ne correspond aux filtres sélectionnés.
             </div>
           ) : (
             <div className="space-y-3">
-              {groupedHospitalisationPatients.map((group) => {
+              {filteredHospitalisationPatients.map((group) => {
                 const isCollapsed = Boolean(collapsedBedGroups[group.groupKey]);
                 const hasOverdue = group.overdueCount > 0;
                 const hasImminent = !hasOverdue && group.imminentCount > 0;
