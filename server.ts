@@ -3439,7 +3439,7 @@ async function handleGuardedPrescribedItemUpdate(
   colName: 'pending_prescriptions' | 'nursing_acts' | 'lab_requests'
 ) {
   try {
-    const id = req.params.id;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : String(req.params.id || '');
     if (!id) {
       return res.status(400).json({ error: 'ID manquant' });
     }
