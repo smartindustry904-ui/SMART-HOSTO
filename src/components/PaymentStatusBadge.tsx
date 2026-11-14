@@ -31,22 +31,48 @@ export const PaymentStatusBadge: React.FC<PaymentStatusBadgeProps> = ({
   size = 'xs',
   className = '',
 }) => {
-  const code: PaymentBadgeCode = typeof status === 'string' ? status : status.code;
-  const cfg = STYLE_MAP[code] || STYLE_MAP.PENDING;
-  const label = typeof status === 'string' ? cfg.label : status.label;
-  const Icon = cfg.Icon;
+  const rawCode = typeof status === 'string' ? status : status.code;
   const sizeClasses =
     size === 'sm'
       ? 'px-2.5 py-1 text-[10px] gap-1.5'
       : 'px-2 py-0.5 text-[9px] gap-1';
 
-  return (
-    <span
-      className={`inline-flex items-center font-black uppercase tracking-wider rounded-lg border whitespace-nowrap ${cfg.bg} ${sizeClasses} ${className}`}
-      title={`Statut financier : ${label}`}
-    >
-      <Icon size={size === 'sm' ? 12 : 10} />
-      {label}
-    </span>
-  );
+  // Strict mutually exclusive financial badge rendering
+  if (rawCode === 'EXONERE') {
+    const cfg = STYLE_MAP.EXONERE;
+    const Icon = cfg.Icon;
+    return (
+      <span
+        className={`inline-flex items-center font-black uppercase tracking-wider rounded-lg border whitespace-nowrap ${cfg.bg} ${sizeClasses} ${className}`}
+        title={`Statut financier : ${cfg.label}`}
+      >
+        <Icon size={size === 'sm' ? 12 : 10} />
+        {cfg.label}
+      </span>
+    );
+  } else if (rawCode === 'PAID') {
+    const cfg = STYLE_MAP.PAID;
+    const Icon = cfg.Icon;
+    return (
+      <span
+        className={`inline-flex items-center font-black uppercase tracking-wider rounded-lg border whitespace-nowrap ${cfg.bg} ${sizeClasses} ${className}`}
+        title={`Statut financier : ${cfg.label}`}
+      >
+        <Icon size={size === 'sm' ? 12 : 10} />
+        {cfg.label}
+      </span>
+    );
+  } else {
+    const cfg = STYLE_MAP.PENDING;
+    const Icon = cfg.Icon;
+    return (
+      <span
+        className={`inline-flex items-center font-black uppercase tracking-wider rounded-lg border whitespace-nowrap ${cfg.bg} ${sizeClasses} ${className}`}
+        title={`Statut financier : ${cfg.label}`}
+      >
+        <Icon size={size === 'sm' ? 12 : 10} />
+        {cfg.label}
+      </span>
+    );
+  }
 };

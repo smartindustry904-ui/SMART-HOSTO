@@ -222,8 +222,10 @@ export function resolvePaymentBadgeStatus(params: {
   const { item, paymentRequests = [], patientIds = [], visiteId } = params;
 
   if (item) {
+    const itemStatutFinancier = String(item.statut_financier || '').toUpperCase().trim();
     if (
       item.isFreeFollowUp ||
+      itemStatutFinancier === 'EXONERE' ||
       item.billingStatus === 'exonéré' ||
       item.isExonerated
     ) {
@@ -234,7 +236,7 @@ export function resolvePaymentBadgeStatus(params: {
     const itemSt = String(item.status || '').toUpperCase().trim();
     const itemBilling = String(item.billingStatus || '').toLowerCase().trim();
 
-    if (EXONERE_STATUSES.has(itemPaySt) || itemBilling === 'exonéré') {
+    if (EXONERE_STATUSES.has(itemPaySt) || EXONERE_STATUSES.has(itemSt) || itemBilling === 'exonéré') {
       return { code: 'EXONERE', label: 'EXONÉRÉ / SUIVI' };
     }
     if (PAID_STATUSES.has(itemPaySt) || PAID_STATUSES.has(itemSt) || itemBilling === 'payé') {

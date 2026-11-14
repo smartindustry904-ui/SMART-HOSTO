@@ -249,6 +249,7 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
 
       const batch = writeBatch(db);
       const prRef = totalCareCost > 0 ? doc(collection(db, 'payment_requests')) : null;
+      const prescriptionGroupId = prRef ? prRef.id : `grp_${Date.now()}`;
 
       // 1. Generate individual time-stamped nursing_acts tasks
       slots.forEach((slot) => {
@@ -285,6 +286,7 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
           paymentStatus: unitPrice > 0 ? 'PENDING' : 'PAID',
           isPaid: unitPrice <= 0,
           paymentRequestId: prRef ? prRef.id : '',
+          prescriptionGroupId,
           billedAtPrescription: Boolean(prRef),
           prescribedBy: currentUser?.name || 'Médecin Hospitalisation',
           prescribedById: currentUser?.id || '',

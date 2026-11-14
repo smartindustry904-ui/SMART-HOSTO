@@ -1425,7 +1425,8 @@ const Reception: React.FC<ReceptionProps> = ({
         service: isMaternityRdv ? 'Maternité' : 'Consultation',
         serviceId: matchedMotif?.serviceId || (isMaternityRdv ? 'SRV-MATERNITE' : 'SRV-CONSULTATION'),
         status: 'waiting_triage',
-        paymentStatus: bypassCashier ? 'PAID' : 'AWAITING_PAYMENT',
+        paymentStatus: validity.isFreeFollowUp ? 'EXONERE' : bypassCashier ? 'EXONERE' : 'AWAITING_PAYMENT',
+        statut_financier: validity.isFreeFollowUp ? 'EXONERE' : bypassCashier ? 'EXONERE' : 'EN_ATTENTE',
         paymentRequestId: createdReq?.id || '',
         attente_module: bypassCashier ? 'SOINS' : 'CAISSE',
         takenInCharge: false,
@@ -2050,7 +2051,8 @@ const Reception: React.FC<ReceptionProps> = ({
           service: isGynecoRecourse ? 'Consultation' : isMaternityService ? 'Maternité' : targetService,
           serviceId: targetSvcId,
           status: initialStatus,
-          paymentStatus: bypassCashier ? 'PAID' : 'AWAITING_PAYMENT',
+          paymentStatus: isFreeFollowUpVisit ? 'EXONERE' : bypassCashier ? 'EXONERE' : 'AWAITING_PAYMENT',
+          statut_financier: isFreeFollowUpVisit ? 'EXONERE' : bypassCashier ? 'EXONERE' : 'EN_ATTENTE',
           paymentRequestId: createdRequest?.id || '',
           attente_module: bypassCashier ? (effectiveSendToNurseTriage ? 'SOINS' : 'CONSULTATION') : 'CAISSE',
           takenInCharge: false,
@@ -3617,12 +3619,19 @@ const Reception: React.FC<ReceptionProps> = ({
                       ((pr.patientId === p.patientId || (pr as any).patientDme === p.dmeId) &&
                         ['PENDING', 'PARTIAL'].includes(String(pr.status || '').toUpperCase()))
                     );
+                    const isExonerated = Boolean(
+                      p.isFreeFollowUp ||
+                      String(p.paymentStatus || '').toUpperCase() === 'EXONERE' ||
+                      String((p as any).statut_financier || '').toUpperCase() === 'EXONERE'
+                    );
                     const hasUnpaidBill = linkedReq
                       ? ['PENDING', 'PARTIAL'].includes(String(linkedReq.status || '').toUpperCase())
-                      : !(p.paymentStatus === 'PAID' || p.status === 'SOLDE');
+                      : !(isExonerated || p.paymentStatus === 'PAID' || p.status === 'SOLDE');
                     const destinationLabel = p.service || p.queueName || 'Consultation';
                     const attenteLabel = hasUnpaidBill
                       ? 'En attente : Caisse'
+                      : isExonerated
+                      ? `Exonéré / Suivi : ${destinationLabel}`
                       : `En attente : ${destinationLabel}`;
 
                     return (

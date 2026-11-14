@@ -583,16 +583,27 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
     slate: 'bg-slate-100 text-slate-700 border-slate-300',
   };
 
-  const financialBadgeColors: Record<'PAID' | 'EXONERE' | 'PENDING', string> = {
-    PAID: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    EXONERE: 'bg-blue-50 text-blue-700 border-blue-200',
-    PENDING: 'bg-rose-50 text-rose-700 border-rose-200',
-  };
-
-  const financialBadgeText: Record<'PAID' | 'EXONERE' | 'PENDING', string> = {
-    PAID: '💰 Payé',
-    EXONERE: '💰 Exonéré / Suivi',
-    PENDING: '💰 En attente Caisse',
+  const renderFinancialBadge = (badge?: ResolvedPaymentBadge) => {
+    if (!badge) return null;
+    if (badge.code === 'EXONERE') {
+      return (
+        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border bg-blue-50 text-blue-700 border-blue-200">
+          💰 Exonéré / Suivi
+        </span>
+      );
+    } else if (badge.code === 'PAID') {
+      return (
+        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border bg-emerald-50 text-emerald-700 border-emerald-200">
+          💰 Payé
+        </span>
+      );
+    } else {
+      return (
+        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border bg-rose-50 text-rose-700 border-rose-200">
+          💰 En attente Caisse
+        </span>
+      );
+    }
   };
 
   const categoryIcon = (cat: TimelineFeedItem['category']) => {
@@ -647,15 +658,7 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
                         {item.clinicalBadge.label}
                       </span>
                     )}
-                    {item.financialBadge && (
-                      <span
-                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border ${
-                          financialBadgeColors[item.financialBadge.code]
-                        }`}
-                      >
-                        {financialBadgeText[item.financialBadge.code]}
-                      </span>
-                    )}
+                    {renderFinancialBadge(item.financialBadge)}
                   </div>
                   <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1 shrink-0">
                     <Clock size={12} />
