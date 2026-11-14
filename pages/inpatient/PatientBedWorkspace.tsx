@@ -248,6 +248,7 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
       const freqMeta = CARE_FREQUENCY_OPTIONS.find(f => f.code === careForm.frequency);
 
       const batch = writeBatch(db);
+      const prRef = totalCareCost > 0 ? doc(collection(db, 'payment_requests')) : null;
 
       // 1. Generate individual time-stamped nursing_acts tasks
       slots.forEach((slot) => {
@@ -282,11 +283,41 @@ export const PatientBedWorkspace: React.FC<PatientBedWorkspaceProps> = ({
           status: 'EN ATTENTE',
           priority: bed.priority === 'Critique' ? 'CRITICAL' : bed.priority === 'Urgent' ? 'HIGH' : 'NORMAL',
           paymentStatus: unitPrice > 0 ? 'PENDING' : 'PAID',
+          isPaid: unitPrice <= 0,
+          paymentRequestId: prRef ? prRef.id : '',
+          billedAtPrescription: Boolean(prRef),
           prescribedBy: currentUser?.name || 'Médecin Hospitalisation',
           prescribedById: currentUser?.id || '',
           createdAt: now.toISOString()
         }, currentUser)));
       });
+
+      if (prRef && totalCareCost > 0) {
+        batch.set(prRef, sanitizeData(stampTenantData({
+          id: prRef.id,
+          patientId: bed.patientId || inpatientRecord.patientId,
+          patientDme: bed.patientDossier || bed.patientId || '',
+          patientName: bed.patientName || inpatientRecord.patientName || 'Patient Hospitalisé',
+          requestingService: 'Hospitalisation',
+          sourceModule: 'Inpatient',
+          type: 'SOIN',
+          visite_id: (inpatientRecord as any).visite_id || (bed as any).visite_id || '',
+          hospitalisation_id: inpatientRecord.id,
+          items: [{
+            id: selectedAct?.id || prRef.id,
+            name: `${actName} (${slots.length}x)`,
+            quantity: slots.length,
+            unitPrice,
+            totalPrice: totalCareCost
+          }],
+          totalAmount: totalCareCost,
+          amountPaid: 0,
+          status: 'PENDING',
+          createdAt: now.toISOString(),
+          createdBy: currentUser?.name || 'Hospitalisation',
+          createdById: currentUser?.id || ''
+        }, currentUser)));
+      }
 
       // 2. Append summary + careCharges to inpatient_records
       const newCare: InpatientCare = {

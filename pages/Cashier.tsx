@@ -138,6 +138,58 @@ const Cashier: React.FC<CashierProps> = ({
     return () => unsub();
   }, [activeTenantId]);
 
+  // Auto-sync unbilled Hospitalisation nursing_acts into payment_requests so they appear in Caisse
+  useEffect(() => {
+    const qHospActs = query(collection(db, 'nursing_acts'), where('source', '==', 'HOSPITALISATION'));
+    const unsub = onSnapshot(qHospActs, (snap) => {
+      snap.docs.forEach((actDoc) => {
+        const d = actDoc.data() as any;
+        if (!belongsToTenant(d, activeTenantId)) return;
+        const pSt = String(d.paymentStatus || '').toUpperCase();
+        const unitP = Number(d.unitPrice ?? d.price ?? 0);
+        if (
+          pSt === 'PENDING' &&
+          !d.paymentRequestId &&
+          !d.billedAtPrescription &&
+          !d.isPaid &&
+          unitP > 0 &&
+          String(d.status || '').toUpperCase() !== 'CANCELLED'
+        ) {
+          const reqId = `REQ-SOIN-HOSP-${actDoc.id}`;
+          setDoc(doc(db, 'payment_requests', reqId), sanitizeData(stampTenantData({
+            id: reqId,
+            patientId: d.patientId || '',
+            patientDme: d.patientDme || d.patientId || '',
+            patientName: d.patientName || 'Patient Hospitalisé',
+            requestingService: 'Hospitalisation',
+            sourceModule: 'Inpatient',
+            type: 'SOIN',
+            visite_id: d.visite_id || '',
+            hospitalisation_id: d.hospitalisation_id || '',
+            items: [{
+              id: d.actId || actDoc.id,
+              name: d.actName || d.actType || 'Soin Hospitalisation',
+              quantity: 1,
+              unitPrice: unitP,
+              totalPrice: unitP
+            }],
+            totalAmount: unitP,
+            amountPaid: 0,
+            status: 'PENDING',
+            createdAt: d.createdAt || new Date().toISOString(),
+            createdBy: d.prescribedBy || 'Hospitalisation',
+            createdById: d.prescribedById || ''
+          }, user, establishment)), { merge: true }).catch(() => {});
+          updateDoc(doc(db, 'nursing_acts', actDoc.id), {
+            paymentRequestId: reqId,
+            billedAtPrescription: true
+          }).catch(() => {});
+        }
+      });
+    }, () => {});
+    return () => unsub();
+  }, [activeTenantId, user, establishment]);
+
   const patientsMap = useMemo(() => {
     const map = new Map<string, Patient>();
     patientsList.forEach(p => {
@@ -855,6 +907,27 @@ const Cashier: React.FC<CashierProps> = ({
                   paidAt: new Date().toISOString() 
                 });
                 hasUpdates = true;
+              }
+
+              // D2. Clear nursing_acts payment status (especially Hospitalisation soins)
+              const qActs = query(collection(db, 'nursing_acts'), where('patientId', '==', pid));
+              const actSnaps = await getDocs(qActs);
+              for (const actDoc of actSnaps.docs) {
+                const aData = actDoc.data() as any;
+                const reqType = String(selectedRequest.type || '').toUpperCase();
+                const matchesReq =
+                  aData.paymentRequestId === selectedRequest.id ||
+                  reqType === 'HOSPITALISATION' ||
+                  reqType === 'SOIN';
+                if (matchesReq && !aData.isPaid && String(aData.paymentStatus || '').toUpperCase() !== 'PAID') {
+                  bgBatch.update(doc(db, 'nursing_acts', actDoc.id), {
+                    paymentStatus: 'PAID',
+                    isPaid: true,
+                    billingStatus: 'paid',
+                    paidAt: new Date().toISOString()
+                  });
+                  hasUpdates = true;
+                }
               }
 
               // E. Clear patient record in 'patients' collection
