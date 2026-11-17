@@ -4,6 +4,125 @@ import { Printer, X, Receipt, FileText, CheckCircle2, Building2, Phone, Mail, Ma
 import { EstablishmentConfig } from '../../types';
 import { printElementDirectly } from '../../src/utils/print';
 import { getApiUrl } from '../../src/utils/apiConfig';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
+const buildReceiptPdfDoc = (
+  receipt: PrintableReceiptData,
+  establishment: EstablishmentConfig,
+  currency: string
+): jsPDF => {
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  // 1. Establishment Header Banner
+  doc.setFillColor(15, 23, 42); // slate-900
+  doc.rect(0, 0, 210, 24, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text(establishment?.name || 'SMART-HOSTO SIH', 15, 16);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(203, 213, 225); // slate-300
+  doc.text(`Tél: ${establishment?.phone || '+237 600 000 000'}`, 140, 11);
+  doc.text(establishment?.address || 'Hôpital Général', 140, 16);
+
+  // 2. Receipt Title & Reference
+  doc.setTextColor(15, 23, 42);
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text('REÇU DE CAISSE & ENCAISSEMENT', 15, 36);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Réf : ${receipt.id}   |   Date : ${receipt.date} ${receipt.time || ''}`, 15, 42);
+
+  // 3. Patient & Cashier Info Box
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.rect(15, 47, 180, 22, 'F');
+  doc.setDrawColor(226, 232, 240);
+  doc.rect(15, 47, 180, 22, 'S');
+
+  doc.setFontSize(9);
+  doc.setTextColor(51, 65, 85);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Patient :', 20, 55);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${receipt.patientName} ${receipt.patientId ? `(ID: ${receipt.patientId})` : ''}`, 42, 55);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Caissier / Opérateur :', 20, 62);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${receipt.operatorName || 'La Caisse'} ${receipt.operatorRole ? `(${receipt.operatorRole})` : ''}`, 58, 62);
+
+  if (receipt.paymentMethod) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('Mode de paiement :', 125, 55);
+    doc.setFont('helvetica', 'normal');
+    doc.text(receipt.paymentMethod, 160, 55);
+  }
+
+  // 4. Items Table
+  const tableRows = (receipt.items || []).map(it => [
+    it.name,
+    String(it.quantity || 1),
+    it.unitPrice ? `${it.unitPrice.toLocaleString('fr-FR')} ${currency}` : '-',
+    `${(it.totalPrice || 0).toLocaleString('fr-FR')} ${currency}`
+  ]);
+
+  autoTable(doc, {
+    startY: 75,
+    head: [['Désignation / Prestation', 'Qté', 'Prix Unitaire', 'Total']],
+    body: tableRows,
+    theme: 'striped',
+    headStyles: { fillColor: [30, 41, 59], textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 9 },
+    styles: { fontSize: 9, cellPadding: 3.5 },
+    columnStyles: {
+      0: { cellWidth: 90 },
+      1: { halign: 'center', cellWidth: 20 },
+      2: { halign: 'right', cellWidth: 35 },
+      3: { halign: 'right', cellWidth: 35, fontStyle: 'bold' }
+    }
+  });
+
+  const finalY = (doc as any).lastAutoTable?.finalY || 120;
+
+  // 5. Totals Section
+  doc.setFillColor(241, 245, 249);
+  doc.rect(115, finalY + 6, 80, 28, 'F');
+  doc.setDrawColor(203, 213, 225);
+  doc.rect(115, finalY + 6, 80, 28, 'S');
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('Total réglé :', 120, finalY + 16);
+  doc.setFontSize(12);
+  doc.setTextColor(16, 185, 129); // emerald-600
+  doc.text(`${(receipt.amountPaid || 0).toLocaleString('fr-FR')} ${currency}`, 190, finalY + 16, { align: 'right' });
+
+  if (receipt.changeGiven && receipt.changeGiven > 0) {
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Monnaie rendue :', 120, finalY + 24);
+    doc.text(`${receipt.changeGiven.toLocaleString('fr-FR')} ${currency}`, 190, finalY + 24, { align: 'right' });
+  }
+
+  // 6. Security & Legal notice
+  doc.setFontSize(7.5);
+  doc.setTextColor(148, 163, 184);
+  doc.text('Ce reçu constitue une preuve officielle de paiement certifiée et enregistrée dans le système SMART-HOSTO.', 15, 280);
+  doc.text('En cas de réclamation, veuillez présenter ce document au bureau de facturation.', 15, 285);
+
+  return doc;
+};
 
 export interface ReceiptItem {
   id?: string;
@@ -104,6 +223,15 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
     }
     setSendingWa(true);
     try {
+      // 1. Generate styled official PDF in memory
+      let pdfBase64: string | undefined;
+      try {
+        const pdfDoc = buildReceiptPdfDoc(receipt, establishment, currency);
+        pdfBase64 = pdfDoc.output('datauristring');
+      } catch (pdfErr) {
+        console.warn('Receipt PDF generation warning:', pdfErr);
+      }
+
       const summaryLines = (receipt.items || []).map(
         it => `${it.name} (x${it.quantity}) : ${(it.totalPrice || 0).toLocaleString('fr-FR')} ${currency}`
       );
@@ -119,6 +247,8 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
           summaryLines,
           totalAmount: receipt.amountPaid,
           currency,
+          pdfBase64,
+          pdfFilename: `Recu_Caisse_${receipt.id || Date.now()}.pdf`,
           staffName: receipt.operatorName || 'La Caisse',
           staffRole: receipt.operatorRole || 'CAISSIER'
         })

@@ -59,6 +59,113 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
   const [customWaPhone, setCustomWaPhone] = useState(patient?.phone || '');
   const [showWaPhoneModal, setShowWaPhoneModal] = useState(false);
 
+  const buildPrescriptionPdfDoc = (): jsPDF => {
+    const doc = new jsPDF();
+    const today = new Date().toLocaleDateString('fr-FR');
+
+    // 1. Clinic Brand Header
+    doc.setFillColor(37, 99, 235); // Blue background banner
+    doc.rect(0, 0, 220, 25, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(establishment?.name || 'SMARTHOSTO SIH', 15, 17);
+
+    // 2. Headings & Contact details
+    doc.setTextColor(230, 242, 255);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text('Ordonnance Médicale Officielle', 130, 11);
+    doc.text(`Tél: ${establishment?.phone || '+237 222 33 44 55'}`, 130, 16);
+    doc.text(establishment?.address || "Avenue de l'Indépendance", 130, 21);
+
+    // Divider line
+    doc.setDrawColor(17, 24, 39);
+    doc.setLineWidth(0.5);
+    doc.line(15, 30, 195, 30);
+
+    // Document Title
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(17, 24, 39);
+    doc.text('ORDONNANCE MEDICALE', 60, 42);
+
+    // 3. User & Patient Sections
+    doc.setFillColor(243, 244, 246);
+    doc.rect(15, 50, 180, 28, 'F');
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('PRESCRIPTEUR :', 20, 56);
+    doc.setFont('helvetica', 'normal');
+    doc.text(
+      `${prescripteur.name || 'Docteur Référent'} (${prescripteur.profession || "Médecin d'Orientation"})`,
+      55,
+      56
+    );
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('PATIENT :', 20, 62);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${patient?.lastName || ''} ${patient?.firstName || ''}`, 55, 62);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('DETAILS :', 20, 68);
+    doc.setFont('helvetica', 'normal');
+    doc.text(
+      `Age : ${patient.age || '--'} ans   |   Sexe : ${patient.gender === 'F' ? 'Féminin' : 'Masculin'}   |   Date : ${today}`,
+      55,
+      68
+    );
+
+    // 4. Treatments Listing
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(37, 99, 235);
+    doc.text('TRAITEMENTS & POSOLOGIES', 15, 88);
+
+    let yPosition = 98;
+    prescriptions.forEach((p, idx) => {
+      // Drug name
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(17, 24, 39);
+      doc.text(`${idx + 1}. ${p.medicationName}`, 15, yPosition);
+
+      yPosition += 5;
+      // Posology details
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(55, 65, 81);
+      doc.text(`Posologie : ${p.dosageScheme || 'Selon prescription'}`, 22, yPosition);
+
+      yPosition += 5;
+      // Duration and box count
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9);
+      doc.setTextColor(107, 114, 128);
+      doc.text(`Pendant ${p.duration || '--'} jours  •  Quantité : ${p.totalBoxes || 1} boîte(s)`, 22, yPosition);
+
+      yPosition += 12; // Extra space
+    });
+
+    // 5. Signature Section
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(55, 65, 81);
+    doc.text('Signature numérique clinique :', 120, yPosition + 15);
+
+    doc.setDrawColor(209, 213, 219);
+    doc.setLineWidth(0.5);
+    doc.line(120, yPosition + 35, 180, yPosition + 35);
+    doc.setFontSize(8);
+    doc.setTextColor(156, 163, 175);
+    doc.text('Certifié SMART-HOSTO', 120, yPosition + 40);
+
+    return doc;
+  };
+
   const handleSendWhatsAppPrescription = async (targetPhone?: string) => {
     const phoneToUse = (targetPhone || customWaPhone || patient?.phone || '').trim();
     if (!phoneToUse) {
@@ -67,6 +174,15 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
     }
     setSendingWaPrescription(true);
     try {
+      // 1. Generate styled official prescription PDF
+      let pdfBase64: string | undefined;
+      try {
+        const doc = buildPrescriptionPdfDoc();
+        pdfBase64 = doc.output('datauristring');
+      } catch (pErr) {
+        console.warn('Prescription PDF generation warning:', pErr);
+      }
+
       const summaryLines = prescriptions.map(
         p =>
           `${p.medicationName} : ${p.dosageScheme || `${p.dosePerIntake || 1} ${p.intakeUnit || 'prise'} ${p.frequency || ''}`} pendant ${p.duration || 5} jours`
@@ -82,6 +198,8 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
           title: diagnostic ? `Prescription médicale — ${diagnostic}` : 'Prescription médicale officielle',
           summaryLines,
           detailsText: notes ? `Conseils du médecin : ${notes}` : undefined,
+          pdfBase64,
+          pdfFilename: `Ordonnance_${patient?.lastName || 'Patient'}_${Date.now()}.pdf`,
           staffName: prescripteur?.name,
           staffRole: prescripteur?.role || 'MÉDECIN'
         })
@@ -127,101 +245,10 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
 
   const handlePrint = () => {
     try {
-      const doc = new jsPDF();
+      const doc = buildPrescriptionPdfDoc();
       const today = new Date().toLocaleDateString('fr-FR');
-
-      // 1. Clinic Brand Header
-      doc.setFillColor(37, 99, 235); // Blue background banner
-      doc.rect(0, 0, 220, 25, 'F');
-      
-      doc.setTextColor(255, 255, 255);
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(14);
-      doc.text(establishment?.name || "SMARTHOSTO SIH", 15, 17);
-
-      // 2. Headings & Contact details
-      doc.setTextColor(230, 242, 255);
-      doc.setFont('helvetica', 'normal');
-      doc.setFontSize(8);
-      doc.text("Ordonnance Médicale Officielle", 130, 11);
-      doc.text(`Tél: ${establishment?.phone || '+237 222 33 44 55'}`, 130, 16);
-      doc.text(establishment?.address || "Avenue de l'Indépendance", 130, 21);
-
-      // Divider line
-      doc.setDrawColor(17, 24, 39);
-      doc.setLineWidth(0.5);
-      doc.line(15, 30, 195, 30);
-
-      // Document Title
-      doc.setFontSize(20);
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(17, 24, 39);
-      doc.text("ORDONNANCE MEDICALE", 60, 42);
-
-      // 3. User & Patient Sections
-      doc.setFillColor(243, 244, 246);
-      doc.rect(15, 50, 180, 28, 'F');
-
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'bold');
-      doc.text("PRESCRIPTEUR :", 20, 56);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`${prescripteur.name || 'Docteur Referent'} (${prescripteur.profession || "Medecin d'Orientation"})`, 55, 56);
-
-      doc.setFont('helvetica', 'bold');
-      doc.text("PATIENT :", 20, 62);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`${patient?.lastName || ''} ${patient?.firstName || ''}`, 55, 62);
-
-      doc.setFont('helvetica', 'bold');
-      doc.text("DETAILS :", 20, 68);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Age : ${patient.age || '--'} ans   |   Sexe : ${patient.gender === 'F' ? 'Feminin' : 'Masculin'}   |   Date : ${today}`, 55, 68);
-
-      // 4. Treatments Listing
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12);
-      doc.setTextColor(37, 99, 235);
-      doc.text("TRAITEMENTS & POSOLOGIES", 15, 88);
-      
-      let yPosition = 98;
-      prescriptions.forEach((p, idx) => {
-        // Drug name
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(11);
-        doc.setTextColor(17, 24, 39);
-        doc.text(`${idx + 1}. ${p.medicationName}`, 15, yPosition);
-        
-        yPosition += 5;
-        // Posology details
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
-        doc.setTextColor(55, 65, 81);
-        doc.text(`Posologie : ${p.dosageScheme || 'Selon prescription'}`, 22, yPosition);
-
-        yPosition += 5;
-        // Duration and box count
-        doc.setFont('helvetica', 'italic');
-        doc.setFontSize(9);
-        doc.setTextColor(107, 114, 128);
-        doc.text(`Pendant ${p.duration || '--'} jours  •  Quantite : ${p.totalBoxes || 1} boite(s)`, 22, yPosition);
-
-        yPosition += 12; // Extra space
-      });
-
-      // 5. Signature Section
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(55, 65, 81);
-      doc.text("Signature numerique clinique :", 120, yPosition + 15);
-      
-      doc.setDrawColor(209, 213, 219);
-      doc.setLineWidth(0.5);
-      doc.line(120, yPosition + 35, 180, yPosition + 35);
-
-      // Save PDF
       doc.save(`Ordonnance_${patient.lastName || 'patient'}_${today}.pdf`);
-      alert("✓ Ordonnance PDF generee et telechargee avec succes.");
+      alert('✓ Ordonnance PDF générée et téléchargée avec succès.');
     } catch (error) {
       console.error("PDF generation failed, falling back to printer window:", error);
       // Fallback to standard window open print

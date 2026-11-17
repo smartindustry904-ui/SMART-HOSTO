@@ -97,74 +97,69 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
 
   const getRequest = (demandeId: string) => requests.find(r => r.id === demandeId);
 
-  const handleGenerateReport = () => {
-    if (!selectedResult) return;
-
-    const req = getRequest(selectedResult.demandeId);
-    if (!req) return;
-
+  const buildLabReportPdfDoc = (res: ResultatLaboratoire, req: any): jsPDF => {
     const doc = new jsPDF();
-    
+
     // Header
     doc.setFontSize(18);
     doc.setFont('helvetica', 'bold');
     doc.text(establishment?.name || 'SMARTHOSTO', 14, 20);
-    
+
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text('Laboratoire d\'Analyses Médicales', 14, 26);
-    
+    doc.text("Laboratoire d'Analyses Médicales", 14, 26);
+
     doc.setFontSize(9);
     doc.text(establishment?.address || '123 Avenue de la Santé', 140, 20);
     doc.text(`Contact: ${establishment?.phone || '+237 600 000 000'}`, 140, 25);
     doc.text(`Email: ${establishment?.email || 'labo@smarthosto.com'}`, 140, 30);
-    
+
     doc.line(14, 35, 196, 35);
-    
+
     // Patient Info
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
     doc.text('Patient:', 14, 45);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${req.patientName} (ID: ${selectedResult.patientId})`, 40, 45);
-    
+    doc.text(`${req.patientName} (ID: ${res.patientId})`, 40, 45);
+
     doc.setFont('helvetica', 'bold');
     doc.text('Prescripteur:', 14, 52);
     doc.setFont('helvetica', 'normal');
     doc.text(req.prescriberName, 40, 52);
-    
+
     doc.setFont('helvetica', 'bold');
     doc.text('Date prélèvement:', 120, 45);
     doc.setFont('helvetica', 'normal');
     doc.text(new Date(req.date).toLocaleDateString(), 155, 45);
-    
+
     doc.setFont('helvetica', 'bold');
     doc.text('Date validation:', 120, 52);
     doc.setFont('helvetica', 'normal');
-    doc.text(new Date(selectedResult.dateValidation || '').toLocaleDateString(), 155, 52);
-    
+    doc.text(new Date(res.dateValidation || '').toLocaleDateString(), 155, 52);
+
     doc.line(14, 60, 196, 60);
-    
+
     // Results Title
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
-    doc.text('RÉSULTATS D\'ANALYSES', 14, 70);
-    
+    doc.text("RÉSULTATS D'ANALYSES", 14, 70);
+
     let currentY = 80;
-    
-    selectedResult.lignes.forEach((ligne) => {
+
+    res.lignes.forEach(ligne => {
       doc.setFontSize(12);
       doc.setFont('helvetica', 'bold');
       doc.text(ligne.examName, 14, currentY);
       currentY += 5;
-      
+
       const tableData = ligne.parametres.map(p => [
         p.nom,
         `${p.valeur} ${p.isAnormal ? '*' : ''}`,
         p.unite,
         p.valeurReference
       ]);
-      
+
       autoTable(doc, {
         startY: currentY,
         head: [['Paramètre', 'Résultat', 'Unité', 'Valeurs de référence']],
@@ -175,7 +170,7 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
         columnStyles: {
           1: { fontStyle: 'bold' }
         },
-        didParseCell: function(data) {
+        didParseCell: function (data) {
           if (data.section === 'body' && data.column.index === 1) {
             const isAnormal = ligne.parametres[data.row.index].isAnormal;
             if (isAnormal) {
@@ -184,9 +179,9 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
           }
         }
       });
-      
+
       currentY = (doc as any).lastAutoTable.finalY + 10;
-      
+
       if (ligne.conclusion) {
         doc.setFontSize(10);
         doc.setFont('helvetica', 'bold');
@@ -196,33 +191,44 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
         currentY += 15;
       }
     });
-    
-    if (selectedResult.commentaireGlobal) {
+
+    if (res.commentaireGlobal) {
       doc.setFontSize(10);
       doc.setFont('helvetica', 'bold');
       doc.text('Commentaire Global:', 14, currentY);
       doc.setFont('helvetica', 'normal');
-      doc.text(selectedResult.commentaireGlobal, 14, currentY + 7);
+      doc.text(res.commentaireGlobal, 14, currentY + 7);
       currentY += 20;
     }
-    
+
     // Signatures
     currentY = Math.max(currentY, 250);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.text('Technicien', 40, currentY);
     doc.text('Biologiste Validateur', 140, currentY);
-    
+
     doc.setFont('helvetica', 'normal');
-    doc.text(selectedResult.saisiPar, 40, currentY + 10);
-    doc.text(selectedResult.validePar || '', 140, currentY + 10);
-    
+    doc.text(res.saisiPar, 40, currentY + 10);
+    doc.text(res.validePar || '', 140, currentY + 10);
+
     // Footer
     doc.setFontSize(8);
     doc.setTextColor(148, 163, 184); // slate-400
     doc.text('* Résultat hors des valeurs de référence', 14, 280);
     doc.text('Ce rapport a été généré électroniquement et est valide sans signature manuscrite.', 14, 285);
-    
+
+    return doc;
+  };
+
+  const handleGenerateReport = () => {
+    if (!selectedResult) return;
+
+    const req = getRequest(selectedResult.demandeId);
+    if (!req) return;
+
+    const doc = buildLabReportPdfDoc(selectedResult, req);
+
     // Save PDF
     doc.save(`Rapport_Labo_${selectedResult.id}.pdf`);
 
@@ -257,6 +263,15 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
 
     setSendingWa(true);
     try {
+      // 1. Generate styled official laboratory report PDF
+      let pdfBase64: string | undefined;
+      try {
+        const doc = buildLabReportPdfDoc(selectedResult, req);
+        pdfBase64 = doc.output('datauristring');
+      } catch (pdfErr) {
+        console.warn('Lab report PDF generation warning:', pdfErr);
+      }
+
       const summaryLines: string[] = [];
       (selectedResult.lignes || []).forEach(l => {
         (l.parametres || []).forEach(p => {
@@ -281,6 +296,8 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
           detailsText: selectedResult.interpretation
             ? `🔬 *Interprétation biologique :*\n${selectedResult.interpretation}`
             : undefined,
+          pdfBase64,
+          pdfFilename: `Rapport_Labo_${selectedResult.id}.pdf`,
           staffName: user?.name || 'Laboratoire d\'Analyses',
           staffRole: 'BIOLOGISTE'
         })
