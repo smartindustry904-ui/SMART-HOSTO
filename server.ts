@@ -4069,6 +4069,7 @@ app.post(['/api/whatsapp/send-document', '/whatsapp/send-document'], async (req,
       currency = 'FCFA',
       detailsText,
       pdfUrl,
+      pdfBase64,
       pdfFilename,
       staffName,
       staffRole
@@ -4095,50 +4096,94 @@ app.post(['/api/whatsapp/send-document', '/whatsapp/send-document'], async (req,
       minute: '2-digit'
     });
 
-    let msg = `🏥 *SMART-HOSTO — Service Médical*\n`;
-    msg += `_${typeLabel}_\n\n`;
+    let actualPdfUrl = pdfUrl;
+    const cleanFilename = pdfFilename || `SMART-HOSTO_${documentType.toLowerCase()}_${Date.now()}.pdf`;
 
-    if (patientName) {
-      msg += `👤 *Patient(e) :* ${patientName}${patientId ? ` _(Réf: ${patientId})_` : ''}\n`;
-    }
-    msg += `📅 *Date :* ${nowFormatted}\n`;
-
-    if (staffName) {
-      msg += `👨‍⚕️ *Émis par :* ${staffRole ? `${staffRole} ` : ''}${staffName}\n`;
-    }
-
-    msg += `\n`;
-
-    if (title) {
-      msg += `*${title}*\n`;
-    }
-
-    if (Array.isArray(summaryLines) && summaryLines.length > 0) {
-      msg += `\n*Détails :*\n`;
-      for (const line of summaryLines) {
-        msg += `• ${line}\n`;
+    // If client supplied base64 PDF from jsPDF, cache in dynamicReportsMap and create download URL
+    if (pdfBase64) {
+      try {
+        const cleanB64 = String(pdfBase64).replace(/^data:application\/pdf;base64,/, '').trim();
+        const pdfBuf = Buffer.from(cleanB64, 'base64');
+        if (pdfBuf.length > 0) {
+          const repId = 'doc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          dynamicReportsMap.set(repId, {
+            id: repId,
+            buffer: pdfBuf,
+            contentType: 'application/pdf',
+            filename: cleanFilename,
+            createdAt: Date.now()
+          });
+          pruneOldDynamicReports();
+          actualPdfUrl = `https://smart-hosto.onrender.com/api/whatsapp/reports/download?id=${encodeURIComponent(repId)}`;
+        }
+      } catch (errB64: any) {
+        console.warn('PDF Base64 decode error:', errB64?.message);
       }
     }
 
-    if (totalAmount !== undefined && totalAmount !== null) {
-      msg += `\n💰 *Total réglé :* *${Number(totalAmount).toLocaleString('fr-FR')} ${currency}*\n`;
+    let msg = '';
+    if (actualPdfUrl) {
+      // Short, elegant message introducing the attached styled PDF
+      msg = `🏥 *SMART-HOSTO — Service Médical*\n`;
+      msg += `_${typeLabel}_\n\n`;
+      msg += `Bonjour *${patientName || 'Cher patient'}*,\n`;
+      msg += `Veuillez trouver ci-joint votre document officiel au format PDF certifié.\n\n`;
+      if (title) msg += `• *Objet :* ${title}\n`;
+      msg += `• *Date :* ${nowFormatted}\n`;
+      if (staffName) msg += `• *Émis par :* ${staffRole ? `${staffRole} ` : ''}${staffName}\n`;
+      if (totalAmount !== undefined && totalAmount !== null) {
+        msg += `• *Montant réglé :* *${Number(totalAmount).toLocaleString('fr-FR')} ${currency}*\n`;
+      }
+      if (detailsText) msg += `\n${detailsText}\n`;
+      msg += `\n📄 _Le document officiel ci-joint est téléchargeable et certifié conforme._\n`;
+      msg += `_SMART-HOSTO SIH • Service d'Information Médicale_`;
+    } else {
+      // Detailed text layout fallback
+      msg = `🏥 *SMART-HOSTO — Service Médical*\n`;
+      msg += `_${typeLabel}_\n\n`;
+
+      if (patientName) {
+        msg += `👤 *Patient(e) :* ${patientName}${patientId ? ` _(Réf: ${patientId})_` : ''}\n`;
+      }
+      msg += `📅 *Date :* ${nowFormatted}\n`;
+
+      if (staffName) {
+        msg += `👨‍⚕️ *Émis par :* ${staffRole ? `${staffRole} ` : ''}${staffName}\n`;
+      }
+
+      msg += `\n`;
+
+      if (title) {
+        msg += `*${title}*\n`;
+      }
+
+      if (Array.isArray(summaryLines) && summaryLines.length > 0) {
+        msg += `\n*Détails :*\n`;
+        for (const line of summaryLines) {
+          msg += `• ${line}\n`;
+        }
+      }
+
+      if (totalAmount !== undefined && totalAmount !== null) {
+        msg += `\n💰 *Total réglé :* *${Number(totalAmount).toLocaleString('fr-FR')} ${currency}*\n`;
+      }
+
+      if (detailsText) {
+        msg += `\n${detailsText}\n`;
+      }
+
+      msg += `\n✅ _Document officiel enregistré dans votre dossier SMART-HOSTO._\n`;
+      msg += `_Pour toute question, contactez le standard de l'établissement._`;
     }
 
-    if (detailsText) {
-      msg += `\n${detailsText}\n`;
-    }
-
-    msg += `\n✅ _Document officiel enregistré dans votre dossier SMART-HOSTO._\n`;
-    msg += `_Pour toute question, contactez le standard de l'établissement._`;
-
-    // 1. Send text message
+    // 1. Send introductory text message
     const sendRes = await sendMetaWhatsAppMessage(cleanPhone, msg, config);
 
-    // 2. If PDF URL provided, also send document attachment
+    // 2. If PDF URL provided, also send document attachment directly
     let docRes = null;
-    if (pdfUrl) {
-      const docFilename = pdfFilename || `${documentType.toLowerCase()}_${Date.now()}.pdf`;
-      docRes = await sendMetaWhatsAppDocument(cleanPhone, pdfUrl, docFilename, title || typeLabel, config);
+    if (actualPdfUrl) {
+      const caption = `📄 ${title || typeLabel} — SMART-HOSTO (Certifié)`;
+      docRes = await sendMetaWhatsAppDocument(cleanPhone, actualPdfUrl, cleanFilename, caption, config);
     }
 
     await logWhatsAppMessage({
@@ -4146,16 +4191,17 @@ app.post(['/api/whatsapp/send-document', '/whatsapp/send-document'], async (req,
       staffName: staffName || 'Système Médical',
       staffRole: staffRole || 'STAFF',
       phone: cleanPhone,
-      message: msg,
+      message: actualPdfUrl ? `[DOCUMENT PDF ENVOYÉ: ${cleanFilename}]\n${msg}` : msg,
       source: 'DOCUMENT_DISPATCH',
-      metaMessageId: sendRes.metaMessageId
+      metaMessageId: docRes?.metaMessageId || sendRes.metaMessageId
     });
 
     return res.json({
       success: true,
-      metaMessageId: sendRes.metaMessageId,
+      metaMessageId: docRes?.metaMessageId || sendRes.metaMessageId,
       documentSent: !!docRes?.sent,
-      message: `Document WhatsApp transmis avec succès à +${cleanPhone}`
+      pdfUrl: actualPdfUrl,
+      message: `Document PDF officiel WhatsApp transmis avec succès à +${cleanPhone}`
     });
   } catch (err: any) {
     console.error('Error sending document via WhatsApp:', err);
