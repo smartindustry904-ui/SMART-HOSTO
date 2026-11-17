@@ -1288,7 +1288,7 @@ function cleanTextForSpeech(raw: string): string {
   return txt;
 }
 
-// Synthesize spoken voice note using Google Gemini TTS model
+// Synthesize spoken voice note using Google Gemini 3.8 Flash TTS via Interactions API
 async function synthesizeSpeechAudio(
   text: string,
   voiceName: string = 'Aoede',
@@ -1298,39 +1298,61 @@ async function synthesizeSpeechAudio(
   const cleaned = cleanTextForSpeech(text);
   if (!cleaned) return null;
 
+  const validVoices = ['Aoede', 'Puck', 'Charon', 'Kore', 'Fenrir'];
+  const voice = validVoices.includes(voiceName) ? voiceName : 'Aoede';
+
+  // 1. Try Gemini 3.8 Flash TTS via Interactions API (official standard)
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${encodeURIComponent(apiKey)}`;
     const resp = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
+      },
       body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: cleaned }] }],
-        generationConfig: {
-          responseModalities: ['AUDIO'],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: voiceName || 'Aoede' }
-            }
-          }
+        model: 'gemini-3.8-flash-tts',
+        input: [{
+          type: 'user_input',
+          content: [{
+            type: 'text',
+            text: cleaned,
+            annotations: [{
+              type: 'speech_metadata',
+              style: 'warm and professional'
+            }]
+          }]
+        }],
+        response_format: { type: 'audio' },
+        generation_config: {
+          speech_config: [{ voice }]
         }
       })
     });
 
-    if (!resp.ok) {
-      console.warn(`TTS synthesis returned status ${resp.status}`);
-      return null;
+    if (resp.ok) {
+      const data: any = await resp.json();
+      const audioContent = data.steps
+        ?.find((s: any) => s.type === 'model_output')
+        ?.content?.find((c: any) => c.type === 'audio');
+
+      if (audioContent?.data) {
+        const audioBuf = Buffer.from(audioContent.data, 'base64');
+        // If it starts with RIFF, it's already a complete WAV
+        if (audioBuf.length > 44 && audioBuf.toString('ascii', 0, 4) === 'RIFF') {
+          return audioBuf;
+        }
+        // Otherwise prepend WAV header
+        return pcmToWav(audioBuf, 24000);
+      }
+    } else {
+      console.warn(`Interactions TTS returned status ${resp.status}`);
     }
-
-    const data: any = await resp.json();
-    const rawB64 = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!rawB64) return null;
-
-    const pcmBuffer = Buffer.from(rawB64, 'base64');
-    return pcmToWav(pcmBuffer, 24000);
-  } catch (err) {
-    console.warn('Speech synthesis error:', err);
-    return null;
+  } catch (err: any) {
+    console.warn('Interactions TTS error:', err?.message);
   }
+
+  return null;
 }
 
 function withFastTimeout<T>(promise: Promise<T>, ms = 1800): Promise<T> {
