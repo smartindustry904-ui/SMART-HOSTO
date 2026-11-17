@@ -566,7 +566,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
   theme = 'light',
   onUserPhoneUpdated
 }) => {
-  const [subTab, setSubTab] = useState<'SIMULATOR' | 'CONFIG' | 'DIRECTORY' | 'LOGS'>('SIMULATOR');
+  const [subTab, setSubTab] = useState<'SIMULATOR' | 'LIVE_CHATS' | 'CONFIG' | 'DIRECTORY' | 'LOGS'>('SIMULATOR');
 
   // Config state
   const [config, setConfig] = useState({
@@ -624,6 +624,119 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
   // Logs state
   const [logs, setLogs] = useState<Array<any>>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  // Live Threads & Handover State
+  const [threads, setThreads] = useState<Array<any>>([]);
+  const [selectedThreadPhone, setSelectedThreadPhone] = useState<string | null>(null);
+  const [threadMessages, setThreadMessages] = useState<Array<any>>([]);
+  const [isLoadingThreads, setIsLoadingThreads] = useState(false);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [humanReplyText, setHumanReplyText] = useState('');
+  const [isSendingHumanReply, setIsSendingHumanReply] = useState(false);
+  const [isTogglingMode, setIsTogglingMode] = useState(false);
+  const threadEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchThreads = async () => {
+    setIsLoadingThreads(true);
+    try {
+      const res = await fetch('/api/whatsapp/threads');
+      const data = await res.json();
+      if (data.success && Array.isArray(data.threads)) {
+        setThreads(data.threads);
+        if (!selectedThreadPhone && data.threads.length > 0) {
+          setSelectedThreadPhone(data.threads[0].phone);
+        }
+      }
+    } catch {}
+    setIsLoadingThreads(false);
+  };
+
+  const fetchThreadMessages = async (phone: string) => {
+    if (!phone) return;
+    setIsLoadingMessages(true);
+    try {
+      const res = await fetch(`/api/whatsapp/threads/${encodeURIComponent(phone)}/messages`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.messages)) {
+        setThreadMessages(data.messages);
+      }
+    } catch {}
+    setIsLoadingMessages(false);
+  };
+
+  useEffect(() => {
+    if (subTab === 'LIVE_CHATS') {
+      fetchThreads();
+    }
+  }, [subTab]);
+
+  useEffect(() => {
+    if (selectedThreadPhone && subTab === 'LIVE_CHATS') {
+      fetchThreadMessages(selectedThreadPhone);
+      const interval = setInterval(() => {
+        fetchThreadMessages(selectedThreadPhone);
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [selectedThreadPhone, subTab]);
+
+  useEffect(() => {
+    if (subTab === 'LIVE_CHATS') {
+      threadEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [threadMessages, isSendingHumanReply]);
+
+  const handleToggleHandoverMode = async (phone: string, targetMode: 'AI' | 'HUMAN') => {
+    setIsTogglingMode(true);
+    try {
+      const res = await fetch(`/api/whatsapp/threads/${encodeURIComponent(phone)}/mode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: targetMode,
+          staffName: currentUser?.name || 'Soignant',
+          staffId: currentUser?.id
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setThreads(prev =>
+          prev.map(t => (t.phone === phone ? { ...t, mode: targetMode, assignedStaffName: currentUser?.name } : t))
+        );
+      }
+    } catch {}
+    setIsTogglingMode(false);
+  };
+
+  const handleSendHumanReply = async () => {
+    if (!selectedThreadPhone || !humanReplyText.trim()) return;
+    setIsSendingHumanReply(true);
+    const textToSend = humanReplyText.trim();
+    try {
+      const res = await fetch(`/api/whatsapp/threads/${encodeURIComponent(selectedThreadPhone)}/reply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: textToSend,
+          staffName: currentUser?.name || 'Soignant SMART-HOSTO',
+          staffRole: currentUser?.role || 'STAFF',
+          staffId: currentUser?.id
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setHumanReplyText('');
+        fetchThreadMessages(selectedThreadPhone);
+        fetchThreads();
+      } else {
+        alert(data.message || 'Erreur lors de l\'envoi');
+      }
+    } catch (err: any) {
+      alert('Erreur: ' + err.message);
+    } finally {
+      setIsSendingHumanReply(false);
+    }
+  };
 
   const webhookUrl = `${window.location.origin}/api/whatsapp/webhook`;
 
@@ -1120,6 +1233,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
           <div className="flex flex-wrap items-center gap-1.5 bg-slate-900/5 dark:bg-zinc-950/60 p-1.5 rounded-2xl">
             {[
               { id: 'SIMULATOR', label: 'Simulateur & Chat IA', icon: Bot },
+              { id: 'LIVE_CHATS', label: 'Discussions & Prise en Main', icon: MessageSquare },
               { id: 'CONFIG', label: 'Meta API & Gemini', icon: Key },
               { id: 'DIRECTORY', label: 'Numéros du Personnel', icon: Users },
               { id: 'LOGS', label: 'Journaux Webhook', icon: Terminal }
@@ -1444,6 +1558,316 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
                 )}
               </form>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================
+          SUBTAB: LIVE CONVERSATIONS & HUMAN HANDOVER INBOX
+      ========================================================= */}
+      {!staffOnlyMode && subTab === 'LIVE_CHATS' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Threads List Pane */}
+          <div className="lg:col-span-4 space-y-4">
+            <div
+              className={`p-4 rounded-3xl border ${
+                isDark ? 'bg-zinc-900/50 border-zinc-800' : 'bg-white border-slate-200 shadow-sm'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                    <MessageSquare size={16} />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-800 dark:text-zinc-200">
+                      Discussions WhatsApp
+                    </h3>
+                    <p className="text-[10px] text-slate-500">
+                      {threads.length} conversation{threads.length > 1 ? 's' : ''} active{threads.length > 1 ? 's' : ''}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchThreads}
+                  disabled={isLoadingThreads}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                  title="Actualiser les fils"
+                >
+                  <RefreshCw size={14} className={isLoadingThreads ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              {isLoadingThreads && threads.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400">Chargement des conversations...</div>
+              ) : threads.length === 0 ? (
+                <div className="py-12 text-center text-xs text-slate-400 space-y-2">
+                  <Smartphone size={28} className="mx-auto text-slate-300" />
+                  <p>Aucun message reçu pour l'instant.</p>
+                  <p className="text-[10px] text-slate-400">
+                    Les échanges réels avec le numéro de l'hôpital apparaîtront ici en temps réel.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1 custom-scrollbar">
+                  {threads.map(t => {
+                    const isSelected = selectedThreadPhone === t.phone;
+                    const isHumanMode = t.mode === 'HUMAN';
+                    return (
+                      <div
+                        key={t.phone}
+                        onClick={() => setSelectedThreadPhone(t.phone)}
+                        className={`p-3 rounded-2xl cursor-pointer transition-all border ${
+                          isSelected
+                            ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-500/50 shadow-xs'
+                            : isDark
+                            ? 'bg-zinc-950/40 border-zinc-800/80 hover:bg-zinc-800/40'
+                            : 'bg-slate-50/70 border-slate-200/60 hover:bg-slate-100/70'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white font-black text-xs flex items-center justify-center">
+                              {t.contactName?.charAt(0)?.toUpperCase() || 'P'}
+                            </div>
+                            <div>
+                              <div className="text-xs font-black text-slate-900 dark:text-zinc-100 truncate max-w-[130px]">
+                                {t.contactName}
+                              </div>
+                              <div className="text-[10px] text-slate-400 font-mono">+{t.phone}</div>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                                isHumanMode
+                                  ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700'
+                                  : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-700'
+                              }`}
+                            >
+                              {isHumanMode ? '👤 Humain' : '🤖 IA'}
+                            </span>
+                            <div className="text-[9px] text-slate-400 mt-0.5">
+                              {t.lastTimestamp ? new Date(t.lastTimestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : ''}
+                            </div>
+                          </div>
+                        </div>
+
+                        <p className="text-[11px] text-slate-600 dark:text-zinc-400 line-clamp-1 italic mt-1">
+                          {t.lastDirection === 'OUTBOUND' ? '↪ ' : '↩ '}
+                          {t.lastMessage || 'Message'}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Active Conversation & Intervention Chat Pane */}
+          <div className="lg:col-span-8 space-y-4">
+            {selectedThreadPhone ? (
+              <div
+                className={`p-5 rounded-3xl border flex flex-col h-[680px] ${
+                  isDark ? 'bg-zinc-900/50 border-zinc-800' : 'bg-white border-slate-200 shadow-sm'
+                }`}
+              >
+                {/* Thread Header with Handover Toggle */}
+                {(() => {
+                  const currentThread = threads.find(t => t.phone === selectedThreadPhone) || {
+                    phone: selectedThreadPhone,
+                    contactName: `+${selectedThreadPhone}`,
+                    mode: 'AI'
+                  };
+                  const isHuman = currentThread.mode === 'HUMAN';
+
+                  return (
+                    <div className="pb-4 border-b border-slate-100 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white font-black text-sm flex items-center justify-center shadow-xs">
+                          {currentThread.contactName?.charAt(0)?.toUpperCase() || 'P'}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm font-black text-slate-900 dark:text-zinc-100">
+                              {currentThread.contactName}
+                            </h3>
+                            <span className="text-xs text-slate-400 font-mono">+{currentThread.phone}</span>
+                          </div>
+                          <div className="text-[11px] flex items-center gap-2 mt-0.5">
+                            <span className="text-slate-500">Statut de réponse :</span>
+                            <span
+                              className={`font-black ${
+                                isHuman ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'
+                              }`}
+                            >
+                              {isHuman
+                                ? `Intervention humaine en cours (${currentThread.assignedStaffName || 'Soignant'})`
+                                : 'Réponse IA automatique activée'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Mode Toggle Button */}
+                      <div>
+                        {isHuman ? (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleHandoverMode(selectedThreadPhone, 'AI')}
+                            disabled={isTogglingMode}
+                            className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs shadow-emerald-600/20 active:scale-[0.98]"
+                          >
+                            <Bot size={14} />
+                            <span>Rendre la main à l'IA 🤖</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleHandoverMode(selectedThreadPhone, 'HUMAN')}
+                            disabled={isTogglingMode}
+                            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-xs shadow-amber-500/20 active:scale-[0.98]"
+                          >
+                            <Users size={14} />
+                            <span>Prendre la main (Pause IA) 👤</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Messages History */}
+                <div className="flex-1 overflow-y-auto py-4 space-y-3 pr-2 custom-scrollbar">
+                  {isLoadingMessages && threadMessages.length === 0 ? (
+                    <div className="py-16 text-center text-xs text-slate-400">Chargement de la discussion...</div>
+                  ) : threadMessages.length === 0 ? (
+                    <div className="py-16 text-center text-xs text-slate-400">Aucun message dans ce fil.</div>
+                  ) : (
+                    threadMessages.map(m => {
+                      const isInbound = m.direction === 'INBOUND';
+                      const isHuman = m.source === 'HUMAN_AGENT';
+                      const isDoc = m.source === 'DOCUMENT_DISPATCH' || m.source === 'NOTIFICATION';
+
+                      return (
+                        <div
+                          key={m.id}
+                          className={`flex flex-col ${isInbound ? 'items-start' : 'items-end'}`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-1 px-1 text-[10px] text-slate-400">
+                            {isInbound ? (
+                              <span>↩ {m.staffName || 'Patient'}</span>
+                            ) : isHuman ? (
+                              <span className="text-amber-600 dark:text-amber-400 font-bold flex items-center gap-1">
+                                👤 {m.staffName || 'Soignant'} ({m.staffRole || 'STAFF'})
+                              </span>
+                            ) : isDoc ? (
+                              <span className="text-blue-600 dark:text-blue-400 font-bold">
+                                📄 Document officiel transmis
+                              </span>
+                            ) : (
+                              <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                🤖 IA SMART-HOSTO ({m.aiModel || 'Gemini'})
+                              </span>
+                            )}
+                            <span>•</span>
+                            <span>
+                              {m.createdAt
+                                ? new Date(m.createdAt).toLocaleTimeString('fr-FR', {
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })
+                                : ''}
+                            </span>
+                          </div>
+
+                          <div
+                            className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed whitespace-pre-wrap ${
+                              isInbound
+                                ? isDark
+                                  ? 'bg-zinc-800 text-zinc-100 rounded-tl-xs'
+                                  : 'bg-slate-100 text-slate-800 rounded-tl-xs'
+                                : isHuman
+                                ? 'bg-amber-600 text-white rounded-tr-xs shadow-xs'
+                                : isDoc
+                                ? 'bg-blue-600 text-white rounded-tr-xs shadow-xs'
+                                : 'bg-emerald-700 text-white rounded-tr-xs shadow-xs'
+                            }`}
+                          >
+                            {m.message}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={threadEndRef} />
+                </div>
+
+                {/* Reply Input Box */}
+                <div className="pt-3 border-t border-slate-100 dark:border-zinc-800 shrink-0">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+                    <span>
+                      Envoi depuis le numéro officiel : <strong className="text-emerald-600">+237 6 81 05 11 23</strong>
+                    </span>
+                    <span>
+                      Opérateur : <strong className="text-slate-700 dark:text-zinc-300">{currentUser?.name || 'Soignant'}</strong>
+                    </span>
+                  </div>
+
+                  <form
+                    onSubmit={e => {
+                      e.preventDefault();
+                      handleSendHumanReply();
+                    }}
+                    className="flex items-center gap-2"
+                  >
+                    <input
+                      type="text"
+                      placeholder="Tapez votre réponse humaine à envoyer sur le WhatsApp du patient..."
+                      value={humanReplyText}
+                      onChange={e => setHumanReplyText(e.target.value)}
+                      disabled={isSendingHumanReply}
+                      className={`flex-1 px-4 py-3 rounded-2xl text-xs border focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all ${
+                        isDark
+                          ? 'bg-zinc-950 border-zinc-800 text-zinc-100 placeholder-zinc-500'
+                          : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400'
+                      }`}
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSendingHumanReply || !humanReplyText.trim()}
+                      className="px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-300 dark:disabled:bg-zinc-800 text-white font-black text-xs flex items-center gap-1.5 transition-all cursor-pointer disabled:cursor-not-allowed shadow-xs"
+                    >
+                      {isSendingHumanReply ? (
+                        <RefreshCw size={14} className="animate-spin" />
+                      ) : (
+                        <Send size={14} />
+                      )}
+                      <span>Envoyer</span>
+                    </button>
+                  </form>
+                </div>
+              </div>
+            ) : (
+              <div
+                className={`p-16 text-center rounded-3xl border flex flex-col items-center justify-center space-y-3 h-[680px] ${
+                  isDark ? 'bg-zinc-900/50 border-zinc-800' : 'bg-white border-slate-200 shadow-sm'
+                }`}
+              >
+                <div className="w-16 h-16 rounded-3xl bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-400">
+                  <MessageSquare size={32} />
+                </div>
+                <h4 className="font-black text-slate-800 dark:text-zinc-200 text-sm">
+                  Sélectionnez une discussion à gauche
+                </h4>
+                <p className="text-xs text-slate-400 max-w-sm">
+                  Visualisez l'historique en temps réel, prenez le relais sur l'IA ou répondez directement au patient ou praticien.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
