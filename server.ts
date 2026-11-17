@@ -1176,6 +1176,8 @@ interface WhatsAppAgentConfig {
   verifyToken: string;
   geminiApiKey: string;
   geminiModel: string;
+  voiceEnabled: boolean;
+  voiceName: string;
   allowUnregisteredPreview: boolean;
   systemPrompt: string;
   updatedAt?: string;
@@ -1221,11 +1223,115 @@ DIRECTIVES DE STYLE & MISE EN FORME (MARKDOWN NATUREL, ÉLÉGANT ET AÉRÉ) :
 
 6. FLUX CONVERSATIONNEL & MÉMOIRE CONTEXTUELLE :
    - Tu disposes de l'historique récent des échanges.
-   - Si l'utilisateur fait référence à une requête précédente (ex: "same like before", "la même chose en pdf", "et pour les urgences ?", "recommence avec...", "détaille ce chiffre"), analyse le fil de discussion pour assurer une continuité parfaite sans lui demander de répéter.`;
+   - Si l'utilisateur fait référence à une requête précédente (ex: "same like before", "la même chose en pdf", "et pour les urgences ?", "recommence avec...", "détaille ce chiffre"), analyse le fil de discussion pour assurer une continuité parfaite sans lui demander de répéter.
+
+7. NOTES VOCALES & MESSAGES AUDIO :
+   - Tu es capable d'écouter, comprendre et traiter les notes vocales WhatsApp envoyées par le personnel soignant.
+   - Tu réponds avec exactitude à la fois sous forme de texte structuré et clair, et sous forme de note vocale audio avec un ton professionnel et chaleureux.`;
 
 // In-memory cache & fallback logs so the agent works seamlessly even during brief Firestore latency
 let cachedWhatsAppConfig: WhatsAppAgentConfig | null = null;
 const memoryWhatsAppLogs: Array<any> = [];
+
+// Audio voice notes cache for WhatsApp audio delivery (TTL: 2 hours)
+interface AudioVoiceEntry {
+  id: string;
+  buffer: Buffer;
+  mimeType: string;
+  createdAt: number;
+}
+const audioVoiceCache = new Map<string, AudioVoiceEntry>();
+
+function pruneOldAudioVoiceEntries() {
+  const now = Date.now();
+  const maxAgeMs = 2 * 60 * 60 * 1000;
+  for (const [id, entry] of audioVoiceCache.entries()) {
+    if (now - entry.createdAt > maxAgeMs) {
+      audioVoiceCache.delete(id);
+    }
+  }
+}
+
+// Convert 24kHz 16-bit mono PCM into standard WAV format with 44-byte RIFF header
+function pcmToWav(pcmBuffer: Buffer, sampleRate: number = 24000): Buffer {
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + pcmBuffer.length, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM = 1
+  header.writeUInt16LE(1, 22); // mono = 1
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(pcmBuffer.length, 40);
+  return Buffer.concat([header, pcmBuffer]);
+}
+
+// Clean markdown, emojis, URLs, and formatting for natural TTS audio synthesis
+function cleanTextForSpeech(raw: string): string {
+  let txt = String(raw || '')
+    .replace(/[*_#`~\[\]]/g, '')
+    .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F900}-\u{1F9FF}\u{1FA70}-\u{1FAFF}]/gu, '')
+    .replace(/•\s*/g, ', ')
+    .replace(/https?:\/\/[^\s]+/g, '')
+    .replace(/FCFA/gi, 'francs CFA')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (txt.length > 400) {
+    txt = txt.slice(0, 400).replace(/\s+[^ ]*$/, '') + '.';
+  }
+  return txt;
+}
+
+// Synthesize spoken voice note using Google Gemini TTS model
+async function synthesizeSpeechAudio(
+  text: string,
+  voiceName: string = 'Aoede',
+  apiKey: string
+): Promise<Buffer | null> {
+  if (!apiKey || !text) return null;
+  const cleaned = cleanTextForSpeech(text);
+  if (!cleaned) return null;
+
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: cleaned }] }],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voiceName || 'Aoede' }
+            }
+          }
+        }
+      })
+    });
+
+    if (!resp.ok) {
+      console.warn(`TTS synthesis returned status ${resp.status}`);
+      return null;
+    }
+
+    const data: any = await resp.json();
+    const rawB64 = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!rawB64) return null;
+
+    const pcmBuffer = Buffer.from(rawB64, 'base64');
+    return pcmToWav(pcmBuffer, 24000);
+  } catch (err) {
+    console.warn('Speech synthesis error:', err);
+    return null;
+  }
+}
 
 function withFastTimeout<T>(promise: Promise<T>, ms = 1800): Promise<T> {
   return Promise.race([
@@ -1262,24 +1368,26 @@ async function getWhatsAppConfig(): Promise<WhatsAppAgentConfig> {
     } catch {}
   }
 
-    const isOldPrompt =
-      !stored.systemPrompt ||
-      stored.systemPrompt.includes("utilise le formatage WhatsApp : *gras*, listes à puces et emojis pertinents") ||
-      stored.systemPrompt.length < 500;
-    const systemPrompt = isOldPrompt ? DEFAULT_WHATSAPP_SYSTEM_PROMPT : stored.systemPrompt;
+  const isOldPrompt =
+    !stored.systemPrompt ||
+    stored.systemPrompt.includes("utilise le formatage WhatsApp : *gras*, listes à puces et emojis pertinents") ||
+    stored.systemPrompt.length < 500;
+  const systemPrompt = isOldPrompt ? DEFAULT_WHATSAPP_SYSTEM_PROMPT : stored.systemPrompt;
 
-    const config: WhatsAppAgentConfig = {
-      enabled: stored.enabled ?? true,
-      phoneNumberId: stored.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || '',
-      businessAccountId: stored.businessAccountId || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
-      accessToken: stored.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
-      verifyToken: stored.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || 'smarthosto_meta_verify_2026',
-      geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || '',
-      geminiModel: stored.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-2.5-pro',
-      allowUnregisteredPreview: stored.allowUnregisteredPreview ?? true,
-      systemPrompt,
-      updatedAt: stored.updatedAt
-    };
+  const config: WhatsAppAgentConfig = {
+    enabled: stored.enabled ?? true,
+    phoneNumberId: stored.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+    businessAccountId: stored.businessAccountId || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || '',
+    accessToken: stored.accessToken || process.env.WHATSAPP_ACCESS_TOKEN || '',
+    verifyToken: stored.verifyToken || process.env.WHATSAPP_VERIFY_TOKEN || 'smarthosto_meta_verify_2026',
+    geminiApiKey: stored.geminiApiKey || process.env.GEMINI_API_KEY || '',
+    geminiModel: stored.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-3.5-flash',
+    voiceEnabled: stored.voiceEnabled !== undefined ? Boolean(stored.voiceEnabled) : true,
+    voiceName: stored.voiceName || 'Aoede',
+    allowUnregisteredPreview: stored.allowUnregisteredPreview ?? true,
+    systemPrompt,
+    updatedAt: stored.updatedAt
+  };
   cachedWhatsAppConfig = config;
   return config;
 }
@@ -2768,10 +2876,63 @@ async function generateStaffAgentReply(
   messageText: string,
   staffDoc: any,
   config: WhatsAppAgentConfig,
-  precomputedContext?: any
-): Promise<{ reply: string; modelUsed: string; contextSummary: any }> {
+  precomputedContext?: any,
+  audioPayload?: { mimeType: string; base64Data: string } | null
+): Promise<{ reply: string; modelUsed: string; contextSummary: any; isVoiceInput?: boolean }> {
   const ctx = precomputedContext || (await buildStaffHospitalContext(staffDoc));
   const apiKey = (config.geminiApiKey || process.env.GEMINI_API_KEY || '').trim();
+
+  // If audio is attached, process native audio understanding with Gemini
+  if (apiKey && audioPayload?.base64Data) {
+    try {
+      const cleanMime = (audioPayload.mimeType || 'audio/ogg').split(';')[0].trim();
+      const promptInstruction =
+        `${config.systemPrompt || DEFAULT_WHATSAPP_SYSTEM_PROMPT}\n\n` +
+        `CONTEXTE TEMPS RÉEL DE L'HÔPITAL ET DU MEMBRE DU PERSONNEL CONNECTÉ (JSON) :\n${JSON.stringify(ctx, null, 2)}\n\n` +
+        `NOTE VOCALE REÇUE : L'utilisateur a envoyé cette note vocale audio ci-jointe. Écoute attentivement ses paroles, comprends sa demande médicale, administrative ou financière et formule une réponse claire, complète et chaleureuse.`;
+
+      // 1. Try Interactions API with native audio
+      const interactionRes = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'gemini-2.5-flash',
+          input: [
+            { type: 'audio', data: audioPayload.base64Data, mime_type: cleanMime },
+            { type: 'text', text: promptInstruction }
+          ]
+        })
+      });
+
+      if (interactionRes.ok) {
+        const iData: any = await interactionRes.json();
+        const modelStep = iData?.steps?.find((s: any) => s.type === 'model_output');
+        const candidateAudioText = modelStep?.content?.[0]?.text?.trim();
+        if (candidateAudioText) {
+          return {
+            reply: candidateAudioText,
+            modelUsed: 'gemini-2.5-flash (Native Audio Dialog)',
+            isVoiceInput: true,
+            contextSummary: {
+              staffName: ctx.staff.name,
+              staffRole: ctx.staff.role,
+              totalActs: ctx.personalFinanceAndActs.totalActs,
+              totalCommissionsEarnedFCFA: ctx.personalFinanceAndActs.totalCommissionsEarnedFCFA,
+              waitingPatients: ctx.waitingQueueToday.totalWaiting
+            }
+          };
+        }
+      } else {
+        const errDetail = await interactionRes.text().catch(() => '');
+        console.warn('Interactions audio API returned:', interactionRes.status, errDetail);
+      }
+    } catch (aErr) {
+      console.warn('Native audio parsing error, falling back:', aErr);
+    }
+  }
 
   if (apiKey) {
     const primaryModel = (config.geminiModel || process.env.WHATSAPP_GEMINI_MODEL || 'gemini-3.5-flash').trim();
@@ -2979,6 +3140,106 @@ async function sendMetaWhatsAppDocument(
   }
 }
 
+async function sendMetaWhatsAppAudio(
+  toPhone: string,
+  audioUrl: string,
+  config: WhatsAppAgentConfig
+): Promise<{ sent: boolean; metaMessageId?: string; error?: string }> {
+  const cleanPhone = normalizePhone(toPhone);
+  if (!cleanPhone || !config.phoneNumberId || !config.accessToken) {
+    return { sent: false, error: 'Identifiants Meta Cloud API non configurés' };
+  }
+
+  try {
+    const url = `https://graph.facebook.com/v21.0/${encodeURIComponent(config.phoneNumberId)}/messages`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'audio',
+        audio: {
+          link: audioUrl
+        }
+      })
+    });
+
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.warn('Meta Audio send error:', data);
+      return {
+        sent: false,
+        error: data?.error?.message || `Erreur Meta Audio (${response.status})`
+      };
+    }
+
+    return {
+      sent: true,
+      metaMessageId: data?.messages?.[0]?.id
+    };
+  } catch (err: any) {
+    return {
+      sent: false,
+      error: err?.message || 'Erreur réseau lors de l’envoi de la note vocale'
+    };
+  }
+}
+
+async function downloadMetaMedia(
+  mediaId: string,
+  accessToken: string
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  try {
+    const metaMediaUrl = `https://graph.facebook.com/v21.0/${encodeURIComponent(mediaId)}`;
+    const metaRes = await fetch(metaMediaUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!metaRes.ok) {
+      console.warn(`Meta media lookup failed with status ${metaRes.status}`);
+      return null;
+    }
+    const metaData: any = await metaRes.json();
+    const downloadUrl = metaData?.url;
+    const mimeType = metaData?.mime_type || 'audio/ogg';
+    if (!downloadUrl) return null;
+
+    const fileRes = await fetch(downloadUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!fileRes.ok) {
+      console.warn(`Meta media download failed with status ${fileRes.status}`);
+      return null;
+    }
+    const arrBuf = await fileRes.arrayBuffer();
+    return { buffer: Buffer.from(arrBuf), mimeType };
+  } catch (err) {
+    console.warn('Error downloading media from Meta Cloud API:', err);
+    return null;
+  }
+}
+
+// Public Download Endpoint for Generated WhatsApp Vocal Notes (Audio)
+app.get(['/api/whatsapp/audio/download', '/whatsapp/audio/download'], (req, res) => {
+  try {
+    const audioId = String(req.query.id || '');
+    if (audioId && audioVoiceCache.has(audioId)) {
+      const entry = audioVoiceCache.get(audioId)!;
+      res.setHeader('Content-Type', entry.mimeType || 'audio/wav');
+      res.setHeader('Content-Disposition', `inline; filename="SMART-HOSTO_VOCAL_${audioId}.wav"`);
+      res.setHeader('Content-Length', entry.buffer.length);
+      return res.send(entry.buffer);
+    }
+    return res.status(404).json({ error: 'AUDIO_NOT_FOUND', message: 'Note vocale expirée ou introuvable.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'AUDIO_SERVE_ERROR', message: err?.message });
+  }
+});
+
 // 0. Public Download Endpoint for Generated PDF & Excel Reports
 app.get(['/api/whatsapp/reports/download', '/reports/download'], async (req, res) => {
   try {
@@ -3067,9 +3328,24 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
           const fromPhone = String(msg.from || '');
           const contactName = contacts[0]?.profile?.name || 'Personnel';
           let textBody = '';
+          let isVoiceMessage = false;
+          let audioPayload: { mimeType: string; base64Data: string } | null = null;
 
           if (msg.type === 'text' && msg.text?.body) {
             textBody = String(msg.text.body).trim();
+          } else if (msg.type === 'audio' || msg.type === 'voice') {
+            isVoiceMessage = true;
+            const audioObj = msg.audio || msg.voice;
+            if (audioObj?.id && config.accessToken) {
+              const downloaded = await downloadMetaMedia(audioObj.id, config.accessToken);
+              if (downloaded) {
+                audioPayload = {
+                  mimeType: downloaded.mimeType,
+                  base64Data: downloaded.buffer.toString('base64')
+                };
+                textBody = `[Note vocale reçue de ${contactName}]`;
+              }
+            }
           } else if (msg.type === 'interactive') {
             textBody =
               msg.interactive?.button_reply?.title ||
@@ -3077,7 +3353,7 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
               '';
           }
 
-          if (!fromPhone || !textBody) continue;
+          if (!fromPhone || (!textBody && !audioPayload)) continue;
 
           let staffDoc = await findStaffByPhoneOrId(fromPhone, undefined);
 
@@ -3142,7 +3418,7 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
           if (isDocRequest && config.phoneNumberId && config.accessToken) {
             try {
               // 1. Generate accurate conversational summary first using live context
-              const agentReply = await generateStaffAgentReply(textBody, staffDoc, config, staffContext);
+              const agentReply = await generateStaffAgentReply(textBody, staffDoc, config, staffContext, audioPayload);
 
               // 2. Send conversational summary immediately so the user gets instant feedback
               const sendRes = await sendMetaWhatsAppMessage(fromPhone, agentReply.reply, config);
@@ -3157,6 +3433,31 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
                 aiModel: agentReply.modelUsed,
                 metaMessageId: sendRes.metaMessageId
               });
+
+              // If voice note was received or voice is enabled, also dispatch vocal audio reply
+              if ((isVoiceMessage || config.voiceEnabled) && config.phoneNumberId && config.accessToken) {
+                try {
+                  const speechBuf = await synthesizeSpeechAudio(
+                    agentReply.reply,
+                    config.voiceName || 'Aoede',
+                    config.geminiApiKey || process.env.GEMINI_API_KEY || ''
+                  );
+                  if (speechBuf) {
+                    const audioId = 'aud_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                    audioVoiceCache.set(audioId, {
+                      id: audioId,
+                      buffer: speechBuf,
+                      mimeType: 'audio/wav',
+                      createdAt: Date.now()
+                    });
+                    pruneOldAudioVoiceEntries();
+                    const audioUrl = `https://smart-hosto.onrender.com/api/whatsapp/audio/download?id=${encodeURIComponent(audioId)}`;
+                    await sendMetaWhatsAppAudio(fromPhone, audioUrl, config);
+                  }
+                } catch (vErr) {
+                  console.warn('Vocal note dispatch error:', vErr);
+                }
+              }
 
               // 3. Generate tailored Dynamic Report Spec grounded directly in the accurate agentReply.reply
               const reportSpec = await generateDynamicReportSpec(textBody, staffContext, config, agentReply.reply);
@@ -3212,7 +3513,7 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
               console.error('Error dispatching dynamic WhatsApp document:', docErr);
             }
           } else {
-            const { reply, modelUsed } = await generateStaffAgentReply(textBody, staffDoc, config, staffContext);
+            const { reply, modelUsed } = await generateStaffAgentReply(textBody, staffDoc, config, staffContext, audioPayload);
             const sendRes = await sendMetaWhatsAppMessage(fromPhone, reply, config);
 
             await logWhatsAppMessage({
@@ -3226,6 +3527,44 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
               aiModel: modelUsed,
               metaMessageId: sendRes.metaMessageId
             });
+
+            // If voice note was received or voice is enabled in settings, also send the audio voice note
+            if ((isVoiceMessage || config.voiceEnabled) && config.phoneNumberId && config.accessToken) {
+              try {
+                const speechBuf = await synthesizeSpeechAudio(
+                  reply,
+                  config.voiceName || 'Aoede',
+                  config.geminiApiKey || process.env.GEMINI_API_KEY || ''
+                );
+                if (speechBuf) {
+                  const audioId = 'aud_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+                  audioVoiceCache.set(audioId, {
+                    id: audioId,
+                    buffer: speechBuf,
+                    mimeType: 'audio/wav',
+                    createdAt: Date.now()
+                  });
+                  pruneOldAudioVoiceEntries();
+                  const audioUrl = `https://smart-hosto.onrender.com/api/whatsapp/audio/download?id=${encodeURIComponent(audioId)}`;
+                  const voiceRes = await sendMetaWhatsAppAudio(fromPhone, audioUrl, config);
+                  if (voiceRes.sent) {
+                    await logWhatsAppMessage({
+                      direction: 'OUTBOUND',
+                      staffId: staffDoc.id,
+                      staffName: staffDoc.name,
+                      staffRole: staffDoc.role,
+                      phone: fromPhone,
+                      message: `[NOTE VOCALE AUDIO ENVOYÉE] (${config.voiceName || 'Aoede'})`,
+                      source: 'META_WEBHOOK',
+                      aiModel: 'gemini-2.5-flash-tts',
+                      metaMessageId: voiceRes.metaMessageId
+                    });
+                  }
+                }
+              } catch (vErr) {
+                console.warn('Could not dispatch WhatsApp voice note:', vErr);
+              }
+            }
           }
         }
       }
@@ -3263,6 +3602,8 @@ app.post(['/api/whatsapp/config', '/whatsapp/config'], async (req, res) => {
       verifyToken: req.body.verifyToken !== undefined ? String(req.body.verifyToken).trim() : current.verifyToken,
       geminiApiKey: req.body.geminiApiKey !== undefined ? String(req.body.geminiApiKey).trim() : current.geminiApiKey,
       geminiModel: req.body.geminiModel !== undefined ? String(req.body.geminiModel).trim() : current.geminiModel,
+      voiceEnabled: req.body.voiceEnabled !== undefined ? Boolean(req.body.voiceEnabled) : current.voiceEnabled,
+      voiceName: req.body.voiceName !== undefined ? String(req.body.voiceName).trim() : current.voiceName,
       allowUnregisteredPreview: req.body.allowUnregisteredPreview ?? current.allowUnregisteredPreview,
       systemPrompt: req.body.systemPrompt !== undefined ? String(req.body.systemPrompt).trim() : current.systemPrompt,
       updatedAt: new Date().toISOString()
@@ -3288,9 +3629,19 @@ app.post(['/api/whatsapp/config', '/whatsapp/config'], async (req, res) => {
 // 4. Interactive Simulator & Staff Chat Endpoint
 app.post(['/api/whatsapp/simulate', '/whatsapp/simulate'], async (req, res) => {
   try {
-    const { message, staffId, phone, staffSnapshot, clientContext, sendToRealWhatsApp } = req.body || {};
-    if (!message || !String(message).trim()) {
-      return res.status(400).json({ error: 'EMPTY_MESSAGE', message: 'Le message est requis.' });
+    const {
+      message,
+      staffId,
+      phone,
+      staffSnapshot,
+      clientContext,
+      sendToRealWhatsApp,
+      audioBase64,
+      audioMimeType
+    } = req.body || {};
+
+    if ((!message || !String(message).trim()) && !audioBase64) {
+      return res.status(400).json({ error: 'EMPTY_MESSAGE', message: 'Le message ou la note vocale est requis.' });
     }
 
     const config = await getWhatsAppConfig();
@@ -3307,7 +3658,9 @@ app.post(['/api/whatsapp/simulate', '/whatsapp/simulate'], async (req, res) => {
       };
     }
 
-    const cleanMessage = String(message).trim();
+    const cleanMessage = audioBase64
+      ? (message && String(message).trim() ? String(message).trim() : `[Note vocale de test de ${staffDoc.name}]`)
+      : String(message).trim();
     const targetPhone = phone || staffDoc.phone || '+237600000000';
 
     await logWhatsAppMessage({
@@ -3320,12 +3673,44 @@ app.post(['/api/whatsapp/simulate', '/whatsapp/simulate'], async (req, res) => {
       source: 'SIMULATOR'
     });
 
+    const audioPayload = audioBase64
+      ? {
+          mimeType: audioMimeType || 'audio/webm',
+          base64Data: String(audioBase64).replace(/^data:audio\/[^;]+;base64,/, '')
+        }
+      : null;
+
     const { reply, modelUsed, contextSummary } = await generateStaffAgentReply(
       cleanMessage,
       staffDoc,
       config,
-      clientContext
+      clientContext,
+      audioPayload
     );
+
+    let audioUrl: string | undefined;
+    if (config.voiceEnabled || audioBase64) {
+      try {
+        const speechBuf = await synthesizeSpeechAudio(
+          reply,
+          config.voiceName || 'Aoede',
+          config.geminiApiKey || process.env.GEMINI_API_KEY || ''
+        );
+        if (speechBuf) {
+          const audioId = 'aud_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+          audioVoiceCache.set(audioId, {
+            id: audioId,
+            buffer: speechBuf,
+            mimeType: 'audio/wav',
+            createdAt: Date.now()
+          });
+          pruneOldAudioVoiceEntries();
+          audioUrl = `/api/whatsapp/audio/download?id=${encodeURIComponent(audioId)}`;
+        }
+      } catch (synthErr) {
+        console.warn('Simulator speech synthesis error:', synthErr);
+      }
+    }
 
     let metaDelivery: { sent: boolean; metaMessageId?: string; error?: string } | null = null;
     if (sendToRealWhatsApp && targetPhone) {
@@ -3349,6 +3734,7 @@ app.post(['/api/whatsapp/simulate', '/whatsapp/simulate'], async (req, res) => {
       reply,
       modelUsed,
       contextSummary,
+      audioUrl,
       metaDelivery
     });
   } catch (err: any) {

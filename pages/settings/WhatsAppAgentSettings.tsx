@@ -18,7 +18,10 @@ import {
   Phone,
   CheckCheck,
   Zap,
-  Lock
+  Lock,
+  Mic,
+  MicOff,
+  Volume2
 } from 'lucide-react';
 import { User } from '../../types';
 import { db, sanitizeData } from '../../src/firebase';
@@ -48,6 +51,8 @@ interface ChatBubble {
   timestamp: string;
   modelUsed?: string;
   metaSent?: boolean;
+  audioUrl?: string;
+  isVoice?: boolean;
 }
 
 const DEFAULT_SYSTEM_PROMPT = `Tu es l'Assistant Hospitalier Officiel sur WhatsApp pour la plateforme hospitalière SMART-HOSTO.
@@ -572,6 +577,8 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
     verifyToken: 'smarthosto_meta_verify_2026',
     geminiApiKey: '',
     geminiModel: 'gemini-3.5-flash',
+    voiceEnabled: true,
+    voiceName: 'Aoede',
     allowUnregisteredPreview: true,
     systemPrompt: DEFAULT_SYSTEM_PROMPT
   });
@@ -583,6 +590,11 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
   const [selectedStaffId, setSelectedStaffId] = useState<string>(currentUser?.id || '');
   const [chatInput, setChatInput] = useState('');
   const [isSendingChat, setIsSendingChat] = useState(false);
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<any>(null);
   const [forwardToRealWhatsApp, setForwardToRealWhatsApp] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatBubble[]>([
     {
@@ -595,9 +607,10 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
         `• 📊 Vos *commissions & actes clôturés*\n` +
         `• 🏥 La *file d'attente* des patients du jour\n` +
         `• 💊 Le *stock de médicaments* en pharmacie\n` +
-        `• 💰 Le *catalogue des tarifs* hospitaliers`,
+        `• 💰 Le *catalogue des tarifs* hospitaliers\n\n` +
+        `🎙️ *Notes vocales activées :* Vous pouvez m'envoyer un message vocal ou écrit !`,
       timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-      modelUsed: 'gemini-2.5-pro'
+      modelUsed: 'gemini-3.5-flash'
     }
   ]);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -687,9 +700,16 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
 
       await setDoc(doc(db, 'whatsapp_config', 'settings'), sanitizeData(payload), { merge: true });
 
+      // Synchronize with Render backend
+      await fetch('https://smart-hosto.onrender.com/api/whatsapp/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(() => {});
+
       setConfigBanner({
         type: 'success',
-        text: 'Configuration Meta Cloud API & Gemini enregistrée avec succès dans Firestore.'
+        text: 'Configuration Meta Cloud API & Gemini enregistrée avec succès.'
       });
     } catch (err: any) {
       setConfigBanner({
@@ -803,40 +823,42 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
         source: 'SIMULATOR'
       });
 
-      // 2. Build live hospital & staff context directly from authenticated client Firestore cache
-      const clientContext = await buildClientHospitalContext(selectedStaffUser);
-
-      // 3. Generate reply via Gemini API (or Smart Hospital Engine fallback)
-      const generated = await generateClientSideAgentReply(textToSend, clientContext, config);
-      const replyText = generated.reply;
-      const modelUsed = generated.modelUsed;
+      let replyText = '';
+      let modelUsed = '';
+      let audioUrl: string | undefined;
       let metaSent = false;
 
-      // 4. Optional: Forward to real WhatsApp via Meta Cloud API if requested and configured
-      if (forwardToRealWhatsApp && config.phoneNumberId && config.accessToken && targetPhone) {
-        try {
-          const cleanPhone = targetPhone.replace(/[^0-9]/g, '');
-          const metaRes = await fetch(
-            `https://graph.facebook.com/v21.0/${encodeURIComponent(config.phoneNumberId)}/messages`,
-            {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${config.accessToken}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                messaging_product: 'whatsapp',
-                to: cleanPhone,
-                type: 'text',
-                text: { body: replyText }
-              })
-            }
-          );
-          if (metaRes.ok) metaSent = true;
-        } catch {}
+      // 2. Try the Render backend simulator endpoint (produces audio note if voice enabled)
+      try {
+        const simRes = await fetch('https://smart-hosto.onrender.com/api/whatsapp/simulate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: textToSend,
+            staffId: selectedStaffUser.id,
+            phone: targetPhone,
+            staffSnapshot: selectedStaffUser,
+            sendToRealWhatsApp: forwardToRealWhatsApp
+          })
+        });
+        if (simRes.ok) {
+          const sData = await simRes.json();
+          replyText = sData.reply;
+          modelUsed = sData.modelUsed;
+          audioUrl = sData.audioUrl;
+          metaSent = Boolean(sData.metaDelivery?.sent);
+        }
+      } catch {}
+
+      // Fallback to client-side reply if server is unreachable
+      if (!replyText) {
+        const clientContext = await buildClientHospitalContext(selectedStaffUser);
+        const generated = await generateClientSideAgentReply(textToSend, clientContext, config);
+        replyText = generated.reply;
+        modelUsed = generated.modelUsed;
       }
 
-      // 5. Log outbound response
+      // 3. Log outbound response
       recordAuditLog({
         direction: 'OUTBOUND',
         staffId: selectedStaffUser.id,
@@ -854,6 +876,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
         text: replyText,
         timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
         modelUsed,
+        audioUrl,
         metaSent
       };
 
@@ -865,6 +888,113 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
           id: `err_${Date.now()}`,
           sender: 'AGENT',
           text: `⚠️ Erreur lors du traitement de la requête : ${err?.message || 'Réessayez.'}`,
+          timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
+    } finally {
+      setIsSendingChat(false);
+    }
+  };
+
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioChunksRef.current = [];
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        clearInterval(recordingTimerRef.current);
+        setIsRecordingVoice(false);
+        setRecordingSeconds(0);
+
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = async () => {
+          const base64Data = (reader.result as string) || '';
+          await sendSimulatorVoiceNote(base64Data, audioBlob);
+        };
+      };
+
+      mediaRecorder.start();
+      setIsRecordingVoice(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingSeconds(prev => prev + 1);
+      }, 1000);
+    } catch (err: any) {
+      alert("Microphone inaccessible : " + (err?.message || 'Vérifiez les permissions de votre navigateur.'));
+      setIsRecordingVoice(false);
+      clearInterval(recordingTimerRef.current);
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
+  const sendSimulatorVoiceNote = async (base64AudioUrl: string, blob: Blob) => {
+    const userAudioUrl = URL.createObjectURL(blob);
+    const userBubble: ChatBubble = {
+      id: `usr_v_${Date.now()}`,
+      sender: 'USER',
+      text: '🎤 Note Vocale envoyée',
+      timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      audioUrl: userAudioUrl,
+      isVoice: true
+    };
+    setChatHistory(prev => [...prev, userBubble]);
+    setIsSendingChat(true);
+
+    const targetPhone = selectedStaffUser.phone || personalPhone || '+237600000000';
+
+    try {
+      const cleanB64 = base64AudioUrl.replace(/^data:audio\/[^;]+;base64,/, '');
+      const resp = await fetch('https://smart-hosto.onrender.com/api/whatsapp/simulate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          staffId: selectedStaffUser.id,
+          phone: targetPhone,
+          staffSnapshot: selectedStaffUser,
+          audioBase64: cleanB64,
+          audioMimeType: 'audio/webm',
+          sendToRealWhatsApp: forwardToRealWhatsApp
+        })
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        const agentBubble: ChatBubble = {
+          id: `agt_${Date.now()}`,
+          sender: 'AGENT',
+          text: data.reply || 'Note vocale traitée avec succès.',
+          timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+          modelUsed: data.modelUsed,
+          audioUrl: data.audioUrl,
+          metaSent: Boolean(data.metaDelivery?.sent)
+        };
+        setChatHistory(prev => [...prev, agentBubble]);
+      } else {
+        throw new Error(`Erreur serveur (${resp.status})`);
+      }
+    } catch (err: any) {
+      setChatHistory(prev => [
+        ...prev,
+        {
+          id: `err_${Date.now()}`,
+          sender: 'AGENT',
+          text: `⚠️ Erreur lors du traitement de la note vocale : ${err?.message}`,
           timestamp: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
         }
       ]);
@@ -1222,6 +1352,19 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
                         }`}
                       >
                         <div>{bubble.text}</div>
+                        {bubble.audioUrl && (
+                          <div className="mt-2.5 pt-2 border-t border-slate-200/50 dark:border-zinc-700/50">
+                            <div className="flex items-center gap-1.5 mb-1.5 text-[10px] font-bold text-emerald-700 dark:text-emerald-400">
+                              <Volume2 size={13} />
+                              <span>{isUser ? 'Votre Note Vocale' : `Note Vocale IA (${config.voiceName || 'Aoede'})`}</span>
+                            </div>
+                            <audio
+                              controls
+                              src={bubble.audioUrl.startsWith('http') || bubble.audioUrl.startsWith('blob:') ? bubble.audioUrl : `https://smart-hosto.onrender.com${bubble.audioUrl}`}
+                              className="w-full h-8 rounded-lg outline-none"
+                            />
+                          </div>
+                        )}
                         <div className="flex items-center justify-end gap-1.5 mt-1 text-[10px] opacity-60">
                           {bubble.modelUsed && !isUser && <span className="font-mono">{bubble.modelUsed}</span>}
                           {bubble.metaSent && <span className="text-emerald-600 font-bold">• Envoyé Meta API</span>}
@@ -1237,7 +1380,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
                   <div className="flex justify-start">
                     <div className="bg-white dark:bg-[#202C33] text-slate-600 dark:text-zinc-300 rounded-2xl rounded-tl-none px-4 py-3 text-xs font-bold flex items-center gap-2 shadow-sm">
                       <RefreshCw size={14} className="animate-spin text-emerald-600" />
-                      <span>Analyse des données SMART-HOSTO en direct...</span>
+                      <span>Analyse et traitement vocal en direct...</span>
                     </div>
                   </div>
                 )}
@@ -1248,24 +1391,57 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
               <form
                 onSubmit={e => {
                   e.preventDefault();
-                  sendSimulatorMessage();
+                  if (isRecordingVoice) {
+                    stopVoiceRecording();
+                  } else {
+                    sendSimulatorMessage();
+                  }
                 }}
                 className="p-3 bg-[#F0F2F5] dark:bg-[#202C33] flex items-center gap-2 shrink-0"
               >
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={e => setChatInput(e.target.value)}
-                  placeholder="Écrivez un message WhatsApp (ex: Quelles sont mes commissions ?)"
-                  className="flex-1 px-4 py-2.5 rounded-full bg-white dark:bg-[#2A3942] text-slate-900 dark:text-white text-xs font-medium outline-none border border-transparent focus:border-emerald-500"
-                />
+                {isRecordingVoice ? (
+                  <div className="flex-1 px-4 py-2 rounded-full bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 flex items-center justify-between animate-pulse">
+                    <div className="flex items-center gap-2 text-rose-600 dark:text-rose-400 text-xs font-bold">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+                      <span>Enregistrement en cours... {recordingSeconds}s</span>
+                    </div>
+                    <span className="text-[10px] text-rose-500">Cliquez sur le micro pour envoyer</span>
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    placeholder="Écrivez un message ou cliquez sur le micro pour parler..."
+                    className="flex-1 px-4 py-2.5 rounded-full bg-white dark:bg-[#2A3942] text-slate-900 dark:text-white text-xs font-medium outline-none border border-transparent focus:border-emerald-500"
+                  />
+                )}
+
+                {/* Microphone Record Button */}
                 <button
-                  type="submit"
-                  disabled={!chatInput.trim() || isSendingChat}
-                  className="w-10 h-10 rounded-full bg-[#00A884] hover:bg-[#008f6f] disabled:opacity-50 text-white flex items-center justify-center transition-all cursor-pointer shrink-0 shadow-md"
+                  type="button"
+                  onClick={isRecordingVoice ? stopVoiceRecording : startVoiceRecording}
+                  disabled={isSendingChat}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all cursor-pointer shrink-0 shadow-md ${
+                    isRecordingVoice
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white animate-bounce'
+                      : 'bg-slate-200 dark:bg-zinc-800 hover:bg-emerald-100 hover:text-emerald-700 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200'
+                  }`}
+                  title={isRecordingVoice ? 'Arrêter et envoyer la note vocale' : 'Enregistrer une note vocale'}
                 >
-                  <Send size={16} />
+                  {isRecordingVoice ? <MicOff size={18} /> : <Mic size={18} />}
                 </button>
+
+                {/* Send Button */}
+                {!isRecordingVoice && (
+                  <button
+                    type="submit"
+                    disabled={!chatInput.trim() || isSendingChat}
+                    className="w-10 h-10 rounded-full bg-[#00A884] hover:bg-[#008f6f] disabled:opacity-50 text-white flex items-center justify-center transition-all cursor-pointer shrink-0 shadow-md"
+                  >
+                    <Send size={16} />
+                  </button>
+                )}
               </form>
             </div>
           </div>
@@ -1374,6 +1550,57 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
                   <option value="gemini-2.5-flash">gemini-2.5-flash (Classique stable)</option>
                 </select>
               </div>
+            </div>
+
+            {/* Voice Notes & Audio Synthesis Settings */}
+            <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-800/40 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-600/20">
+                    <Volume2 size={16} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-800 dark:text-zinc-100 flex items-center gap-1.5">
+                      <span>Notes Vocales IA WhatsApp</span>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300 font-bold">
+                        Speech-to-Speech
+                      </span>
+                    </h4>
+                    <p className="text-[10px] text-slate-500 dark:text-zinc-400">
+                      Écoute les notes vocales WhatsApp et répond vocalement avec voix de synthèse Gemini TTS
+                    </p>
+                  </div>
+                </div>
+
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.voiceEnabled}
+                    onChange={e => setConfig({ ...config, voiceEnabled: e.target.checked })}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                </label>
+              </div>
+
+              {config.voiceEnabled && (
+                <div className="pt-2 border-t border-emerald-200/50 dark:border-emerald-800/40">
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-zinc-400 block mb-1">
+                    Voix de Synthèse Hospitalière
+                  </label>
+                  <select
+                    value={config.voiceName}
+                    onChange={e => setConfig({ ...config, voiceName: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-zinc-900 text-xs font-bold"
+                  >
+                    <option value="Aoede">Aoede (Voix féminine chaleureuse et professionnelle • Recommandée)</option>
+                    <option value="Puck">Puck (Voix masculine dynamique et claire)</option>
+                    <option value="Charon">Charon (Voix posée et institutionnelle)</option>
+                    <option value="Kore">Kore (Voix douce et rassurante)</option>
+                    <option value="Fenrir">Fenrir (Voix grave et assurée)</option>
+                  </select>
+                </div>
+              )}
             </div>
 
             <div>
