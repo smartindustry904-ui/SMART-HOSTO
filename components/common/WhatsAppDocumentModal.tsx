@@ -235,7 +235,13 @@ export const WhatsAppDocumentModal: React.FC<WhatsAppDocumentModalProps> = ({
       try {
         const rawPdf = await getPdfBase64();
         if (rawPdf && typeof rawPdf === 'string') {
-          pdfBase64 = rawPdf;
+          // Normalize to pure base64 (strip data uri prefixes like data:application/pdf;filename=...;base64,)
+          const commaIdx = rawPdf.indexOf(',');
+          if (commaIdx !== -1 && rawPdf.slice(0, commaIdx).includes('base64')) {
+            pdfBase64 = rawPdf.slice(commaIdx + 1).trim();
+          } else {
+            pdfBase64 = rawPdf.trim();
+          }
         }
       } catch (pdfErr) {
         console.warn('PDF generation in modal failed:', pdfErr);

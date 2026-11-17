@@ -3341,8 +3341,12 @@ app.get(['/api/whatsapp/reports/download', '/reports/download'], async (req, res
     const reportId = String(req.query.id || '');
     if (reportId && dynamicReportsMap.has(reportId)) {
       const item = dynamicReportsMap.get(reportId)!;
-      res.setHeader('Content-Type', item.contentType);
+      console.log(`[WhatsApp Document] Serving downloaded PDF ${item.filename} (${item.buffer.length} bytes) to Meta crawler`);
+      res.setHeader('Content-Type', item.contentType || 'application/pdf');
+      res.setHeader('Content-Length', String(item.buffer.length));
       res.setHeader('Content-Disposition', `inline; filename="${item.filename}"`);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'public, max-age=7200');
       return res.status(200).send(item.buffer);
     }
 
@@ -4102,8 +4106,21 @@ app.post(['/api/whatsapp/send-document', '/whatsapp/send-document'], async (req,
     // If client supplied base64 PDF from jsPDF, cache in dynamicReportsMap and create download URL
     if (pdfBase64) {
       try {
-        const cleanB64 = String(pdfBase64).replace(/^data:application\/pdf;base64,/, '').trim();
+        let cleanB64 = String(pdfBase64).trim();
+        const commaIdx = cleanB64.indexOf(',');
+        if (commaIdx !== -1 && cleanB64.slice(0, commaIdx).includes('base64')) {
+          cleanB64 = cleanB64.slice(commaIdx + 1).trim();
+        } else {
+          cleanB64 = cleanB64
+            .replace(/^data:[^;]+;.*base64,/, '')
+            .replace(/^data:application\/pdf;base64,/, '')
+            .trim();
+        }
+
         const pdfBuf = Buffer.from(cleanB64, 'base64');
+        const header = pdfBuf.subarray(0, 5).toString('utf-8');
+        console.log(`[WhatsApp Document] PDF buffer decoded: ${pdfBuf.length} bytes, Header: "${header}"`);
+
         if (pdfBuf.length > 0) {
           const repId = 'doc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
           dynamicReportsMap.set(repId, {
