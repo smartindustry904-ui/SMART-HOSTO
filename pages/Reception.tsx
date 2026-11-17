@@ -673,6 +673,12 @@ const Reception: React.FC<ReceptionProps> = ({
       let positionLabel = '📍 Attente : Consultation';
       let positionTone: 'amber' | 'blue' | 'indigo' | 'purple' | 'emerald' = 'amber';
 
+      // 2-pre. Out of service and awaiting exit (discharges_waiting)?
+      const awaitingExitDoc = patientsToDischarge.find((dw: any) => {
+        if (visiteId && dw.visite_id && dw.visite_id === visiteId) return true;
+        return cleanIds.includes(dw.patientId) || cleanIds.includes(dw.id) || (dw.dmeId && cleanIds.includes(dw.dmeId));
+      });
+
       // 2a. Admitted to a bed?
       const occBed = radarBeds.find((b: any) => {
         const st = String(b.status || '').toUpperCase();
@@ -683,7 +689,13 @@ const Reception: React.FC<ReceptionProps> = ({
         (r: any) => (r.patientId && cleanIds.includes(r.patientId)) || (r.patientDme && cleanIds.includes(r.patientDme))
       );
 
-      if (occBed || activeInp) {
+      if (awaitingExitDoc) {
+        const oldService = awaitingExitDoc.department || awaitingExitDoc.service || '';
+        positionLabel = oldService
+          ? `🚪 Attente : Sortie (${oldService})`
+          : '🚪 Attente : Sortie Admin';
+        positionTone = 'emerald';
+      } else if (occBed || activeInp) {
         const roomLabel = occBed?.roomName || activeInp?.roomName || 'Chambre';
         positionLabel = `🛏️ Hospitalisé (${roomLabel})`;
         positionTone = 'indigo';
@@ -704,15 +716,22 @@ const Reception: React.FC<ReceptionProps> = ({
         });
 
         // 2c. Active service_queues entries (most recent unresolved)
-        const matchingQueues = radarServiceQueues
+        const allPtQueues = radarServiceQueues
           .filter((q: any) => {
             if (visiteId && q.visite_id && q.visite_id !== visiteId) return false;
-            const matchesPt = cleanIds.includes(q.patientId) || cleanIds.includes(q.dmeId);
-            if (!matchesPt) return false;
-            const st = String(q.status || '').toLowerCase();
-            return !['completed', 'done', 'discharged', 'reoriented', 'cancelled', 'cloture'].includes(st);
+            return cleanIds.includes(q.patientId) || cleanIds.includes(q.dmeId);
           })
           .sort((a: any, b: any) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+        const matchingQueues = allPtQueues.filter((q: any) => {
+          const st = String(q.status || '').toLowerCase();
+          return !['completed', 'done', 'discharged', 'ready_for_discharge', 'reoriented', 'cancelled', 'cloture'].includes(st);
+        });
+
+        const completedQueue = allPtQueues.find((q: any) => {
+          const st = String(q.status || '').toLowerCase();
+          return ['completed', 'done', 'discharged', 'ready_for_discharge'].includes(st);
+        });
 
         const latestQueue = matchingQueues[0];
         const latestStatus = String(latestQueue?.status || '').toLowerCase();
@@ -720,7 +739,7 @@ const Reception: React.FC<ReceptionProps> = ({
         const hasVitals = Boolean(latestQueue?.vitals && Object.keys(latestQueue.vitals).length > 0);
 
         if (
-          ['in_progress', 'consulting', 'en_cours', 'prise_en_charge'].includes(latestStatus) ||
+          ['in_progress', 'consulting', 'en_cours', 'prise_en_charge', 'in_consultation'].includes(latestStatus) ||
           (visitObj && visitObj.inUrgencesQueue && visitObj.urgencesStatus === 'Pris en charge')
         ) {
           positionLabel = visitObj?.inUrgencesQueue ? '🩺 En Consultation (Urgences)' : '🩺 En Consultation';
@@ -740,6 +759,10 @@ const Reception: React.FC<ReceptionProps> = ({
         } else if (latestQueue) {
           positionLabel = `📍 Attente : ${latestService || 'Consultation'}`;
           positionTone = 'amber';
+        } else if (completedQueue) {
+          const oldSrv = completedQueue.service || completedQueue.queueName || 'Consultation';
+          positionLabel = `🚪 Attente : Sortie (${oldSrv})`;
+          positionTone = 'emerald';
         } else if (visitObj?.inUrgencesQueue) {
           positionLabel = '📍 Attente : Urgences';
           positionTone = 'amber';
@@ -757,7 +780,7 @@ const Reception: React.FC<ReceptionProps> = ({
         positionTone,
       };
     };
-  }, [paymentRequests, radarBeds, radarInpatients, sortieLabRequests, radarServiceQueues]);
+  }, [paymentRequests, radarBeds, radarInpatients, sortieLabRequests, radarServiceQueues, patientsToDischarge]);
 
   const activeCycleRadarRows = useMemo(() => {
     return (activeVisits || [])
@@ -3029,7 +3052,9 @@ const Reception: React.FC<ReceptionProps> = ({
                 <tbody className={`divide-y ${theme === 'dark' ? 'divide-slate-800/80' : 'divide-slate-100'}`}>
                   {activeCycleRadarRows.length > 0 ? activeCycleRadarRows.map((row, idx) => {
                     const posClass =
-                      row.positionTone === 'indigo'
+                      row.positionTone === 'emerald'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                        : row.positionTone === 'indigo'
                         ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800'
                         : row.positionTone === 'blue'
                         ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800'
@@ -3970,7 +3995,9 @@ const Reception: React.FC<ReceptionProps> = ({
                     const radar = computeCycleRadarStatus(pids, p.visite_id || matchingVisit?.visite_id, matchingVisit);
                     const hasUnpaidBill = radar.isCaissePending;
                     const posBadgeClass =
-                      radar.positionTone === 'indigo'
+                      radar.positionTone === 'emerald'
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : radar.positionTone === 'indigo'
                         ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                         : radar.positionTone === 'blue'
                         ? 'bg-blue-50 text-blue-700 border-blue-200'

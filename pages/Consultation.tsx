@@ -4,7 +4,7 @@ import {
   LayoutDashboard, LogOut, ChevronRight, UserCheck,
   Activity, Thermometer, AlertTriangle, Calendar, BedDouble,
   TrendingUp, X, Check, MapPin, Clock, User, Heart, AlertCircle, FileText, RefreshCw, Loader2, Home, ArrowLeft,
-  MoreVertical, Stethoscope, Syringe
+  MoreVertical, Stethoscope, Syringe, Edit3
 } from 'lucide-react';
 import WaitingRoom from './consultation/WaitingRoom';
 import ActiveConsultation from './consultation/ActiveConsultation';
@@ -22,7 +22,7 @@ import { Breadcrumbs } from '../components/common/Breadcrumbs';
 import { MedicalStatusBadge } from '../components/common/MedicalStatusBadge';
 import { MicroHeader } from '../components/common/MicroHeader';
 import { User as UserType, PaymentRequest } from '../types';
-import { useHospitalServices, useSettings } from '../hooks/useSettings';
+import { useHospitalServices, useSettings, useMedicalActs, getDefaultMedicalActs } from '../hooks/useSettings';
 import { db, sanitizeData } from '../src/firebase';
 import { collection, doc, setDoc, getDocs, query, where, updateDoc, onSnapshot, getDoc, writeBatch } from 'firebase/firestore';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
@@ -66,6 +66,20 @@ const Consultation: React.FC<ConsultationProps> = ({
     return tid;
   }, [user, establishment]);
   const { services: hospitalServices } = useHospitalServices();
+  const { acts: medicalActs } = useMedicalActs();
+  const consultationActs = useMemo(() => {
+    const source = (medicalActs && medicalActs.length > 0) ? medicalActs : getDefaultMedicalActs();
+    const filtered = source.filter((a: any) => {
+      const cat = String(a.category || a.type || '').toLowerCase();
+      const name = String(a.name || '').toLowerCase();
+      return cat.includes('consult') || name.includes('consult') || cat === 'général' || cat === 'spécialisé';
+    });
+    return filtered.length > 0 ? filtered : source.slice(0, 10);
+  }, [medicalActs]);
+  const [showConsultationTypeModal, setShowConsultationTypeModal] = useState<false | 'SELECT' | 'EDIT'>(false);
+  const [pendingConsultPatient, setPendingConsultPatient] = useState<any | null>(null);
+  const [selectedConsultActId, setSelectedConsultActId] = useState<string>('');
+  const [isUpdatingConsultType, setIsUpdatingConsultType] = useState(false);
   const [selectedSpecialty, setSelectedSpecialty] = useState<string>('ALL');
   const isSendingPrescriptionRef = useRef(false);
   const isSendingExamsRef = useRef(false);
@@ -501,70 +515,90 @@ const Consultation: React.FC<ConsultationProps> = ({
     return false;
   };
 
-  // Handle starting a consultation with prominent warning system (no hard financial lock)
-  const handleStartConsultation = (patient: any) => {
-    // 1. INSTANT OPTIMISTIC UI TRANSITION (Zero latency - appears immediately)
+  const isGenericConsultationMotif = (val?: string) => {
+    const s = String(val || '').trim().toLowerCase();
+    if (!s) return true;
+    return [
+      'consultation',
+      'consultation dossier patient',
+      'parcours actif',
+      'suivi',
+      'réorientation',
+      'transfert',
+      'admission',
+    ].includes(s);
+  };
+
+  // Start clinical workspace directly (Auto-Bypass when consultation act already exists)
+  const enterConsultationWorkspace = (patient: any, resolvedMotif?: string, resolvedActId?: string) => {
+    const finalPatient = {
+      ...patient,
+      status: 'in_consultation',
+      ...(resolvedMotif ? { motif_consultation: resolvedMotif, motifLabel: resolvedMotif, motif: resolvedMotif } : {}),
+      ...(resolvedActId ? { acte_id: resolvedActId } : {}),
+    };
+
     if (setWaitingQueue) {
-      setWaitingQueue(prev => prev.map(p => 
+      setWaitingQueue(prev => prev.map(p =>
         (p.id === patient.id || p.queueDocId === patient.queueDocId || (patient.patientId && p.patientId === patient.patientId))
-          ? { ...p, status: 'in_consultation' }
+          ? { ...p, ...finalPatient, status: 'in_consultation' }
           : p
       ));
     }
-    setActivePatient({ ...patient, status: 'in_consultation' });
-    setConsultationTab('MEDICAL'); // Default to MEDICAL (active clinical workspace) tab
+    setActivePatient(finalPatient);
+    setConsultationTab('MEDICAL');
     setActiveMenu('CONSULTATION');
 
-    const isPaid = checkPatientIsPaid(patient);
-    const isEmergency = patient.priority === 'critique' || patient.priority === 'urgent';
+    const isPaid = checkPatientIsPaid(finalPatient);
+    const isEmergency = finalPatient.priority === 'critique' || finalPatient.priority === 'urgent';
 
     if (!isPaid) {
       window.dispatchEvent(new CustomEvent('app-notification', {
-        detail: `⚠️ Information Caisse : Le ticket d'admission de ${patient.lastName} ${patient.firstName} est en attente de règlement. Dossier ouvert pour prise en charge médicale.`
+        detail: `⚠️ Information Caisse : Le ticket d'admission de ${finalPatient.lastName} ${finalPatient.firstName} est en attente de règlement. Dossier ouvert pour prise en charge médicale.`
       }));
     }
 
-    // 2. BACKGROUND FIRESTORE SYNC (Non-blocking async)
+    // Background Firestore sync (non-blocking)
     (async () => {
       try {
         const today = new Date();
-        // Sync updated status to Firestore
-        const targetIds = [patient.id, patient.patientId, patient.dmeId].filter(Boolean);
+        const targetIds = [finalPatient.id, finalPatient.patientId, finalPatient.dmeId].filter(Boolean);
         for (const pid of targetIds) {
           const q = query(collection(db, 'service_queues'), where('patientId', '==', pid));
           const snaps = await getDocs(q);
           for (const dSnap of snaps.docs) {
-            await updateDoc(doc(db, 'service_queues', dSnap.id), { 
+            await updateDoc(doc(db, 'service_queues', dSnap.id), {
               status: 'in_consultation',
               takenInCharge: true,
               attente_module: 'EN_COURS',
               calledAt: today.toISOString(),
-              emergencyBypass: !isPaid && isEmergency
+              emergencyBypass: !isPaid && isEmergency,
+              ...(resolvedActId ? { acte_id: resolvedActId } : {}),
+              ...(resolvedMotif ? { motif_consultation: resolvedMotif, motifLabel: resolvedMotif } : {}),
             });
           }
 
           const qDme = query(collection(db, 'service_queues'), where('dmeId', '==', pid));
           const snapsDme = await getDocs(qDme);
           for (const dSnap of snapsDme.docs) {
-            await updateDoc(doc(db, 'service_queues', dSnap.id), { 
+            await updateDoc(doc(db, 'service_queues', dSnap.id), {
               status: 'in_consultation',
               calledAt: today.toISOString(),
-              emergencyBypass: !isPaid && isEmergency
+              emergencyBypass: !isPaid && isEmergency,
             });
           }
         }
 
-        if (patient.queueDocId) {
+        if (finalPatient.queueDocId) {
           try {
-            await updateDoc(doc(db, 'service_queues', patient.queueDocId), {
+            await updateDoc(doc(db, 'service_queues', finalPatient.queueDocId), {
               status: 'in_consultation',
               calledAt: today.toISOString(),
-              emergencyBypass: !isPaid && isEmergency
+              emergencyBypass: !isPaid && isEmergency,
             });
           } catch (_) {}
         }
-        
-        // Trace action in audit_logs
+
         const actionText = (!isPaid && isEmergency)
           ? `⚡ Prise en charge d'URGENCE (Bypass Caisse / Dette) - Statut: En consultation`
           : `Appel Patient - Statut mis à jour: En consultation (in_consultation)`;
@@ -576,18 +610,211 @@ const Consultation: React.FC<ConsultationProps> = ({
           time: today.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
           timestamp: today.toISOString(),
           action: actionText,
-          details: { 
-            patientId: patient.id, 
-            name: `${patient.lastName} ${patient.firstName}`,
+          details: {
+            patientId: finalPatient.id,
+            name: `${finalPatient.lastName} ${finalPatient.firstName}`,
             emergencyOverride: !isPaid && isEmergency,
-            priority: patient.priority || 'normal'
+            priority: finalPatient.priority || 'normal',
+            acte_id: finalPatient.acte_id || null,
+            motif_consultation: finalPatient.motif_consultation || finalPatient.motifLabel || finalPatient.motif || null,
           },
           module: 'Consultation'
         });
-      } catch(e) {
+      } catch (e) {
         console.error("Error setting service_queues in_consultation status:", e);
       }
     })();
+  };
+
+  // Handle starting a consultation with auto-bypass when Accueil already defined the consultation act
+  const handleStartConsultation = async (patient: any) => {
+    const directActId = patient.acte_id || patient.actId || '';
+    const directMotif = patient.motif_consultation || patient.motifLabel || patient.motif || '';
+
+    if (directActId || !isGenericConsultationMotif(directMotif)) {
+      // Fast-Track Bypass: drop doctor directly into Dossier Patient
+      enterConsultationWorkspace(patient, directMotif, directActId);
+      return;
+    }
+
+    // Inspect active visite_id payload in Firestore for pre-selected acte_id / motif_consultation
+    try {
+      let visitData: any = null;
+      if (patient.visite_id) {
+        const vSnap = await getDoc(doc(db, 'visites', patient.visite_id));
+        if (vSnap.exists()) visitData = { id: vSnap.id, ...vSnap.data() };
+      } else {
+        visitData = await findActiveVisitForPatient(
+          [patient.patientId, patient.id, patient.dmeId].filter(Boolean) as string[],
+          activeTenantId
+        );
+      }
+
+      if (visitData) {
+        const dests = Array.isArray(visitData.destinations) ? visitData.destinations : [];
+        const consultDest = [...dests].reverse().find((d: any) =>
+          String(d.service || '').toLowerCase().includes('consult') || d.acte_id || d.motif_consultation
+        );
+        const vActId = visitData.acte_id || consultDest?.acte_id || '';
+        const vMotif = visitData.motif_consultation || consultDest?.motifLabel || consultDest?.motif || '';
+        if (vActId || !isGenericConsultationMotif(vMotif)) {
+          enterConsultationWorkspace(
+            { ...patient, visite_id: visitData.visite_id || visitData.id },
+            vMotif,
+            vActId
+          );
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not inspect active visite_id for auto-bypass:', e);
+    }
+
+    // Fallback: No specific consultation act attached -> show "Choix de la consultation" modal
+    setPendingConsultPatient(patient);
+    setSelectedConsultActId(consultationActs[0]?.id || '');
+    setShowConsultationTypeModal('SELECT');
+  };
+
+  // Save/Update Consultation Type (Fallback selection or "Modifier le type" Caisse sync)
+  const handleConfirmConsultationType = async () => {
+    const chosenAct = consultationActs.find((a: any) => a.id === selectedConsultActId);
+    if (!chosenAct) return;
+    const targetPt = showConsultationTypeModal === 'EDIT' ? activePatient : pendingConsultPatient;
+    if (!targetPt) return;
+
+    setIsUpdatingConsultType(true);
+    try {
+      const newMotif = chosenAct.name;
+      const newPrice = Number(chosenAct.price || 0);
+      const pids = [targetPt.patientId, targetPt.id, targetPt.dmeId].filter(Boolean) as string[];
+
+      if (showConsultationTypeModal === 'SELECT') {
+        setShowConsultationTypeModal(false);
+        setPendingConsultPatient(null);
+        enterConsultationWorkspace(
+          { ...targetPt, consultationPrice: newPrice },
+          newMotif,
+          chosenAct.id
+        );
+        if (targetPt.visite_id) {
+          updateDoc(doc(db, 'visites', targetPt.visite_id), {
+            acte_id: chosenAct.id,
+            motif_consultation: newMotif,
+            updatedAt: new Date().toISOString(),
+          }).catch(() => {});
+        }
+        return;
+      }
+
+      // EDIT mode: update activePatient, visite, service_queues & sync Caisse difference
+      const oldPrice = Number(targetPt.consultationPrice || 0);
+      const updatedPt = {
+        ...targetPt,
+        acte_id: chosenAct.id,
+        motif_consultation: newMotif,
+        motifLabel: newMotif,
+        motif: newMotif,
+        consultationPrice: newPrice,
+      };
+      setActivePatient(updatedPt);
+      if (setWaitingQueue) {
+        setWaitingQueue(prev => prev.map(p => (p.id === targetPt.id ? { ...p, ...updatedPt } : p)));
+      }
+
+      if (targetPt.visite_id) {
+        await updateDoc(doc(db, 'visites', targetPt.visite_id), {
+          acte_id: chosenAct.id,
+          motif_consultation: newMotif,
+          updatedAt: new Date().toISOString(),
+        }).catch(() => {});
+      }
+
+      if (targetPt.queueDocId) {
+        await updateDoc(doc(db, 'service_queues', targetPt.queueDocId), {
+          acte_id: chosenAct.id,
+          motif_consultation: newMotif,
+          motifLabel: newMotif,
+          motif: newMotif,
+        }).catch(() => {});
+      }
+
+      // Sync with Caisse (payment_requests)
+      const matchingPr = (paymentRequests || []).find((pr: any) => {
+        const matchesVisit = targetPt.visite_id && pr.visite_id === targetPt.visite_id;
+        const matchesPt = pids.includes(pr.patientId) || pids.includes(pr.patientDme);
+        const isConsult = String(pr.type || '').toUpperCase() === 'CONSULTATION';
+        return (matchesVisit || matchesPt) && isConsult;
+      });
+
+      if (matchingPr) {
+        const prSt = String(matchingPr.status || '').toUpperCase();
+        const prevUnit = Number(matchingPr.items?.[0]?.unitPrice ?? matchingPr.totalAmount ?? oldPrice);
+        if (['PENDING', 'PARTIAL', 'EN_ATTENTE_CAISSE'].includes(prSt)) {
+          const updatedItems = [
+            {
+              id: chosenAct.id,
+              name: newMotif,
+              quantity: 1,
+              unitPrice: newPrice,
+              totalPrice: newPrice,
+            },
+            ...(matchingPr.items || []).slice(1),
+          ];
+          const newTotal = updatedItems.reduce((s, it) => s + Number(it.totalPrice || 0), 0);
+          const paidAmt = Number((matchingPr as any).amountPaid || 0);
+          await updateDoc(doc(db, 'payment_requests', matchingPr.id), sanitizeData({
+            items: updatedItems,
+            totalAmount: newTotal,
+            remainingAmount: Math.max(0, newTotal - paidAmt),
+            updatedAt: new Date().toISOString(),
+          }));
+        } else if (newPrice > prevUnit) {
+          const diff = newPrice - prevUnit;
+          const suppRef = doc(collection(db, 'payment_requests'));
+          await setDoc(suppRef, sanitizeData(stampTenantData({
+            id: suppRef.id,
+            patientId: targetPt.patientId || targetPt.id,
+            patientName: `${targetPt.lastName || ''} ${targetPt.firstName || ''}`.trim(),
+            visite_id: targetPt.visite_id || matchingPr.visite_id || '',
+            requestingService: 'Consultation',
+            sourceModule: 'Consultation',
+            type: 'CONSULTATION',
+            items: [{
+              id: `DIFF-${chosenAct.id}`,
+              name: `Ajustement Type Consultation (${newMotif})`,
+              quantity: 1,
+              unitPrice: diff,
+              totalPrice: diff,
+            }],
+            totalAmount: diff,
+            amountPaid: 0,
+            remainingAmount: diff,
+            status: 'PENDING',
+            createdAt: new Date().toISOString(),
+          }, user, establishment)));
+        } else if (newPrice < prevUnit) {
+          const diff = prevUnit - newPrice;
+          const notifRef = doc(collection(db, 'notifications'));
+          await setDoc(notifRef, sanitizeData(stampTenantData({
+            id: notifRef.id,
+            message: `Ajustement Caisse (-${diff.toLocaleString()} FCFA) : ${targetPt.lastName} ${targetPt.firstName} passé à ${newMotif}`,
+            module: 'Consultation',
+            targetModules: ['Cashier'],
+            createdAt: new Date().toISOString(),
+          }, user, establishment)));
+        }
+      }
+
+      window.dispatchEvent(new CustomEvent('app-notification', {
+        detail: `✅ Type de consultation mis à jour : ${newMotif} (synchronisé avec la Caisse).`
+      }));
+      setShowConsultationTypeModal(false);
+    } catch (err) {
+      console.error('Error updating consultation type:', err);
+    } finally {
+      setIsUpdatingConsultType(false);
+    }
   };
 
   const handleEndSession = async () => {
@@ -2450,6 +2677,20 @@ const Consultation: React.FC<ConsultationProps> = ({
                               <MapPin size={10} /> {contextData.hospStatus}
                             </span>
                           )}
+                          <span className="ml-1 text-[10px] font-black text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md flex items-center gap-1.5">
+                            <span>Motif : {activePatient.motif_consultation || activePatient.motifLabel || activePatient.motif || 'Consultation Générale'}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedConsultActId(activePatient.acte_id || consultationActs[0]?.id || '');
+                                setShowConsultationTypeModal('EDIT');
+                              }}
+                              className="inline-flex items-center gap-0.5 text-[9px] font-black uppercase tracking-wider text-blue-800 bg-white hover:bg-blue-100 border border-blue-200 px-1.5 py-0.5 rounded cursor-pointer transition-colors"
+                              title="Modifier le type de consultation (synchronisé Caisse)"
+                            >
+                              <Edit3 size={10} /> Modifier le type
+                            </button>
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -3317,6 +3558,74 @@ const Consultation: React.FC<ConsultationProps> = ({
             >
               Fermer
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 5. CHOIX / MODIFICATION TYPE DE CONSULTATION MODAL */}
+      {showConsultationTypeModal && (
+        <div className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl border border-slate-200 w-full max-w-md p-6 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">
+                  {showConsultationTypeModal === 'EDIT' ? 'Modifier le type de consultation' : 'Choix de la consultation'}
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  {showConsultationTypeModal === 'EDIT'
+                    ? 'Tout changement mettra à jour le dossier et synchronisera un éventuel ajustement Caisse.'
+                    : 'Aucun acte spécifique n’était pré-sélectionné depuis l’Accueil. Veuillez choisir le type.'}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowConsultationTypeModal(false);
+                  setPendingConsultPatient(null);
+                }}
+                className="p-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-rose-50 hover:text-rose-600 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1.5">
+                Acte / Type de Consultation
+              </label>
+              <select
+                value={selectedConsultActId}
+                onChange={(e) => setSelectedConsultActId(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 outline-none focus:border-blue-500"
+              >
+                {consultationActs.map((act: any) => (
+                  <option key={act.id} value={act.id}>
+                    {act.name} — {Number(act.price || 0).toLocaleString()} FCFA
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowConsultationTypeModal(false);
+                  setPendingConsultPatient(null);
+                }}
+                className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                disabled={!selectedConsultActId || isUpdatingConsultType}
+                onClick={handleConfirmConsultationType}
+                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-black uppercase tracking-wider cursor-pointer flex items-center justify-center gap-1.5"
+              >
+                {isUpdatingConsultType ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                <span>{showConsultationTypeModal === 'EDIT' ? 'Appliquer & Sync Caisse' : 'Démarrer'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
