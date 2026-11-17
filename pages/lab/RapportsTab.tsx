@@ -7,6 +7,7 @@ import { useSettings } from '../../hooks/useSettings';
 import { LabFilterToolbar, LabFilters } from '../../components/lab/LabFilterToolbar';
 import { isStatusTermine } from '../../src/utils/labStatus';
 import { getApiUrl } from '../../src/utils/apiConfig';
+import { WhatsAppDocumentModal } from '../../components/common/WhatsAppDocumentModal';
 
 interface RapportsTabProps {
   requests: LabExamRequest[];
@@ -246,77 +247,9 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
   };
 
   // WhatsApp Dispatch State
-  const [sendingWa, setSendingWa] = useState(false);
   const [waSuccess, setWaSuccess] = useState(false);
-  const [waPhone, setWaPhone] = useState('');
-  const [showPhoneModal, setShowPhoneModal] = useState(false);
-
-  const handleSendWhatsAppLabResult = async (targetPhone?: string) => {
-    if (!selectedResult) return;
-    const req = getRequest(selectedResult.demandeId);
-    const phoneToUse = (targetPhone || waPhone || (req as any)?.patientPhone || '').trim();
-
-    if (!phoneToUse) {
-      setShowPhoneModal(true);
-      return;
-    }
-
-    setSendingWa(true);
-    try {
-      // 1. Generate styled official laboratory report PDF
-      let pdfBase64: string | undefined;
-      try {
-        const doc = buildLabReportPdfDoc(selectedResult, req);
-        pdfBase64 = doc.output('datauristring');
-      } catch (pdfErr) {
-        console.warn('Lab report PDF generation warning:', pdfErr);
-      }
-
-      const summaryLines: string[] = [];
-      (selectedResult.lignes || []).forEach(l => {
-        (l.parametres || []).forEach(p => {
-          summaryLines.push(
-            `${p.nom} : *${p.valeur}* ${p.unite || ''} (Réf: ${p.valeurReference || 'N/A'})${
-              p.isAnormal ? ' ⚠️ *(ANORMAL)*' : ''
-            }`
-          );
-        });
-      });
-
-      const res = await fetch(getApiUrl('/api/whatsapp/send-document'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: phoneToUse,
-          documentType: 'LAB_RESULTS',
-          patientName: req?.patientName || 'Patient',
-          patientId: selectedResult.patientId,
-          title: `Résultats d'Analyses Médicales — Dossier ${selectedResult.id}`,
-          summaryLines: summaryLines.slice(0, 15),
-          detailsText: selectedResult.interpretation
-            ? `🔬 *Interprétation biologique :*\n${selectedResult.interpretation}`
-            : undefined,
-          pdfBase64,
-          pdfFilename: `Rapport_Labo_${selectedResult.id}.pdf`,
-          staffName: user?.name || 'Laboratoire d\'Analyses',
-          staffRole: 'BIOLOGISTE'
-        })
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setWaSuccess(true);
-        setShowPhoneModal(false);
-        setTimeout(() => setWaSuccess(false), 6000);
-      } else {
-        alert(data.message || 'Erreur lors de l\'envoi WhatsApp');
-      }
-    } catch (err: any) {
-      alert('Erreur réseau WhatsApp: ' + err.message);
-    } finally {
-      setSendingWa(false);
-    }
-  };
+  const [showWaModal, setShowWaModal] = useState(false);
+  const [patientPhone, setPatientPhone] = useState('');
 
   const handlePrint = () => {
     window.print();
@@ -413,15 +346,7 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
                 </button>
                 <button 
                   type="button"
-                  onClick={() => {
-                    const req = getRequest(selectedResult.demandeId);
-                    if (!(req as any)?.patientPhone && !waPhone) {
-                      setShowPhoneModal(true);
-                    } else {
-                      handleSendWhatsAppLabResult();
-                    }
-                  }}
-                  disabled={sendingWa}
+                  onClick={() => setShowWaModal(true)}
                   className={`px-2.5 py-1 text-xs font-bold rounded-lg flex items-center gap-1 cursor-pointer transition-all shadow-2xs ${
                     waSuccess
                       ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
@@ -429,14 +354,12 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
                   }`}
                   title="Envoyer les résultats au patient par WhatsApp"
                 >
-                  {sendingWa ? (
-                    <Loader2 size={13} className="animate-spin" />
-                  ) : waSuccess ? (
+                  {waSuccess ? (
                     <Check size={13} className="text-emerald-700 font-black" />
                   ) : (
                     <MessageSquare size={13} />
                   )}
-                  <span>{sendingWa ? 'Envoi...' : waSuccess ? 'Envoyé !' : 'WhatsApp 📲'}</span>
+                  <span>{waSuccess ? 'Envoyé !' : 'WhatsApp 📲'}</span>
                 </button>
               </div>
             </div>
@@ -549,57 +472,45 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
         )}
       </div>
       </div>
-      {/* Modal de saisie téléphone WhatsApp pour les analyses */}
-      {showPhoneModal && selectedResult && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
-            <div className="flex items-center justify-between">
-              <h3 className="font-black text-slate-800 text-base flex items-center gap-2">
-                <MessageSquare className="text-emerald-600" size={20} />
-                Transmettre les résultats par WhatsApp
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowPhoneModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <p className="text-xs text-slate-500">
-              Saisissez le numéro WhatsApp du patient <strong>{getRequest(selectedResult.demandeId)?.patientName}</strong> pour lui transmettre sa synthèse d'analyses certifiée.
-            </p>
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1.5">Numéro WhatsApp du Patient</label>
-              <input
-                type="tel"
-                placeholder="Ex: 681051123 ou +237..."
-                value={waPhone}
-                onChange={e => setWaPhone(e.target.value)}
-                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                autoFocus
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowPhoneModal(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-              >
-                Annuler
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSendWhatsAppLabResult(waPhone)}
-                disabled={!waPhone.trim() || sendingWa}
-                className="px-5 py-2 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              >
-                {sendingWa ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                <span>Confirmer et Transmettre</span>
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Styled WhatsApp Modal */}
+      {selectedResult && (
+        <WhatsAppDocumentModal
+          isOpen={showWaModal}
+          onClose={() => setShowWaModal(false)}
+          patientName={getRequest(selectedResult.demandeId)?.patientName || 'Patient'}
+          patientId={selectedResult.patientId}
+          initialPhone={patientPhone || (getRequest(selectedResult.demandeId) as any)?.patientPhone}
+          documentType="LAB_RESULTS"
+          documentTitle={`Résultats d'Analyses Médicales — Dossier ${selectedResult.id}`}
+          summaryLines={(() => {
+            const lines: string[] = [];
+            (selectedResult.lignes || []).forEach(l => {
+              (l.parametres || []).forEach(p => {
+                lines.push(
+                  `${p.nom} : ${p.valeur} ${p.unite || ''} (Réf: ${p.valeurReference || 'N/A'})${
+                    p.isAnormal ? ' ⚠️ (ANORMAL)' : ''
+                  }`
+                );
+              });
+            });
+            return lines.slice(0, 10);
+          })()}
+          detailsText={selectedResult.interpretation ? `🔬 Interprétation biologique :\n${selectedResult.interpretation}` : undefined}
+          getPdfBase64={() => {
+            const doc = buildLabReportPdfDoc(selectedResult, getRequest(selectedResult.demandeId));
+            return doc.output('datauristring');
+          }}
+          pdfFilename={`Rapport_Labo_${selectedResult.id}.pdf`}
+          staffName={user?.name || 'Laboratoire d\'Analyses'}
+          staffRole="BIOLOGISTE"
+          onPhoneSaved={(newPhone) => {
+            setPatientPhone(newPhone);
+          }}
+          onSuccess={() => {
+            setWaSuccess(true);
+            setTimeout(() => setWaSuccess(false), 8000);
+          }}
+        />
       )}
     </div>
   );

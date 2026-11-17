@@ -4,6 +4,7 @@ import { Printer, X, Receipt, FileText, CheckCircle2, Building2, Phone, Mail, Ma
 import { EstablishmentConfig } from '../../types';
 import { printElementDirectly } from '../../src/utils/print';
 import { getApiUrl } from '../../src/utils/apiConfig';
+import { WhatsAppDocumentModal } from './WhatsAppDocumentModal';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
@@ -210,63 +211,9 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
     window.print();
   };
 
-  const [waPhone, setWaPhone] = useState(receipt.patientPhone || '');
-  const [showWaInput, setShowWaInput] = useState(false);
-  const [sendingWa, setSendingWa] = useState(false);
+  const [showWaModal, setShowWaModal] = useState(false);
   const [waSentSuccess, setWaSentSuccess] = useState(false);
-
-  const handleSendWhatsApp = async () => {
-    const targetPhone = (waPhone || receipt.patientPhone || '').trim();
-    if (!targetPhone) {
-      setShowWaInput(true);
-      return;
-    }
-    setSendingWa(true);
-    try {
-      // 1. Generate styled official PDF in memory
-      let pdfBase64: string | undefined;
-      try {
-        const pdfDoc = buildReceiptPdfDoc(receipt, establishment, currency);
-        pdfBase64 = pdfDoc.output('datauristring');
-      } catch (pdfErr) {
-        console.warn('Receipt PDF generation warning:', pdfErr);
-      }
-
-      const summaryLines = (receipt.items || []).map(
-        it => `${it.name} (x${it.quantity}) : ${(it.totalPrice || 0).toLocaleString('fr-FR')} ${currency}`
-      );
-      const res = await fetch(getApiUrl('/api/whatsapp/send-document'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: targetPhone,
-          documentType: 'RECEIPT',
-          patientName: receipt.patientName,
-          patientId: receipt.patientId,
-          title: receipt.title || 'Reçu de Paiement Hospitalier',
-          summaryLines,
-          totalAmount: receipt.amountPaid,
-          currency,
-          pdfBase64,
-          pdfFilename: `Recu_Caisse_${receipt.id || Date.now()}.pdf`,
-          staffName: receipt.operatorName || 'La Caisse',
-          staffRole: receipt.operatorRole || 'CAISSIER'
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setWaSentSuccess(true);
-        setShowWaInput(false);
-        setTimeout(() => setWaSentSuccess(false), 6000);
-      } else {
-        alert(data.message || 'Erreur lors de l\'envoi WhatsApp');
-      }
-    } catch (err: any) {
-      alert('Erreur réseau WhatsApp: ' + err.message);
-    } finally {
-      setSendingWa(false);
-    }
-  };
+  const [patientPhone, setPatientPhone] = useState(receipt.patientPhone || '');
 
   if (typeof document === 'undefined') return null;
 
@@ -814,67 +761,25 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            {showWaInput ? (
-              <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-emerald-300 animate-in fade-in">
-                <input
-                  type="tel"
-                  placeholder="Ex: 681051123 ou +237..."
-                  value={waPhone}
-                  onChange={e => setWaPhone(e.target.value)}
-                  className="px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-lg text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500 w-40"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  onClick={handleSendWhatsApp}
-                  disabled={sendingWa}
-                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs flex items-center gap-1 transition-all cursor-pointer"
-                >
-                  {sendingWa ? <Loader2 size={13} className="animate-spin" /> : <MessageSquare size={13} />}
-                  <span>Confirmer</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowWaInput(false)}
-                  className="px-2 py-1.5 text-slate-400 hover:text-slate-600 text-xs"
-                >
-                  Annuler
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  if (!receipt.patientPhone && !waPhone) {
-                    setShowWaInput(true);
-                  } else {
-                    handleSendWhatsApp();
-                  }
-                }}
-                disabled={sendingWa}
-                className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer shadow-xs active:scale-[0.98] ${
-                  waSentSuccess
-                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20'
-                }`}
-                title="Transmettre le reçu au patient sur son WhatsApp"
-              >
-                {sendingWa ? (
-                  <Loader2 size={15} className="animate-spin" />
-                ) : waSentSuccess ? (
-                  <Check size={15} className="text-emerald-700 font-black" />
-                ) : (
-                  <MessageSquare size={15} />
-                )}
-                <span>
-                  {sendingWa
-                    ? 'Transmission...'
-                    : waSentSuccess
-                    ? 'Reçu envoyé sur WhatsApp !'
-                    : 'Envoyer sur WhatsApp 📲'}
-                </span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setShowWaModal(true)}
+              className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-2 cursor-pointer shadow-xs active:scale-[0.98] ${
+                waSentSuccess
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20'
+              }`}
+              title="Transmettre le reçu au patient sur son WhatsApp"
+            >
+              {waSentSuccess ? (
+                <Check size={15} className="text-emerald-700 font-black" />
+              ) : (
+                <MessageSquare size={15} />
+              )}
+              <span>
+                {waSentSuccess ? 'Reçu envoyé sur WhatsApp !' : 'Envoyer sur WhatsApp 📲'}
+              </span>
+            </button>
 
             <button
               type="button"
@@ -895,6 +800,34 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
         </div>
 
       </div>
+
+      {/* Styled In-App WhatsApp Dispatch & Persistence Modal */}
+      <WhatsAppDocumentModal
+        isOpen={showWaModal}
+        onClose={() => setShowWaModal(false)}
+        patientName={receipt.patientName}
+        patientId={receipt.patientId || (receipt as any).dmeId}
+        initialPhone={patientPhone || receipt.patientPhone}
+        documentType="RECEIPT"
+        documentTitle={receipt.title || 'Reçu de Paiement Hospitalier'}
+        summaryLines={(receipt.items || []).map(
+          it => `${it.name} (x${it.quantity}) : ${(it.totalPrice || 0).toLocaleString('fr-FR')} ${currency}`
+        )}
+        totalAmount={receipt.amountPaid}
+        currency={currency}
+        getPdfBase64={() => buildReceiptPdfDoc(receipt, establishment, currency).output('datauristring')}
+        pdfFilename={`Recu_Caisse_${receipt.id || Date.now()}.pdf`}
+        staffName={receipt.operatorName || 'La Caisse'}
+        staffRole={receipt.operatorRole || 'CAISSIER'}
+        onPhoneSaved={(newPhone) => {
+          setPatientPhone(newPhone);
+          receipt.patientPhone = newPhone;
+        }}
+        onSuccess={() => {
+          setWaSentSuccess(true);
+          setTimeout(() => setWaSentSuccess(false), 8000);
+        }}
+      />
     </div>,
     document.body
   );

@@ -10,6 +10,7 @@ import DosageAssistant from './DosageAssistant';
 import { jsPDF } from 'jspdf';
 import { useSettings } from '../../hooks/useSettings';
 import { getApiUrl } from '../../src/utils/apiConfig';
+import { WhatsAppDocumentModal } from '../../components/common/WhatsAppDocumentModal';
 
 interface DigitalPrescriptionProps {
   patient: Patient;
@@ -54,10 +55,9 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
   const [customBoxes, setCustomBoxes] = useState('1');
 
   // WhatsApp Transmission State
-  const [sendingWaPrescription, setSendingWaPrescription] = useState(false);
   const [waPrescriptionSuccess, setWaPrescriptionSuccess] = useState(false);
-  const [customWaPhone, setCustomWaPhone] = useState(patient?.phone || '');
-  const [showWaPhoneModal, setShowWaPhoneModal] = useState(false);
+  const [showWaPrescriptionModal, setShowWaPrescriptionModal] = useState(false);
+  const [patientPhone, setPatientPhone] = useState(patient?.phone || '');
 
   const buildPrescriptionPdfDoc = (): jsPDF => {
     const doc = new jsPDF();
@@ -164,59 +164,6 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
     doc.text('Certifié SMART-HOSTO', 120, yPosition + 40);
 
     return doc;
-  };
-
-  const handleSendWhatsAppPrescription = async (targetPhone?: string) => {
-    const phoneToUse = (targetPhone || customWaPhone || patient?.phone || '').trim();
-    if (!phoneToUse) {
-      setShowWaPhoneModal(true);
-      return;
-    }
-    setSendingWaPrescription(true);
-    try {
-      // 1. Generate styled official prescription PDF
-      let pdfBase64: string | undefined;
-      try {
-        const doc = buildPrescriptionPdfDoc();
-        pdfBase64 = doc.output('datauristring');
-      } catch (pErr) {
-        console.warn('Prescription PDF generation warning:', pErr);
-      }
-
-      const summaryLines = prescriptions.map(
-        p =>
-          `${p.medicationName} : ${p.dosageScheme || `${p.dosePerIntake || 1} ${p.intakeUnit || 'prise'} ${p.frequency || ''}`} pendant ${p.duration || 5} jours`
-      );
-      const res = await fetch(getApiUrl('/api/whatsapp/send-document'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: phoneToUse,
-          documentType: 'PRESCRIPTION',
-          patientName: `${patient?.firstName || ''} ${patient?.lastName || ''}`.trim(),
-          patientId: patient?.id || (patient as any)?.dmeId,
-          title: diagnostic ? `Prescription médicale — ${diagnostic}` : 'Prescription médicale officielle',
-          summaryLines,
-          detailsText: notes ? `Conseils du médecin : ${notes}` : undefined,
-          pdfBase64,
-          pdfFilename: `Ordonnance_${patient?.lastName || 'Patient'}_${Date.now()}.pdf`,
-          staffName: prescripteur?.name,
-          staffRole: prescripteur?.role || 'MÉDECIN'
-        })
-      });
-      const data = await res.json();
-      if (data.success) {
-        setWaPrescriptionSuccess(true);
-        setShowWaPhoneModal(false);
-        setTimeout(() => setWaPrescriptionSuccess(false), 6000);
-      } else {
-        alert(data.message || 'Erreur lors de l\'envoi WhatsApp');
-      }
-    } catch (err: any) {
-      alert('Erreur réseau WhatsApp: ' + err.message);
-    } finally {
-      setSendingWaPrescription(false);
-    }
   };
 
   const handleAddInlineCustom = () => {
@@ -954,14 +901,8 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    if (!patient?.phone && !customWaPhone) {
-                      setShowWaPhoneModal(true);
-                    } else {
-                      handleSendWhatsAppPrescription();
-                    }
-                  }}
-                  disabled={prescriptions.length === 0 || sendingWaPrescription}
+                  onClick={() => setShowWaPrescriptionModal(true)}
+                  disabled={prescriptions.length === 0}
                   className={`px-5 py-3 rounded-xl font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs active:scale-[0.98] ${
                     waPrescriptionSuccess
                       ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
@@ -969,17 +910,13 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
                   }`}
                   title="Envoyer les consignes et la prescription sur le WhatsApp du patient"
                 >
-                  {sendingWaPrescription ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : waPrescriptionSuccess ? (
+                  {waPrescriptionSuccess ? (
                     <Check size={18} className="text-emerald-700 font-black" />
                   ) : (
                     <MessageSquare size={18} />
                   )}
                   <span>
-                    {sendingWaPrescription
-                      ? 'Transmission...'
-                      : waPrescriptionSuccess
+                    {waPrescriptionSuccess
                       ? 'Prescription envoyée sur WhatsApp !'
                       : 'Envoyer sur WhatsApp 📲'}
                   </span>
@@ -997,58 +934,32 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
               </button>
             </div>
 
-            {/* Modal de saisie téléphone WhatsApp si absent */}
-            {showWaPhoneModal && (
-              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 border border-slate-100">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-black text-slate-800 text-base flex items-center gap-2">
-                      <MessageSquare className="text-emerald-600" size={20} />
-                      Transmettre l'ordonnance par WhatsApp
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => setShowWaPhoneModal(false)}
-                      className="text-slate-400 hover:text-slate-600 p-1"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-                  <p className="text-xs text-slate-500">
-                    Saisissez le numéro WhatsApp du patient <strong>{patient?.firstName} {patient?.lastName}</strong> pour lui délivrer instantanément son ordonnance certifiée.
-                  </p>
-                  <div>
-                    <label className="text-xs font-bold text-slate-700 block mb-1.5">Numéro WhatsApp</label>
-                    <input
-                      type="tel"
-                      placeholder="Ex: 681051123 ou +237..."
-                      value={customWaPhone}
-                      onChange={e => setCustomWaPhone(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      autoFocus
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      onClick={() => setShowWaPhoneModal(false)}
-                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-                    >
-                      Annuler
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSendWhatsAppPrescription(customWaPhone)}
-                      disabled={!customWaPhone.trim() || sendingWaPrescription}
-                      className="px-5 py-2 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    >
-                      {sendingWaPrescription ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                      <span>Confirmer et Envoyer</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Styled WhatsApp Modal */}
+            <WhatsAppDocumentModal
+              isOpen={showWaPrescriptionModal}
+              onClose={() => setShowWaPrescriptionModal(false)}
+              patientName={`${patient?.firstName || ''} ${patient?.lastName || ''}`.trim()}
+              patientId={patient?.id || (patient as any)?.dmeId}
+              initialPhone={patientPhone || patient?.phone}
+              documentType="PRESCRIPTION"
+              documentTitle={diagnostic ? `Prescription médicale — ${diagnostic}` : 'Prescription Médicale Officielle'}
+              summaryLines={prescriptions.map(
+                p => `${p.medicationName} : ${p.dosageScheme || `${p.dosePerIntake || 1} ${p.intakeUnit || 'prise'} ${p.frequency || ''}`} pendant ${p.duration || 5} jours`
+              )}
+              detailsText={notes ? `Conseils du médecin : ${notes}` : undefined}
+              getPdfBase64={() => buildPrescriptionPdfDoc().output('datauristring')}
+              pdfFilename={`Ordonnance_${patient?.lastName || 'Patient'}_${Date.now()}.pdf`}
+              staffName={prescripteur?.name}
+              staffRole={prescripteur?.role || 'MÉDECIN'}
+              onPhoneSaved={(newPhone) => {
+                setPatientPhone(newPhone);
+                if (patient) patient.phone = newPhone;
+              }}
+              onSuccess={() => {
+                setWaPrescriptionSuccess(true);
+                setTimeout(() => setWaPrescriptionSuccess(false), 8000);
+              }}
+            />
           </div>
         )}
       </div>
