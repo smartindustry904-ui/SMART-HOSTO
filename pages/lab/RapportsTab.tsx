@@ -6,6 +6,7 @@ import autoTable from 'jspdf-autotable';
 import { useSettings } from '../../hooks/useSettings';
 import { LabFilterToolbar, LabFilters } from '../../components/lab/LabFilterToolbar';
 import { isStatusTermine } from '../../src/utils/labStatus';
+import { getApiUrl } from '../../src/utils/apiConfig';
 
 interface RapportsTabProps {
   requests: LabExamRequest[];
@@ -267,7 +268,7 @@ const RapportsTab: React.FC<RapportsTabProps> = ({ requests, resultats, rapports
         });
       });
 
-      const res = await fetch('/api/whatsapp/send-document', {
+      const res = await fetch(getApiUrl('/api/whatsapp/send-document'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

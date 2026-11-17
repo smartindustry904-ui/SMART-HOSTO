@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { User } from '../../types';
 import { db, sanitizeData } from '../../src/firebase';
+import { getApiUrl } from '../../src/utils/apiConfig';
 import {
   doc,
   setDoc,
@@ -639,7 +640,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
   const fetchThreads = async () => {
     setIsLoadingThreads(true);
     try {
-      const res = await fetch('/api/whatsapp/threads');
+      const res = await fetch(getApiUrl('/api/whatsapp/threads'));
       const data = await res.json();
       if (data.success && Array.isArray(data.threads)) {
         setThreads(data.threads);
@@ -655,7 +656,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
     if (!phone) return;
     setIsLoadingMessages(true);
     try {
-      const res = await fetch(`/api/whatsapp/threads/${encodeURIComponent(phone)}/messages`);
+      const res = await fetch(getApiUrl(`/api/whatsapp/threads/${encodeURIComponent(phone)}/messages`));
       const data = await res.json();
       if (data.success && Array.isArray(data.messages)) {
         setThreadMessages(data.messages);
@@ -689,7 +690,7 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
   const handleToggleHandoverMode = async (phone: string, targetMode: 'AI' | 'HUMAN') => {
     setIsTogglingMode(true);
     try {
-      const res = await fetch(`/api/whatsapp/threads/${encodeURIComponent(phone)}/mode`, {
+      const res = await fetch(getApiUrl(`/api/whatsapp/threads/${encodeURIComponent(phone)}/mode`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -713,16 +714,19 @@ export const WhatsAppAgentSettings: React.FC<WhatsAppAgentSettingsProps> = ({
     setIsSendingHumanReply(true);
     const textToSend = humanReplyText.trim();
     try {
-      const res = await fetch(`/api/whatsapp/threads/${encodeURIComponent(selectedThreadPhone)}/reply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: textToSend,
-          staffName: currentUser?.name || 'Soignant SMART-HOSTO',
-          staffRole: currentUser?.role || 'STAFF',
-          staffId: currentUser?.id
-        })
-      });
+      const res = await fetch(
+        getApiUrl(`/api/whatsapp/threads/${encodeURIComponent(selectedThreadPhone)}/reply`),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: textToSend,
+            staffName: currentUser?.name || 'Soignant SMART-HOSTO',
+            staffRole: currentUser?.role || 'STAFF',
+            staffId: currentUser?.id
+          })
+        }
+      );
       const data = await res.json();
       if (data.success) {
         setHumanReplyText('');

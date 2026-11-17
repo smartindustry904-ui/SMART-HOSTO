@@ -9,6 +9,7 @@ import {
 import DosageAssistant from './DosageAssistant';
 import { jsPDF } from 'jspdf';
 import { useSettings } from '../../hooks/useSettings';
+import { getApiUrl } from '../../src/utils/apiConfig';
 
 interface DigitalPrescriptionProps {
   patient: Patient;
@@ -70,7 +71,7 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
         p =>
           `${p.medicationName} : ${p.dosageScheme || `${p.dosePerIntake || 1} ${p.intakeUnit || 'prise'} ${p.frequency || ''}`} pendant ${p.duration || 5} jours`
       );
-      const res = await fetch('/api/whatsapp/send-document', {
+      const res = await fetch(getApiUrl('/api/whatsapp/send-document'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

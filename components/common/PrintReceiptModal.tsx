@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Printer, X, Receipt, FileText, CheckCircle2, Building2, Phone, Mail, MapPin, User, ShieldCheck, MessageSquare, Loader2, Check } from 'lucide-react';
 import { EstablishmentConfig } from '../../types';
 import { printElementDirectly } from '../../src/utils/print';
+import { getApiUrl } from '../../src/utils/apiConfig';
 
 export interface ReceiptItem {
   id?: string;
@@ -106,7 +107,7 @@ export const PrintReceiptModal: React.FC<PrintReceiptModalProps> = ({
       const summaryLines = (receipt.items || []).map(
         it => `${it.name} (x${it.quantity}) : ${(it.totalPrice || 0).toLocaleString('fr-FR')} ${currency}`
       );
-      const res = await fetch('/api/whatsapp/send-document', {
+      const res = await fetch(getApiUrl('/api/whatsapp/send-document'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
