@@ -1403,17 +1403,33 @@ async function logWhatsAppMessage(entry: {
   aiModel?: string;
   metaMessageId?: string;
 }) {
-  const logItem = {
+  const cleanLogItem: any = {
     id: `wa_log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-    ...entry,
+    direction: entry.direction,
+    phone: entry.phone || '',
+    message: entry.message || '',
+    source: entry.source,
     createdAt: new Date().toISOString()
   };
-  memoryWhatsAppLogs.unshift(logItem);
+
+  if (entry.staffId !== undefined && entry.staffId !== null) cleanLogItem.staffId = entry.staffId;
+  if (entry.staffName !== undefined && entry.staffName !== null) cleanLogItem.staffName = entry.staffName;
+  if (entry.staffRole !== undefined && entry.staffRole !== null) cleanLogItem.staffRole = entry.staffRole;
+  if (entry.aiModel !== undefined && entry.aiModel !== null) cleanLogItem.aiModel = entry.aiModel;
+  if (entry.metaMessageId !== undefined && entry.metaMessageId !== null) cleanLogItem.metaMessageId = entry.metaMessageId;
+
+  memoryWhatsAppLogs.unshift(cleanLogItem);
   if (memoryWhatsAppLogs.length > 100) memoryWhatsAppLogs.pop();
 
-  // Fire-and-forget Firestore write so HTTP responses never hang
-  setDoc(doc(db, 'whatsapp_logs', logItem.id), logItem).catch(() => {});
-  return logItem;
+  // Firestore write wrapped in try/catch so unexpected serialization never throws synchronously
+  try {
+    setDoc(doc(db, 'whatsapp_logs', cleanLogItem.id), cleanLogItem).catch((err) => {
+      console.warn('Async Firestore whatsapp_logs write warning:', err?.message);
+    });
+  } catch (err: any) {
+    console.warn('Firestore logWhatsAppMessage setDoc sync warning:', err?.message);
+  }
+  return cleanLogItem;
 }
 
 async function findStaffByPhoneOrId(phone?: string, staffId?: string): Promise<any | null> {
