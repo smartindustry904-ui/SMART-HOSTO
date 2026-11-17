@@ -3422,6 +3422,25 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
         const value = change?.value;
         const messages = Array.isArray(value?.messages) ? value.messages : [];
         const contacts = Array.isArray(value?.contacts) ? value.contacts : [];
+        const statuses = Array.isArray(value?.statuses) ? value.statuses : [];
+
+        // Track delivery statuses (delivered, read, failed) from Meta Cloud API
+        for (const st of statuses) {
+          const wamid = st.id;
+          const status = st.status; // 'sent' | 'delivered' | 'read' | 'failed'
+          const recipientId = st.recipient_id;
+          const errors = st.errors || [];
+          if (status === 'failed') {
+            const errCode = errors[0]?.code;
+            const errMsg = errors[0]?.message || errors[0]?.title || 'Échec de distribution';
+            console.warn(`⚠️ [WhatsApp Webhook Status] Message ${wamid} to +${recipientId} FAILED. Code: ${errCode}, Reason: ${errMsg}`);
+            if (errCode === 131047) {
+              console.warn(`ℹ️ [WhatsApp Webhook] Code 131047: Le patient +${recipientId} n'a pas envoyé de message au numéro de l'hôpital au cours des dernières 24h. Meta bloque l'envoi de messages libres hors fenêtre de 24h.`);
+            }
+          } else {
+            console.log(`[WhatsApp Webhook Status] Message ${wamid} to +${recipientId} -> ${status}`);
+          }
+        }
 
         for (const msg of messages) {
           const fromPhone = String(msg.from || '');

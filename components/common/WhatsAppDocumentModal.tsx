@@ -15,7 +15,8 @@ import {
   ExternalLink,
   ShieldCheck,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Info
 } from 'lucide-react';
 import { db } from '../../src/firebase';
 import { doc, getDoc, getDocs, collection, query, where, setDoc } from 'firebase/firestore';
@@ -485,6 +486,26 @@ export const WhatsAppDocumentModal: React.FC<WhatsAppDocumentModalProps> = ({
                   </div>
                 </label>
               )}
+
+              {/* Meta WhatsApp 24h Customer Care Notice & Initiation Link */}
+              <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/60 text-amber-900 dark:text-amber-200 text-xs space-y-1.5">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <Info size={14} className="text-amber-600 shrink-0" />
+                  <span>Règle de sécurité Meta WhatsApp (Fenêtre 24h)</span>
+                </div>
+                <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                  Pour recevoir ses documents, le patient doit avoir envoyé au moins un message (ex: <em>"Bonjour"</em>) au numéro WhatsApp de l'hôpital (<strong>+237 6 81 05 11 23</strong>).
+                </p>
+                <a
+                  href="https://wa.me/237681051123?text=Bonjour"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 hover:underline pt-0.5"
+                >
+                  <ExternalLink size={12} />
+                  <span>Lien direct WhatsApp pour le patient : wa.me/237681051123</span>
+                </a>
+              </div>
 
               {/* In-Modal Error Alert (NO browser alert) */}
               {errorMsg && (
