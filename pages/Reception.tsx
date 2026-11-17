@@ -472,6 +472,9 @@ const Reception: React.FC<ReceptionProps> = ({
   const [patientsToDischarge, setPatientsToDischarge] = useState<any[]>([]);
   const [sortieLabRequests, setSortieLabRequests] = useState<any[]>([]);
   const [sortiePharmaOrders, setSortiePharmaOrders] = useState<any[]>([]);
+  const [radarServiceQueues, setRadarServiceQueues] = useState<any[]>([]);
+  const [radarBeds, setRadarBeds] = useState<any[]>([]);
+  const [radarInpatients, setRadarInpatients] = useState<any[]>([]);
   const [dischargeError, setDischargeError] = useState<{ patientId: string; message: string } | null>(null);
   const [isProcessingDischarge, setIsProcessingDischarge] = useState<string | null>(null);
   const [selectedPatientForHistory, setSelectedPatientForHistory] = useState<Patient | null>(null);
@@ -636,6 +639,146 @@ const Reception: React.FC<ReceptionProps> = ({
       };
     });
   }, [patientsToDischarge, activeVisits, paymentRequests, sortieLabRequests, sortiePharmaOrders]);
+
+  // Real-Time Radar computation for ALL patients with an ACTIF visit cycle
+  const computeCycleRadarStatus = useMemo(() => {
+    const PAID_OR_DONE_FIN = new Set([
+      'PAID', 'SOLDE', 'SOLDÉ', 'PAYE', 'PAYÉ', 'EXONERE', 'EXONÉRÉ',
+      'ASSURANCE', 'PEC', 'TIERS_PAYANT', 'GRATUIT', 'SUIVI',
+      'DELIVERED', 'DISPENSED', 'CANCELLED', 'ANNULE', 'ANNULÉ'
+    ]);
+
+    return (pids: string[], visiteId?: string, visitObj?: any) => {
+      const cleanIds = pids.filter(Boolean);
+
+      // 1. Statut Caisse: Sum all unpaid items tied to active visite_id (or patient if visite_id absent)
+      const unpaidReqs = paymentRequests.filter((pr: any) => {
+        if (visiteId && pr.visite_id) {
+          if (pr.visite_id !== visiteId) return false;
+        } else {
+          const matchesPt = cleanIds.includes(pr.patientId) || cleanIds.includes(pr.patientDme);
+          if (!matchesPt) return false;
+        }
+        const st = String(pr.status || pr.payment_status || '').toUpperCase().trim();
+        if (PAID_OR_DONE_FIN.has(st)) return false;
+        const rem = Number(pr.remainingAmount ?? ((pr.totalAmount || 0) - (pr.amountPaid || 0)));
+        return rem > 0;
+      });
+      const unpaidTotal = unpaidReqs.reduce(
+        (sum: number, pr: any) => sum + Number(pr.remainingAmount ?? ((pr.totalAmount || 0) - (pr.amountPaid || 0))),
+        0
+      );
+
+      // 2. Position actuelle (Cycle Status)
+      let positionLabel = '📍 Attente : Consultation';
+      let positionTone: 'amber' | 'blue' | 'indigo' | 'purple' | 'emerald' = 'amber';
+
+      // 2a. Admitted to a bed?
+      const occBed = radarBeds.find((b: any) => {
+        const st = String(b.status || '').toUpperCase();
+        const isOcc = st.includes('OCCUP');
+        return isOcc && ((b.patientId && cleanIds.includes(b.patientId)) || (b.patientDme && cleanIds.includes(b.patientDme)));
+      });
+      const activeInp = radarInpatients.find(
+        (r: any) => (r.patientId && cleanIds.includes(r.patientId)) || (r.patientDme && cleanIds.includes(r.patientDme))
+      );
+
+      if (occBed || activeInp) {
+        const roomLabel = occBed?.roomName || activeInp?.roomName || 'Chambre';
+        positionLabel = `🛏️ Hospitalisé (${roomLabel})`;
+        positionTone = 'indigo';
+      } else {
+        // 2b. Labs prescribed and blood not drawn yet?
+        const pendingLab = sortieLabRequests.find((lr: any) => {
+          if (visiteId && lr.visite_id && lr.visite_id !== visiteId) return false;
+          const matchesPt = cleanIds.includes(lr.patientId) || cleanIds.includes(lr.patientDme);
+          if (!matchesPt) return false;
+          if (lr.isCancelled) return false;
+          const st = String(lr.status || '').toUpperCase().trim();
+          const cs = String(lr.clinicalStatus || '').toUpperCase().trim();
+          if (['PUBLISHED', 'COMPLETED', 'VALIDATED', 'TERMINE', 'TERMINÉ', 'PRELEVEMENT_FAIT', 'PRÉLÈVEMENT_FAIT', 'ANALYSED', 'ANNULE'].includes(st) ||
+              ['PRELEVEMENT_FAIT', 'PRÉLÈVEMENT_FAIT', 'VALIDATED', 'PUBLISHED', 'TERMINE', 'TERMINÉ'].includes(cs)) {
+            return false;
+          }
+          return true;
+        });
+
+        // 2c. Active service_queues entries (most recent unresolved)
+        const matchingQueues = radarServiceQueues
+          .filter((q: any) => {
+            if (visiteId && q.visite_id && q.visite_id !== visiteId) return false;
+            const matchesPt = cleanIds.includes(q.patientId) || cleanIds.includes(q.dmeId);
+            if (!matchesPt) return false;
+            const st = String(q.status || '').toLowerCase();
+            return !['completed', 'done', 'discharged', 'reoriented', 'cancelled', 'cloture'].includes(st);
+          })
+          .sort((a: any, b: any) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+
+        const latestQueue = matchingQueues[0];
+        const latestStatus = String(latestQueue?.status || '').toLowerCase();
+        const latestService = String(latestQueue?.service || latestQueue?.queueName || '').trim();
+        const hasVitals = Boolean(latestQueue?.vitals && Object.keys(latestQueue.vitals).length > 0);
+
+        if (
+          ['in_progress', 'consulting', 'en_cours', 'prise_en_charge'].includes(latestStatus) ||
+          (visitObj && visitObj.inUrgencesQueue && visitObj.urgencesStatus === 'Pris en charge')
+        ) {
+          positionLabel = visitObj?.inUrgencesQueue ? '🩺 En Consultation (Urgences)' : '🩺 En Consultation';
+          positionTone = 'blue';
+        } else if (pendingLab) {
+          positionLabel = '🧪 Attente : Prélèvement Labo';
+          positionTone = 'purple';
+        } else if (
+          latestStatus === 'waiting_triage' ||
+          latestStatus === 'triage' ||
+          latestService.toLowerCase().includes('soins') ||
+          latestService.toLowerCase().includes('triage') ||
+          (latestQueue && !hasVitals && latestService.toLowerCase().includes('infirm'))
+        ) {
+          positionLabel = '📍 Attente : Triage';
+          positionTone = 'amber';
+        } else if (latestQueue) {
+          positionLabel = `📍 Attente : ${latestService || 'Consultation'}`;
+          positionTone = 'amber';
+        } else if (visitObj?.inUrgencesQueue) {
+          positionLabel = '📍 Attente : Urgences';
+          positionTone = 'amber';
+        } else if (Array.isArray(visitObj?.destinations) && visitObj.destinations.length > 0) {
+          const lastDest = visitObj.destinations[visitObj.destinations.length - 1];
+          positionLabel = `📍 Attente : ${lastDest.service || 'Consultation'}`;
+          positionTone = 'amber';
+        }
+      }
+
+      return {
+        unpaidTotal,
+        isCaissePending: unpaidTotal > 0,
+        positionLabel,
+        positionTone,
+      };
+    };
+  }, [paymentRequests, radarBeds, radarInpatients, sortieLabRequests, radarServiceQueues]);
+
+  const activeCycleRadarRows = useMemo(() => {
+    return (activeVisits || [])
+      .map((v: any) => {
+        const pids = [v.patientId, v.dmeId, v.id].filter(Boolean);
+        const radar = computeCycleRadarStatus(pids, v.visite_id || v.id, v);
+        const lastDest = Array.isArray(v.destinations) && v.destinations.length > 0
+          ? v.destinations[v.destinations.length - 1]
+          : null;
+        return {
+          visit: v,
+          visiteId: v.visite_id || v.id,
+          patientId: v.patientId || v.dmeId || v.id,
+          patientName: v.patientName || 'Patient',
+          service: v.currentService || lastDest?.service || 'Parcours Actif',
+          openedTime: v.openedTime || '--:--',
+          ...radar,
+        };
+      })
+      .sort((a, b) => String(b.visit.openedAt || '').localeCompare(String(a.visit.openedAt || '')));
+  }, [activeVisits, computeCycleRadarStatus]);
 
   const sortieStats = useMemo(() => {
     const total = enrichedPatientsToDischarge.length;
@@ -875,7 +1018,35 @@ const Reception: React.FC<ReceptionProps> = ({
         }
       );
 
-      unsubs = [unsubPatients, unsubDischarges, unsubSortieLabs, unsubSortiePharma, unsubApps, unsubVisites];
+      const unsubRadarQueues = onSnapshot(collection(db, 'service_queues'), (snap) => {
+        setRadarServiceQueues(
+          snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(q => belongsToTenant(q, activeTenantId))
+        );
+      }, () => {});
+
+      const unsubRadarBeds = onSnapshot(collection(db, 'beds'), (snap) => {
+        setRadarBeds(
+          snap.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(b => belongsToTenant(b, activeTenantId))
+        );
+      }, () => {});
+
+      const unsubRadarInpatients = onSnapshot(
+        query(collection(db, 'inpatient_records'), where('status', '==', 'admitted')),
+        (snap) => {
+          setRadarInpatients(
+            snap.docs
+              .map(d => ({ id: d.id, ...d.data() }))
+              .filter(r => belongsToTenant(r, activeTenantId))
+          );
+        },
+        () => {}
+      );
+
+      unsubs = [unsubPatients, unsubDischarges, unsubSortieLabs, unsubSortiePharma, unsubApps, unsubVisites, unsubRadarQueues, unsubRadarBeds, unsubRadarInpatients];
     };
 
     const unsubscribeAuth = auth.onAuthStateChanged((firebaseUser) => {
@@ -2829,6 +3000,84 @@ const Reception: React.FC<ReceptionProps> = ({
           onFilterClick={handleDashboardFilterClick}
           activeFilter={dashboardFilter || undefined}
         >
+          {/* Real-Time Radar: Active Visit Cycles (Position & Statut Caisse) */}
+          <div className={`rounded-2xl border shadow-xs overflow-hidden mt-6 ${
+            theme === 'dark' ? 'bg-[#111827] border-slate-800' : 'bg-white border-slate-200'
+          }`}>
+            <div className={`px-6 py-4 border-b flex justify-between items-center ${
+              theme === 'dark' ? 'border-slate-800 bg-slate-900/50' : 'border-slate-200 bg-slate-50/70'
+            }`}>
+              <h3 className={`font-bold text-xs uppercase tracking-wider flex items-center gap-2 ${
+                theme === 'dark' ? 'text-slate-200' : 'text-slate-800'
+              }`}>
+                <Activity size={16} className="text-emerald-500 animate-pulse" /> Radar Patients Actifs — Temps Réel ({activeCycleRadarRows.length})
+              </h3>
+              <span className="text-[11px] font-semibold text-slate-400">
+                Synchronisation Firebase instantanée
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left table-medical">
+                <thead>
+                  <tr>
+                    <th className="px-6 py-3">Patient</th>
+                    <th className="px-6 py-3">Service / Entrée</th>
+                    <th className="px-6 py-3">Position actuelle</th>
+                    <th className="px-6 py-3">Statut Caisse</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${theme === 'dark' ? 'divide-slate-800/80' : 'divide-slate-100'}`}>
+                  {activeCycleRadarRows.length > 0 ? activeCycleRadarRows.map((row, idx) => {
+                    const posClass =
+                      row.positionTone === 'indigo'
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/60 dark:text-indigo-300 dark:border-indigo-800'
+                        : row.positionTone === 'blue'
+                        ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800'
+                        : row.positionTone === 'purple'
+                        ? 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800'
+                        : 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800';
+                    return (
+                      <tr key={row.visiteId || idx} className="transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/40">
+                        <td className="px-6 py-3">
+                          <p className={`font-bold text-sm ${theme === 'dark' ? 'text-slate-100' : 'text-slate-900'}`}>
+                            {row.patientName}
+                          </p>
+                          <p className="text-xs text-slate-400 font-mono uppercase">{row.patientId}</p>
+                        </td>
+                        <td className="px-6 py-3">
+                          <span className="text-xs font-bold text-blue-600 dark:text-blue-400">{row.service}</span>
+                          <span className="block text-[10px] text-slate-400 font-medium">Ouvert à {row.openedTime}</span>
+                        </td>
+                        <td className="px-6 py-3">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-black border ${posClass}`}>
+                            {row.positionLabel}
+                          </span>
+                        </td>
+                        <td className="px-6 py-3">
+                          {row.isCaissePending ? (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-black bg-rose-100 text-rose-800 border border-rose-200 dark:bg-rose-950/70 dark:text-rose-300 dark:border-rose-800">
+                              🔴 En attente Caisse ({row.unpaidTotal.toLocaleString()} F)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200 dark:bg-emerald-950/70 dark:text-emerald-300 dark:border-emerald-800">
+                              🟢 À jour
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  }) : (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-8 text-center text-slate-400 text-xs font-semibold">
+                        Aucun cycle patient ACTIF en cours dans l&apos;hôpital
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           {/* Table section for Dashboard */}
           <div className={`rounded-2xl border shadow-xs overflow-hidden mt-6 ${
             theme === 'dark' ? 'bg-[#111827] border-slate-800' : 'bg-white border-slate-200'
@@ -3714,25 +3963,20 @@ const Reception: React.FC<ReceptionProps> = ({
                   </div>
                 ) : (
                   activeWaitingList.map((p, i) => {
-                    const linkedReq = paymentRequests.find(pr =>
-                      (p.paymentRequestId && pr.id === p.paymentRequestId) ||
-                      ((pr.patientId === p.patientId || (pr as any).patientDme === p.dmeId) &&
-                        ['PENDING', 'PARTIAL'].includes(String(pr.status || '').toUpperCase()))
+                    const pids = [p.patientId, p.dmeId, p.id].filter(Boolean) as string[];
+                    const matchingVisit = activeVisits.find(
+                      v => (p.visite_id && v.visite_id === p.visite_id) || pids.includes(v.patientId) || (v.dmeId && pids.includes(v.dmeId))
                     );
-                    const isExonerated = Boolean(
-                      p.isFreeFollowUp ||
-                      String(p.paymentStatus || '').toUpperCase() === 'EXONERE' ||
-                      String((p as any).statut_financier || '').toUpperCase() === 'EXONERE'
-                    );
-                    const hasUnpaidBill = linkedReq
-                      ? ['PENDING', 'PARTIAL'].includes(String(linkedReq.status || '').toUpperCase())
-                      : !(isExonerated || p.paymentStatus === 'PAID' || p.status === 'SOLDE');
-                    const destinationLabel = p.service || p.queueName || 'Consultation';
-                    const attenteLabel = hasUnpaidBill
-                      ? 'En attente : Caisse'
-                      : isExonerated
-                      ? `Exonéré / Suivi : ${destinationLabel}`
-                      : `En attente : ${destinationLabel}`;
+                    const radar = computeCycleRadarStatus(pids, p.visite_id || matchingVisit?.visite_id, matchingVisit);
+                    const hasUnpaidBill = radar.isCaissePending;
+                    const posBadgeClass =
+                      radar.positionTone === 'indigo'
+                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                        : radar.positionTone === 'blue'
+                        ? 'bg-blue-50 text-blue-700 border-blue-200'
+                        : radar.positionTone === 'purple'
+                        ? 'bg-purple-50 text-purple-700 border-purple-200'
+                        : 'bg-amber-50 text-amber-800 border-amber-200';
 
                     return (
                       <div key={p.id || `wait-${p.patientId || 'pt'}-${i}`} className="p-3.5 hover:bg-slate-50 transition-all relative overflow-hidden">
@@ -3749,15 +3993,19 @@ const Reception: React.FC<ReceptionProps> = ({
                              <span className="text-[11px] text-slate-400 font-semibold tabular-nums">{p.time}</span>
                            </div>
                         </div>
-                        <div className="flex justify-between items-center pl-1.5 mt-2">
-                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
-                             !hasUnpaidBill
-                               ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                               : 'bg-rose-50 text-rose-700 border-rose-200'
-                           }`}>
-                             {attenteLabel}
+                        <div className="flex flex-wrap items-center justify-between gap-1.5 pl-1.5 mt-2">
+                           <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${posBadgeClass}`}>
+                             {radar.positionLabel}
                            </span>
-                           <span className="text-[11px] text-slate-400 font-medium">{p.priority === 'urgent' ? 'Urgent' : 'Normal'}</span>
+                           {hasUnpaidBill ? (
+                             <span className="text-[10px] font-black px-2 py-0.5 rounded-full border bg-rose-100 text-rose-800 border-rose-200">
+                               🔴 En attente Caisse
+                             </span>
+                           ) : (
+                             <span className="text-[10px] font-black px-2 py-0.5 rounded-full border bg-emerald-100 text-emerald-800 border-emerald-200">
+                               🟢 À jour
+                             </span>
+                           )}
                         </div>
                       </div>
                     );
