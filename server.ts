@@ -3235,6 +3235,78 @@ async function sendMetaWhatsAppDocument(
   }
 }
 
+async function sendMetaWhatsAppTemplate(
+  toPhone: string,
+  templateName: string,
+  languageCode: string,
+  bodyParams: string[],
+  buttonUrlParam?: string,
+  config?: WhatsAppAgentConfig
+): Promise<{ sent: boolean; metaMessageId?: string; error?: string }> {
+  const cleanPhone = normalizePhone(toPhone);
+  if (!cleanPhone || !config?.phoneNumberId || !config?.accessToken) {
+    return { sent: false, error: 'Identifiants Meta Cloud API non configurés' };
+  }
+
+  const components: any[] = [];
+  if (bodyParams && bodyParams.length > 0) {
+    components.push({
+      type: 'body',
+      parameters: bodyParams.map(text => ({ type: 'text', text: String(text || '-') }))
+    });
+  }
+
+  if (buttonUrlParam) {
+    components.push({
+      type: 'button',
+      sub_type: 'url',
+      index: '0',
+      parameters: [{ type: 'text', text: buttonUrlParam }]
+    });
+  }
+
+  try {
+    const url = `https://graph.facebook.com/v21.0/${encodeURIComponent(config.phoneNumberId)}/messages`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'template',
+        template: {
+          name: templateName,
+          language: { code: languageCode || 'fr' },
+          components
+        }
+      })
+    });
+
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.warn('[Meta Template Send Error]:', data);
+      return {
+        sent: false,
+        error: data?.error?.message || `Erreur Meta Template (${response.status})`
+      };
+    }
+
+    return {
+      sent: true,
+      metaMessageId: data?.messages?.[0]?.id
+    };
+  } catch (err: any) {
+    return {
+      sent: false,
+      error: err?.message || 'Erreur réseau lors de l’envoi du template'
+    };
+  }
+}
+
 async function sendMetaWhatsAppAudio(
   toPhone: string,
   audioUrl: string,
@@ -4212,15 +4284,46 @@ app.post(['/api/whatsapp/send-document', '/whatsapp/send-document'], async (req,
       msg += `_Pour toute question, contactez le standard de l'établissement._`;
     }
 
-    // 1. Send introductory text message
-    const sendRes = await sendMetaWhatsAppMessage(cleanPhone, msg, config);
+    // 0. Extract report ID for template URL button
+    let repIdParam = '';
+    if (actualPdfUrl) {
+      const match = actualPdfUrl.match(/[?&]id=([^&]+)/);
+      if (match) repIdParam = decodeURIComponent(match[1]);
+    }
 
-    // 2. If PDF URL provided, also send document attachment directly
+    // 1. Dispatch official Meta Utility Template (Bypasses 24h customer window completely!)
+    let templateRes: { sent: boolean; metaMessageId?: string; error?: string } = { sent: false };
+    if (repIdParam) {
+      const bodyParams = [
+        patientName || 'Patient',
+        title || typeLabel,
+        patientId || 'Dossier SMART-HOSTO',
+        nowFormatted
+      ];
+      templateRes = await sendMetaWhatsAppTemplate(
+        cleanPhone,
+        'smarthosto_document_patient',
+        'fr',
+        bodyParams,
+        repIdParam,
+        config
+      );
+      if (templateRes.sent) {
+        console.log(`✅ [WhatsApp Template] Delivered template smarthosto_document_patient to +${cleanPhone}`);
+      } else {
+        console.warn(`⚠️ [WhatsApp Template] Template dispatch notice:`, templateRes.error);
+      }
+    }
+
+    // 2. Also send direct text summary & document attachment (for conversations with active 24h session)
+    const sendRes = await sendMetaWhatsAppMessage(cleanPhone, msg, config);
     let docRes = null;
     if (actualPdfUrl) {
       const caption = `📄 ${title || typeLabel} — SMART-HOSTO (Certifié)`;
       docRes = await sendMetaWhatsAppDocument(cleanPhone, actualPdfUrl, cleanFilename, caption, config);
     }
+
+    const primaryMetaMessageId = templateRes?.metaMessageId || docRes?.metaMessageId || sendRes?.metaMessageId;
 
     await logWhatsAppMessage({
       direction: 'OUTBOUND',
@@ -4229,13 +4332,14 @@ app.post(['/api/whatsapp/send-document', '/whatsapp/send-document'], async (req,
       phone: cleanPhone,
       message: actualPdfUrl ? `[DOCUMENT PDF ENVOYÉ: ${cleanFilename}]\n${msg}` : msg,
       source: 'DOCUMENT_DISPATCH',
-      metaMessageId: docRes?.metaMessageId || sendRes.metaMessageId
+      metaMessageId: primaryMetaMessageId
     });
 
     return res.json({
       success: true,
-      metaMessageId: docRes?.metaMessageId || sendRes.metaMessageId,
-      documentSent: !!docRes?.sent,
+      metaMessageId: primaryMetaMessageId,
+      templateSent: !!templateRes?.sent,
+      documentSent: !!docRes?.sent || !!templateRes?.sent,
       pdfUrl: actualPdfUrl,
       message: `Document PDF officiel WhatsApp transmis avec succès à +${cleanPhone}`
     });
