@@ -1414,6 +1414,63 @@ async function getWhatsAppConfig(): Promise<WhatsAppAgentConfig> {
   return config;
 }
 
+interface WhatsAppHandover {
+  phone: string;
+  mode: 'AI' | 'HUMAN';
+  assignedStaffName?: string;
+  assignedStaffId?: string;
+  updatedAt: string;
+}
+
+const memoryHandovers = new Map<string, WhatsAppHandover>();
+
+async function getHandoverStatus(phone: string): Promise<WhatsAppHandover | null> {
+  const clean = normalizePhone(phone);
+  if (!clean) return null;
+  const inMem = memoryHandovers.get(clean);
+  if (inMem) return inMem;
+
+  try {
+    const snap = await withFastTimeout(getDoc(doc(db, 'whatsapp_handovers', clean)), 1200);
+    if (snap.exists()) {
+      const data = snap.data() as WhatsAppHandover;
+      memoryHandovers.set(clean, data);
+      return data;
+    }
+  } catch {}
+  return null;
+}
+
+async function setHandoverStatus(
+  phone: string,
+  mode: 'AI' | 'HUMAN',
+  staffName?: string,
+  staffId?: string
+): Promise<WhatsAppHandover> {
+  const clean = normalizePhone(phone);
+  const handover: WhatsAppHandover = {
+    phone: clean,
+    mode,
+    assignedStaffName: staffName || undefined,
+    assignedStaffId: staffId || undefined,
+    updatedAt: new Date().toISOString()
+  };
+  memoryHandovers.set(clean, handover);
+
+  const cleanDoc: any = {
+    phone: clean,
+    mode,
+    updatedAt: handover.updatedAt
+  };
+  if (staffName) cleanDoc.assignedStaffName = staffName;
+  if (staffId) cleanDoc.assignedStaffId = staffId;
+
+  try {
+    setDoc(doc(db, 'whatsapp_handovers', clean), cleanDoc, { merge: true }).catch(() => {});
+  } catch {}
+  return handover;
+}
+
 async function logWhatsAppMessage(entry: {
   direction: 'INBOUND' | 'OUTBOUND';
   staffId?: string;
@@ -1421,7 +1478,7 @@ async function logWhatsAppMessage(entry: {
   staffRole?: string;
   phone: string;
   message: string;
-  source: 'META_WEBHOOK' | 'SIMULATOR' | 'NOTIFICATION';
+  source: 'META_WEBHOOK' | 'SIMULATOR' | 'NOTIFICATION' | 'HUMAN_AGENT' | 'DOCUMENT_DISPATCH';
   aiModel?: string;
   metaMessageId?: string;
 }) {
@@ -3406,6 +3463,15 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
             metaMessageId: msg.id
           });
 
+          // Check if human handover is active for this phone
+          const handover = await getHandoverStatus(fromPhone);
+          if (handover && handover.mode === 'HUMAN') {
+            console.log(
+              `[WHATSAPP HANDOVER] Skipping AI reply for +${fromPhone} because human agent (${handover.assignedStaffName || 'soignant'}) has taken over.`
+            );
+            continue;
+          }
+
           if (!staffDoc && !config.allowUnregisteredPreview) {
             const unlinkedReply =
               `🔒 *Accès Restreint — SMART-HOSTO Staff*\n\n` +
@@ -3853,6 +3919,247 @@ app.get(['/api/whatsapp/logs', '/whatsapp/logs'], async (_req, res) => {
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'LOGS_ERROR', message: err?.message });
+  }
+});
+
+// 7. Get WhatsApp Conversation Threads (for Live Inbox & Handover)
+app.get(['/api/whatsapp/threads', '/whatsapp/threads'], async (_req, res) => {
+  try {
+    let logs: Array<any> = [...memoryWhatsAppLogs];
+    try {
+      const snap = await withFastTimeout(getDocs(query(collection(db, 'whatsapp_logs'), limit(150))), 1500);
+      const dbLogs = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const mergedMap = new Map<string, any>();
+      [...logs, ...dbLogs].forEach(item => mergedMap.set(item.id, item));
+      logs = Array.from(mergedMap.values()).sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+    } catch {}
+
+    const threadsMap = new Map<string, any>();
+    for (const log of logs) {
+      const phone = normalizePhone(log.phone);
+      if (!phone) continue;
+      if (!threadsMap.has(phone)) {
+        const handover = memoryHandovers.get(phone) || { mode: 'AI' };
+        threadsMap.set(phone, {
+          phone,
+          contactName: log.staffName || `+${phone}`,
+          staffRole: log.staffRole || 'PATIENT',
+          lastMessage: log.message,
+          lastDirection: log.direction,
+          lastTimestamp: log.createdAt,
+          messageCount: 1,
+          mode: handover.mode,
+          assignedStaffName: handover.assignedStaffName,
+          unread: log.direction === 'INBOUND'
+        });
+      } else {
+        const th = threadsMap.get(phone);
+        th.messageCount += 1;
+      }
+    }
+
+    const threads = Array.from(threadsMap.values()).sort(
+      (a, b) => new Date(b.lastTimestamp || 0).getTime() - new Date(a.lastTimestamp || 0).getTime()
+    );
+
+    return res.json({ success: true, threads });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'THREADS_ERROR', message: err?.message });
+  }
+});
+
+// 8. Get Messages for a specific Conversation Thread
+app.get(['/api/whatsapp/threads/:phone/messages', '/whatsapp/threads/:phone/messages'], async (req, res) => {
+  try {
+    const rawPhone = Array.isArray(req.params.phone) ? req.params.phone[0] : String(req.params.phone || '');
+    const cleanPhone = normalizePhone(rawPhone);
+    let logs: Array<any> = memoryWhatsAppLogs.filter(l => normalizePhone(l.phone) === cleanPhone);
+
+    try {
+      const snap = await withFastTimeout(
+        getDocs(query(collection(db, 'whatsapp_logs'), where('phone', '==', cleanPhone), limit(100))),
+        1500
+      );
+      const dbLogs = snap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const mergedMap = new Map<string, any>();
+      [...logs, ...dbLogs].forEach(item => mergedMap.set(item.id, item));
+      logs = Array.from(mergedMap.values());
+    } catch {}
+
+    logs.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+    const handover = await getHandoverStatus(cleanPhone);
+
+    return res.json({
+      success: true,
+      phone: cleanPhone,
+      mode: handover?.mode || 'AI',
+      assignedStaffName: handover?.assignedStaffName,
+      messages: logs
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'THREAD_MESSAGES_ERROR', message: err?.message });
+  }
+});
+
+// 9. Switch Thread Handover Mode ('AI' vs 'HUMAN')
+app.post(['/api/whatsapp/threads/:phone/mode', '/whatsapp/threads/:phone/mode'], async (req, res) => {
+  try {
+    const rawPhone = Array.isArray(req.params.phone) ? req.params.phone[0] : String(req.params.phone || '');
+    const cleanPhone = normalizePhone(rawPhone);
+    const { mode, staffName, staffId } = req.body || {};
+    if (mode !== 'AI' && mode !== 'HUMAN') {
+      return res.status(400).json({ error: 'INVALID_MODE', message: 'Mode doit être AI ou HUMAN' });
+    }
+
+    const handover = await setHandoverStatus(cleanPhone, mode, staffName, staffId);
+    return res.json({ success: true, handover });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'SET_MODE_ERROR', message: err?.message });
+  }
+});
+
+// 10. Send Human Staff Reply to a WhatsApp Thread
+app.post(['/api/whatsapp/threads/:phone/reply', '/whatsapp/threads/:phone/reply'], async (req, res) => {
+  try {
+    const rawPhone = Array.isArray(req.params.phone) ? req.params.phone[0] : String(req.params.phone || '');
+    const cleanPhone = normalizePhone(rawPhone);
+    const { message, staffName, staffRole, staffId } = req.body || {};
+
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ error: 'EMPTY_MESSAGE', message: 'Le message ne peut être vide' });
+    }
+
+    const config = await getWhatsAppConfig();
+    const sendRes = await sendMetaWhatsAppMessage(cleanPhone, String(message).trim(), config);
+
+    const logEntry = await logWhatsAppMessage({
+      direction: 'OUTBOUND',
+      staffId: staffId || undefined,
+      staffName: staffName || 'Soignant SMART-HOSTO',
+      staffRole: staffRole || 'STAFF',
+      phone: cleanPhone,
+      message: String(message).trim(),
+      source: 'HUMAN_AGENT',
+      metaMessageId: sendRes.metaMessageId
+    });
+
+    return res.json({
+      success: true,
+      metaMessageId: sendRes.metaMessageId,
+      log: logEntry
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'HUMAN_REPLY_ERROR', message: err?.message });
+  }
+});
+
+// 11. Send Clinical/Administrative Document (Receipt, Prescription, Lab Results, Appointment)
+app.post(['/api/whatsapp/send-document', '/whatsapp/send-document'], async (req, res) => {
+  try {
+    const {
+      phone,
+      documentType, // 'RECEIPT' | 'PRESCRIPTION' | 'LAB_RESULTS' | 'APPOINTMENT' | 'GENERIC'
+      patientName,
+      patientId,
+      title,
+      summaryLines,
+      totalAmount,
+      currency = 'FCFA',
+      detailsText,
+      pdfUrl,
+      pdfFilename,
+      staffName,
+      staffRole
+    } = req.body || {};
+
+    const cleanPhone = normalizePhone(phone);
+    if (!cleanPhone) {
+      return res.status(400).json({ error: 'PHONE_REQUIRED', message: 'Numéro de téléphone WhatsApp requis' });
+    }
+
+    const config = await getWhatsAppConfig();
+    const typeLabel =
+      documentType === 'RECEIPT' ? '🎫 TICKET DE CAISSE / REÇU DE PAIEMENT' :
+      documentType === 'PRESCRIPTION' ? '💊 ORDONNANCE MÉDICALE OFFICIELLE' :
+      documentType === 'LAB_RESULTS' ? '🔬 RÉSULTATS D\'ANALYSES MÉDICALES' :
+      documentType === 'APPOINTMENT' ? '📅 RAPPEL DE RENDEZ-VOUS' :
+      '📄 DOCUMENT HOSPITALIER OFFICIEL';
+
+    const nowFormatted = new Date().toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    let msg = `🏥 *SMART-HOSTO — Service Médical*\n`;
+    msg += `_${typeLabel}_\n\n`;
+
+    if (patientName) {
+      msg += `👤 *Patient(e) :* ${patientName}${patientId ? ` _(Réf: ${patientId})_` : ''}\n`;
+    }
+    msg += `📅 *Date :* ${nowFormatted}\n`;
+
+    if (staffName) {
+      msg += `👨‍⚕️ *Émis par :* ${staffRole ? `${staffRole} ` : ''}${staffName}\n`;
+    }
+
+    msg += `\n`;
+
+    if (title) {
+      msg += `*${title}*\n`;
+    }
+
+    if (Array.isArray(summaryLines) && summaryLines.length > 0) {
+      msg += `\n*Détails :*\n`;
+      for (const line of summaryLines) {
+        msg += `• ${line}\n`;
+      }
+    }
+
+    if (totalAmount !== undefined && totalAmount !== null) {
+      msg += `\n💰 *Total réglé :* *${Number(totalAmount).toLocaleString('fr-FR')} ${currency}*\n`;
+    }
+
+    if (detailsText) {
+      msg += `\n${detailsText}\n`;
+    }
+
+    msg += `\n✅ _Document officiel enregistré dans votre dossier SMART-HOSTO._\n`;
+    msg += `_Pour toute question, contactez le standard de l'établissement._`;
+
+    // 1. Send text message
+    const sendRes = await sendMetaWhatsAppMessage(cleanPhone, msg, config);
+
+    // 2. If PDF URL provided, also send document attachment
+    let docRes = null;
+    if (pdfUrl) {
+      const docFilename = pdfFilename || `${documentType.toLowerCase()}_${Date.now()}.pdf`;
+      docRes = await sendMetaWhatsAppDocument(cleanPhone, pdfUrl, docFilename, title || typeLabel, config);
+    }
+
+    await logWhatsAppMessage({
+      direction: 'OUTBOUND',
+      staffName: staffName || 'Système Médical',
+      staffRole: staffRole || 'STAFF',
+      phone: cleanPhone,
+      message: msg,
+      source: 'DOCUMENT_DISPATCH',
+      metaMessageId: sendRes.metaMessageId
+    });
+
+    return res.json({
+      success: true,
+      metaMessageId: sendRes.metaMessageId,
+      documentSent: !!docRes?.sent,
+      message: `Document WhatsApp transmis avec succès à +${cleanPhone}`
+    });
+  } catch (err: any) {
+    console.error('Error sending document via WhatsApp:', err);
+    return res.status(500).json({ error: 'SEND_DOCUMENT_ERROR', message: err?.message });
   }
 });
 
