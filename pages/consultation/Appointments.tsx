@@ -4,6 +4,7 @@ import { db } from '../../src/firebase';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs } from 'firebase/firestore';
 import { AvatarPlaceholder } from '../../components/common/AvatarPlaceholder';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
+import { getApiUrl } from '../../src/utils/apiConfig';
 
 interface AppointmentsProps {
   user?: {
@@ -57,7 +58,8 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
     setInviteSuccessMsg('');
 
     try {
-      const res = await fetch('/api/whatsapp/send-booking-invitation', {
+      const url = getApiUrl('/api/whatsapp/send-booking-invitation');
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -65,7 +67,16 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
           patientName: invitePatientName.trim()
         })
       });
-      const data = await res.json();
+
+      const contentType = res.headers.get('content-type') || '';
+      let data: any = {};
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(`Le serveur a retourné une réponse inattendue (${res.status})`);
+      }
+
       if (!res.ok || !data.success) {
         throw new Error(data.message || data.error || 'Erreur lors de l’envoi');
       }
