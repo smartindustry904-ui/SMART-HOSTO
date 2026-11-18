@@ -483,6 +483,8 @@ const Reception: React.FC<ReceptionProps> = ({
   const [sortieSearchTerm, setSortieSearchTerm] = useState('');
   const [sortieStatusFilter, setSortieStatusFilter] = useState<'ALL' | 'READY' | 'PENDING_CAISSE' | 'PENDING_MEDICAL'>('ALL');
   const [sortieDepartmentFilter, setSortieDepartmentFilter] = useState<string>('ALL');
+  const [sortieViewMode, setSortieViewMode] = useState<'cards' | 'list'>('cards');
+  const [expandedSortieBreakdowns, setExpandedSortieBreakdowns] = useState<Record<string, boolean>>({});
 
   const getSortieTimestamp = (item: any): number => {
     if (item.createdAt) {
@@ -537,26 +539,87 @@ const Reception: React.FC<ReceptionProps> = ({
   }, [patientsToDischarge]);
 
   const enrichedPatientsToDischarge = useMemo(() => {
-    const mergedMap = new Map<string, any>();
+    const aliasToCanonical = new Map<string, string>();
+    const canonicalToAliases = new Map<string, Set<string>>();
 
-    // 1. Seed with discharges_waiting records
-    patientsToDischarge.forEach(p => {
-      const key = p.patientId || p.id;
-      mergedMap.set(key, { ...p, fromDischargeQueue: true });
+    const registerAliases = (rawIds: string[], fallbackName?: string) => {
+      const clean = rawIds.filter(Boolean).map(x => String(x).trim());
+      if (clean.length === 0) return '';
+      let canon = '';
+      for (const id of clean) {
+        const hit = aliasToCanonical.get(id);
+        if (hit) { canon = hit; break; }
+      }
+      if (!canon) {
+        const patOrDme = clean.find(id => /^(PAT|DME)-/i.test(id));
+        canon = patOrDme ? patOrDme.replace(/^(PAT|DME)-/i, 'CANON-') : clean[0];
+        if (!canon && fallbackName) canon = `NAME-${fallbackName.trim().toLowerCase()}`;
+      }
+      if (!canonicalToAliases.has(canon)) canonicalToAliases.set(canon, new Set());
+      const aliasSet = canonicalToAliases.get(canon)!;
+      clean.forEach(id => {
+        aliasToCanonical.set(id, canon);
+        aliasSet.add(id);
+      });
+      return canon;
+    };
+
+    patients.forEach((pt: any) => {
+      registerAliases([pt.id, pt.patientId, pt.dmeId].filter(Boolean));
     });
 
-    // 2. Merge ALL active Visit Cycles (visites where statut === 'ACTIF') so every patient inside the hospital is visible
+    const resolveKey = (rawIds: string[], fallbackName?: string) => {
+      const clean = rawIds.filter(Boolean).map(x => String(x).trim());
+      for (const id of clean) {
+        const hit = aliasToCanonical.get(id);
+        if (hit) {
+          clean.forEach(a => {
+            aliasToCanonical.set(a, hit);
+            canonicalToAliases.get(hit)?.add(a);
+          });
+          return hit;
+        }
+      }
+      return registerAliases(clean, fallbackName);
+    };
+
+    const mergedMap = new Map<string, any>();
+
+    // 1. Seed with discharges_waiting records (strictly 1 entry per canonical patient)
+    patientsToDischarge.forEach(p => {
+      const key = resolveKey([p.patientId, p.dmeId, p.id].filter(Boolean), p.name || p.patientName);
+      if (!key) return;
+      const docId = p.docId || p.id;
+      if (!mergedMap.has(key)) {
+        mergedMap.set(key, {
+          ...p,
+          fromDischargeQueue: true,
+          mergedDischargeDocIds: docId ? [docId] : [],
+        });
+      } else {
+        const existing = mergedMap.get(key);
+        const docIds = Array.from(new Set([...(existing.mergedDischargeDocIds || []), ...(docId ? [docId] : [])]));
+        mergedMap.set(key, {
+          ...existing,
+          medicalClearance: Boolean(existing.medicalClearance && p.medicalClearance),
+          hospitalizationClosed: Boolean(existing.hospitalizationClosed && p.hospitalizationClosed),
+          mergedDischargeDocIds: docIds,
+        });
+      }
+    });
+
+    // 2. Merge ALL active Visit Cycles (visites where status === 'ACTIF')
     activeVisits.forEach(v => {
-      const key = v.patientId || v.dmeId || v.id;
+      const key = resolveKey([v.patientId, v.dmeId, v.id].filter(Boolean), v.patientName);
       if (!key) return;
       if (!mergedMap.has(key)) {
         const lastDest = Array.isArray(v.destinations) && v.destinations.length > 0
           ? v.destinations[v.destinations.length - 1]
           : null;
         mergedMap.set(key, {
-          id: key,
-          patientId: v.patientId || key,
-          dmeId: v.dmeId || key,
+          id: v.patientId || v.dmeId || v.id,
+          patientId: v.patientId || v.dmeId || v.id,
+          dmeId: v.dmeId || v.patientId || v.id,
           visite_id: v.visite_id || v.id,
           name: v.patientName || 'Patient',
           patientName: v.patientName || 'Patient',
@@ -568,6 +631,7 @@ const Reception: React.FC<ReceptionProps> = ({
           hospitalizationClosed: true,
           financialClearance: true,
           fromActiveVisit: true,
+          mergedDischargeDocIds: [],
         });
       } else {
         const existing = mergedMap.get(key);
@@ -577,8 +641,9 @@ const Reception: React.FC<ReceptionProps> = ({
       }
     });
 
-    return Array.from(mergedMap.values()).map(patient => {
-      const pids = [patient.patientId, patient.id, patient.dmeId].filter(Boolean);
+    return Array.from(mergedMap.entries()).map(([canonKey, patient]) => {
+      const aliasSet = canonicalToAliases.get(canonKey) || new Set<string>();
+      const pids = Array.from(new Set([patient.patientId, patient.id, patient.dmeId, ...Array.from(aliasSet)].filter(Boolean)));
       const unpaidReqs = paymentRequests.filter(pr => {
         const matchesPatient = pids.includes(pr.patientId) || pids.includes((pr as any).patientDme);
         if (!matchesPatient) return false;
@@ -629,16 +694,18 @@ const Reception: React.FC<ReceptionProps> = ({
 
       return {
         ...patient,
+        allPatientIds: pids,
         financialClearance: effectiveFinancialClearance,
         unpaidItems,
         totalUnpaidAmount,
+        total_impaye: totalUnpaidAmount,
         pendingLabCount: pendingLabs.length,
         laboClear: pendingLabs.length === 0,
         pendingPharmaCount: pendingPharmas.length,
         pharmaClear: pendingPharmas.length === 0,
       };
     });
-  }, [patientsToDischarge, activeVisits, paymentRequests, sortieLabRequests, sortiePharmaOrders]);
+  }, [patients, patientsToDischarge, activeVisits, paymentRequests, sortieLabRequests, sortiePharmaOrders]);
 
   // Real-Time Radar computation for ALL patients with an ACTIF visit cycle
   const computeCycleRadarStatus = useMemo(() => {
@@ -2763,7 +2830,12 @@ const Reception: React.FC<ReceptionProps> = ({
 
       // Save database actions in parallel + strictly close Visit Cycle (ACTIF -> CLOTURE)
       const p1 = setDoc(dischargeDocRef, sanitizeData(dischargeData));
-      const p2 = deleteDoc(doc(db, 'discharges_waiting', patient.docId || patient.id)).catch(() => {});
+      const docIdsToDelete: string[] = Array.from(
+        new Set([...((patient as any).mergedDischargeDocIds || []), patient.docId || patient.id].filter(Boolean))
+      );
+      const p2 = Promise.all(
+        docIdsToDelete.map(did => deleteDoc(doc(db, 'discharges_waiting', did)).catch(() => {}))
+      );
       const p3 = setDoc(notifDocRef, sanitizeData(stampTenantData({
         id: notifDocRef.id,
         message: `Sortie administrative validée pour ${patient.name} (${patient.id})`,
@@ -4114,6 +4186,34 @@ const Reception: React.FC<ReceptionProps> = ({
                     <span className="font-mono">{sortieStats.pendingCaisse}</span>
                   </div>
                 )}
+
+                {/* View Mode Toggle: [ ⊞ Cartes | ☰ Liste ] */}
+                <div className={`inline-flex items-center p-1 rounded-xl border ${
+                  theme === 'dark' ? 'bg-slate-800 border-slate-700' : 'bg-slate-100 border-slate-200'
+                }`}>
+                  <button
+                    type="button"
+                    onClick={() => setSortieViewMode('cards')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      sortieViewMode === 'cards'
+                        ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white'
+                        : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+                    }`}
+                  >
+                    ⊞ Cartes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSortieViewMode('list')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer ${
+                      sortieViewMode === 'list'
+                        ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-white'
+                        : 'text-slate-500 hover:text-slate-800 dark:text-slate-400'
+                    }`}
+                  >
+                    ☰ Liste
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -4223,8 +4323,8 @@ const Reception: React.FC<ReceptionProps> = ({
               </div>
             </div>
 
-            {/* 3. Global Active Cycles Clearance Matrix Table */}
-            {filteredAndSortedPatientsToDischarge.length > 0 && (
+            {/* 3. List View: Global Active Cycles Clearance Matrix Table */}
+            {sortieViewMode === 'list' && filteredAndSortedPatientsToDischarge.length > 0 && (
               <div className={`rounded-2xl border overflow-hidden shadow-xs mt-3 ${
                 theme === 'dark' ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'
               }`}>
@@ -4346,7 +4446,8 @@ const Reception: React.FC<ReceptionProps> = ({
               </div>
             )}
 
-            {/* 4. Patients to Discharge Cards Grid */}
+            {/* 4. Cards View: Patients to Discharge Cards Grid */}
+            {sortieViewMode === 'cards' && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 pt-3">
               {filteredAndSortedPatientsToDischarge.map((patient, pIdx) => {
                 const isReady = Boolean(patient.medicalClearance && patient.hospitalizationClosed && patient.financialClearance);
@@ -4513,14 +4614,32 @@ const Reception: React.FC<ReceptionProps> = ({
                             )}
                           </div>
                           {patient.unpaidItems && patient.unpaidItems.length > 0 ? (
-                            <ul className="space-y-0.5 pl-4 list-disc text-[10px] font-semibold">
-                              {patient.unpaidItems.map((item: any, idx: number) => (
-                                <li key={item.id || idx} className="flex justify-between gap-2">
-                                  <span className="truncate">{item.module} : {item.label}</span>
-                                  <span className="font-mono shrink-0">{(item.amount || 0).toLocaleString()} F</span>
-                                </li>
-                              ))}
-                            </ul>
+                            <div className="space-y-1">
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedSortieBreakdowns(prev => ({
+                                    ...prev,
+                                    [patient.id]: !prev[patient.id],
+                                  }))
+                                }
+                                className="text-[10px] font-black text-rose-800 dark:text-rose-200 underline cursor-pointer"
+                              >
+                                {expandedSortieBreakdowns[patient.id]
+                                  ? `Masquer le détail (${patient.unpaidItems.length} lignes)`
+                                  : `Voir le détail (${patient.unpaidItems.length} ligne${patient.unpaidItems.length > 1 ? 's' : ''})`}
+                              </button>
+                              {expandedSortieBreakdowns[patient.id] && (
+                                <ul className="space-y-0.5 pl-4 list-disc text-[10px] font-semibold">
+                                  {patient.unpaidItems.map((item: any, idx: number) => (
+                                    <li key={item.id || idx} className="flex justify-between gap-2">
+                                      <span className="truncate">{item.module} : {item.label}</span>
+                                      <span className="font-mono shrink-0">{(item.amount || 0).toLocaleString()} F</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
                           ) : (
                             <p className="font-medium">Paiement en attente à la Caisse avant autorisation finale.</p>
                           )}
@@ -4634,6 +4753,7 @@ const Reception: React.FC<ReceptionProps> = ({
                 </div>
               )}
             </div>
+            )}
           </div>
         </div>
       )}

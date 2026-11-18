@@ -115,6 +115,8 @@ const Cashier: React.FC<CashierProps> = ({
 
   // New Search & Filter states
   const [pendingSearchQuery, setPendingSearchQuery] = useState('');
+  const [expandedPatientKeys, setExpandedPatientKeys] = useState<Record<string, boolean>>({});
+  const [selectedLineIdsByPatient, setSelectedLineIdsByPatient] = useState<Record<string, Record<string, boolean>>>({});
   const [dailySearchQuery, setDailySearchQuery] = useState('');
   const [dailyFilterMethod, setDailyFilterMethod] = useState<string>('ALL');
 
@@ -543,6 +545,122 @@ const Cashier: React.FC<CashierProps> = ({
     return filtered.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   }, [paymentRequests, pendingSearchQuery]);
 
+  // Patient-Level Billing Aggregator (groups all EN_ATTENTE_CAISSE / PENDING requests by canonical patient)
+  const groupedPendingPatients = useMemo(() => {
+    const groups = new Map<string, {
+      canonicalKey: string;
+      patientId: string;
+      allPatientIds: string[];
+      patientObj: Patient | null;
+      patientName: string;
+      isCreditBlocked: boolean;
+      requests: PaymentRequest[];
+      modules: string[];
+      totalGlobal: number;
+      latestCreatedAt: string;
+    }>();
+
+    const resolveCanonical = (pr: PaymentRequest) => {
+      const rawIds = [pr.patientId, (pr as any).patientDme, (pr as any).dmeId].filter(Boolean).map(String);
+      for (const id of rawIds) {
+        const pt = patientsMap.get(id);
+        if (pt) {
+          const pPatId = (pt as any).patientId || pt.id;
+          return {
+            key: String(pPatId).replace(/^(PAT|DME)-/i, 'CANON-'),
+            pt,
+            aliases: Array.from(new Set([pt.id, pPatId, (pt as any).dmeId, ...rawIds].filter(Boolean))) as string[],
+          };
+        }
+      }
+      const firstId = rawIds[0] || pr.patientName || pr.id;
+      const key = /^(PAT|DME)-/i.test(firstId)
+        ? firstId.replace(/^(PAT|DME)-/i, 'CANON-')
+        : firstId;
+      return { key, pt: null, aliases: rawIds };
+    };
+
+    pendingRequestsSorted.forEach((pr) => {
+      const { key, pt, aliases } = resolveCanonical(pr);
+      const rem = Math.max(0, Number((pr as any).remainingAmount ?? ((pr.totalAmount || 0) - (pr.amountPaid || 0))));
+      const modLabel =
+        pr.type === 'LABORATOIRE' ? 'Laboratoire'
+        : pr.type === 'CONSULTATION' ? 'Consultation'
+        : pr.type === 'HOSPITALISATION' ? 'Hospitalisation'
+        : pr.type === 'PHARMACIE' ? 'Pharmacie'
+        : pr.type === 'SOIN' ? 'Soins'
+        : (pr.sourceModule || pr.requestingService || pr.type || 'Prestation');
+
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          canonicalKey: key,
+          patientId: (pt as any)?.patientId || pr.patientId || aliases[0] || '',
+          allPatientIds: aliases,
+          patientObj: pt,
+          patientName: formatPatientFullName(pt, pr.patientName),
+          isCreditBlocked: pt ? (pt.creditBlocked === true || pt.allowCredit === false) : false,
+          requests: [pr],
+          modules: [modLabel],
+          totalGlobal: rem,
+          latestCreatedAt: pr.createdAt || '',
+        });
+      } else {
+        existing.requests.push(pr);
+        existing.totalGlobal += rem;
+        existing.allPatientIds = Array.from(new Set([...existing.allPatientIds, ...aliases]));
+        if (!existing.modules.includes(modLabel)) existing.modules.push(modLabel);
+        if (String(pr.createdAt || '') > String(existing.latestCreatedAt || '')) {
+          existing.latestCreatedAt = pr.createdAt || existing.latestCreatedAt;
+        }
+      }
+    });
+
+    return Array.from(groups.values()).sort(
+      (a, b) => new Date(b.latestCreatedAt || 0).getTime() - new Date(a.latestCreatedAt || 0).getTime()
+    );
+  }, [pendingRequestsSorted, patientsMap]);
+
+  const handleOpenGroupCheckout = (requestsToPay: PaymentRequest[], group: { patientId: string; patientName: string; allPatientIds: string[] }) => {
+    if (requestsToPay.length === 0) return;
+    if (requestsToPay.length === 1) {
+      handleOpenPayment(requestsToPay[0]);
+      return;
+    }
+    const totalRemaining = requestsToPay.reduce(
+      (sum, r) => sum + Math.max(0, Number((r as any).remainingAmount ?? ((r.totalAmount || 0) - (r.amountPaid || 0)))),
+      0
+    );
+    const flattenedItems = requestsToPay.flatMap((r) =>
+      (r.items && r.items.length > 0)
+        ? r.items.map((it: any, idx: number) => ({
+            ...it,
+            id: it.id || `${r.id}-${idx}`,
+            name: `${it.name || r.type}`,
+          }))
+        : [{ id: r.id, name: r.type || 'Prestation', quantity: 1, unitPrice: r.totalAmount || 0, totalPrice: r.totalAmount || 0 }]
+    );
+    const aggregatedReq: any = {
+      id: requestsToPay[0].id,
+      patientId: group.patientId,
+      patientName: group.patientName,
+      allPatientIds: group.allPatientIds,
+      visite_id: requestsToPay.find(r => r.visite_id)?.visite_id || '',
+      type: 'FACTURE_GROUPEE',
+      sourceModule: 'Caisse Unifiée',
+      requestingService: 'Multi-services',
+      items: flattenedItems,
+      totalAmount: totalRemaining,
+      amountPaid: 0,
+      remainingAmount: totalRemaining,
+      status: 'PENDING',
+      createdAt: requestsToPay[0].createdAt || new Date().toISOString(),
+      isAggregatedGroup: true,
+      aggregatedRequests: requestsToPay,
+    };
+    handleOpenPayment(aggregatedReq);
+  };
+
   const dailyTransactionsFiltered = useMemo(() => {
     const todayStr = new Date().toISOString().split('T')[0];
     const txMap = new Map<string, CashierTransaction>();
@@ -728,13 +846,36 @@ const Cashier: React.FC<CashierProps> = ({
 
       const batch = writeBatch(db);
 
-      // 1. Update PaymentRequest in Firebase
-      const prRef = doc(db, 'payment_requests', selectedRequest.id);
-      batch.update(prRef, sanitizeData({
-        amountPaid: newPaid,
-        status: newStatus,
-        updatedAt: new Date().toISOString()
-      }));
+      // 1. Update PaymentRequest(s) in Firebase (supports single or aggregated patient checkout)
+      const aggReqs: PaymentRequest[] | undefined = (selectedRequest as any).aggregatedRequests;
+      const aggUpdatesMap = new Map<string, { amountPaid: number; remainingAmount: number; status: PaymentStatus }>();
+      if (aggReqs && aggReqs.length > 0) {
+        let poolToApply = Math.max(0, newPaid);
+        for (const sub of aggReqs) {
+          const subTotal = Number(sub.totalAmount || 0);
+          const subPrevPaid = Number(sub.amountPaid || 0);
+          const subRem = Math.max(0, subTotal - subPrevPaid);
+          const applied = Math.min(subRem, poolToApply);
+          poolToApply -= applied;
+          const subNewPaid = subPrevPaid + applied;
+          const subNewRem = Math.max(0, subTotal - subNewPaid);
+          const subStatus: PaymentStatus = subNewRem <= 0 ? 'PAID' : subNewPaid > 0 ? 'PARTIAL' : 'PENDING';
+          aggUpdatesMap.set(sub.id, { amountPaid: subNewPaid, remainingAmount: subNewRem, status: subStatus });
+          batch.update(doc(db, 'payment_requests', sub.id), sanitizeData({
+            amountPaid: subNewPaid,
+            remainingAmount: subNewRem,
+            status: subStatus,
+            updatedAt: new Date().toISOString()
+          }));
+        }
+      } else {
+        const prRef = doc(db, 'payment_requests', selectedRequest.id);
+        batch.update(prRef, sanitizeData({
+          amountPaid: newPaid,
+          status: newStatus,
+          updatedAt: new Date().toISOString()
+        }));
+      }
 
       // 2. Save Transaction in Firebase
       const txRef = doc(db, 'cashier_transactions', newTransaction.id);
@@ -803,13 +944,22 @@ const Cashier: React.FC<CashierProps> = ({
       }
 
       // Optimistically update local states immediately (0ms delay)
-      setPaymentRequests(prev =>
-        prev.map(pr =>
-          pr.id === selectedRequest.id
-            ? { ...pr, amountPaid: newPaid, status: newStatus }
-            : pr
-        )
-      );
+      if (aggUpdatesMap.size > 0) {
+        setPaymentRequests(prev =>
+          prev.map(pr => {
+            const upd = aggUpdatesMap.get(pr.id);
+            return upd ? { ...pr, ...upd } : pr;
+          })
+        );
+      } else {
+        setPaymentRequests(prev =>
+          prev.map(pr =>
+            pr.id === selectedRequest.id
+              ? { ...pr, amountPaid: newPaid, status: newStatus }
+              : pr
+          )
+        );
+      }
       setCashierTransactions(prev => [newTransaction, ...prev.filter(t => t.id !== newTransaction.id)]);
 
       if (surplusAction === 'AVANCE' && surplus > 0) {
@@ -865,11 +1015,15 @@ const Cashier: React.FC<CashierProps> = ({
 
       // 6. Clear financial status across all modules (Discharges, Queues, Lab Requests, Prescriptions, Patients & Duplicate Invoices)
       if (newStatus === 'PAID' || newPaid > 0 || resteAPayer === 0) {
-        const targetPatientIds = [
+        const targetPatientIds = Array.from(new Set([
           selectedRequest.patientId,
           (selectedRequest as any).dmeId,
-          (selectedRequest as any).patientDocId
-        ].filter(Boolean);
+          (selectedRequest as any).patientDocId,
+          ...((selectedRequest as any).allPatientIds || []),
+          selectedPatientObj?.id,
+          (selectedPatientObj as any)?.patientId,
+          (selectedPatientObj as any)?.dmeId,
+        ].filter(Boolean)));
 
         (async () => {
           try {
@@ -1522,20 +1676,17 @@ const Cashier: React.FC<CashierProps> = ({
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="bg-slate-50 text-[11px] uppercase tracking-[0.15em] text-slate-500 font-black border-b border-slate-200/60">
-                  <th className="px-5 py-4">Date & Heure</th>
-                  <th className="px-5 py-4">Réf. Demande</th>
                   <th className="px-5 py-4">Patient</th>
-                  <th className="px-5 py-4">Service & Nature</th>
-                  <th className="px-5 py-4">Détail des Actes / Examens</th>
-                  <th className="px-5 py-4 text-right">Total à Payer</th>
-                  <th className="px-5 py-4 text-right">Reste</th>
-                  <th className="px-5 py-4 text-center">Action</th>
+                  <th className="px-5 py-4">Services concernés</th>
+                  <th className="px-5 py-4">Factures en attente</th>
+                  <th className="px-5 py-4 text-right">Total Global à Payer</th>
+                  <th className="px-5 py-4 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {pendingRequestsSorted.length === 0 ? (
+                {groupedPendingPatients.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="p-20 text-center">
+                    <td colSpan={5} className="p-20 text-center">
                       <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
                         <Check size={32} className="text-emerald-500" />
                       </div>
@@ -1544,130 +1695,148 @@ const Cashier: React.FC<CashierProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  pendingRequestsSorted.map((pr) => {
-                    const remaining = (pr.totalAmount || 0) - (pr.amountPaid || 0);
-                    const patientObj = pr.patientId ? patientsMap.get(pr.patientId) : null;
-                    const resolvedFullName = formatPatientFullName(patientObj, pr.patientName);
-                    const prIsBlocked = patientObj ? (patientObj.creditBlocked === true || patientObj.allowCredit === false) : false;
-
-                    const isLab = pr.type === 'LABORATOIRE' || 
-                      (pr.sourceModule || '').toLowerCase().includes('lab') || 
-                      (pr.requestingService || '').toLowerCase().includes('lab') || 
-                      (pr.items || []).some((it: any) => (it.name || '').toLowerCase().includes('examen') || (it.name || '').toLowerCase().includes('analyse') || (it.name || '').toLowerCase().includes('lab'));
-                    
-                    const isConsult = pr.type === 'CONSULTATION' || 
-                      (pr.sourceModule || '').toLowerCase().includes('consult') || 
-                      (pr.requestingService || '').toLowerCase().includes('consult');
-
-                    const isSoin = (pr.sourceModule || '').toLowerCase().includes('soin') || 
-                      (pr.requestingService || '').toLowerCase().includes('soin') || 
-                      (pr.items || []).some((it: any) => (it.name || '').toLowerCase().includes('soin') || (it.name || '').toLowerCase().includes('pansement') || (it.name || '').toLowerCase().includes('injection'));
+                  groupedPendingPatients.map((group) => {
+                    const isExpanded = Boolean(expandedPatientKeys[group.canonicalKey]);
+                    const selectedMap = selectedLineIdsByPatient[group.canonicalKey] || {};
+                    const selectedReqs = group.requests.filter(r => selectedMap[r.id]);
+                    const selectedSum = selectedReqs.reduce(
+                      (s, r) => s + Math.max(0, Number((r as any).remainingAmount ?? ((r.totalAmount || 0) - (r.amountPaid || 0)))),
+                      0
+                    );
 
                     return (
-                      <tr key={pr.id} className="hover:bg-slate-50/80 transition-colors group">
-                        <td className="px-5 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <Calendar size={14} className="text-blue-600 shrink-0" />
-                            <span className="font-mono text-xs font-bold text-slate-800 bg-blue-50/80 border border-blue-100 px-2.5 py-1 rounded-lg">
-                              {formatDateTime(pr.createdAt)}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-5 py-4 whitespace-nowrap">
-                          <span className="font-mono text-xs font-bold text-slate-600 px-2 py-1 bg-slate-100 rounded-md uppercase">
-                            {pr.id}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-black text-sm text-slate-900">{resolvedFullName}</span>
-                            {prIsBlocked && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
-                                <Lock size={10} /> Crédit Bloqué
-                              </span>
-                            )}
-                          </div>
-                          {pr.patientId && (
-                            <div className="text-[10px] font-medium text-slate-400 font-mono">ID: {pr.patientId}</div>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 whitespace-nowrap">
-                          {isLab ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-xs font-bold uppercase tracking-wider">
-                              <TestTube size={13} className="text-purple-600" />
-                              Laboratoire
-                            </span>
-                          ) : isConsult ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold uppercase tracking-wider">
-                              <Stethoscope size={13} className="text-blue-600" />
-                              Consultation
-                            </span>
-                          ) : isSoin ? (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold uppercase tracking-wider">
-                              <Syringe size={13} className="text-amber-600" />
-                              Soins Infirmiers
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold uppercase tracking-wider">
-                              <Activity size={13} />
-                              {pr.sourceModule || pr.requestingService || 'Prestation'}
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 max-w-xs">
-                          {pr.items && pr.items.length > 0 ? (
-                            <div className="flex flex-col gap-1">
-                              <div className="flex flex-wrap gap-1.5">
-                                {pr.items.map((it: any, idx: number) => (
-                                  <span
-                                    key={idx}
-                                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold ${
-                                      isLab 
-                                        ? 'bg-purple-50 text-purple-900 border border-purple-200/80' 
-                                        : 'bg-slate-100 text-slate-800 border border-slate-200/80'
-                                    }`}
-                                  >
-                                    {isLab && <TestTube size={10} className="text-purple-600 shrink-0" />}
-                                    {it.name || 'Acte'}
-                                    {it.quantity > 1 && <span className="text-slate-500 font-mono text-[10px]">×{it.quantity}</span>}
-                                  </span>
-                                ))}
-                              </div>
-                              {(pr.practitionerName || pr.requestedBy) && (
-                                <span className="text-[10px] text-slate-400 font-medium">
-                                  Prescrit par: <span className="font-semibold text-slate-600">{pr.practitionerName || pr.requestedBy}</span>
+                      <React.Fragment key={group.canonicalKey}>
+                        <tr
+                          onClick={() =>
+                            setExpandedPatientKeys(prev => ({
+                              ...prev,
+                              [group.canonicalKey]: !prev[group.canonicalKey],
+                            }))
+                          }
+                          className="hover:bg-slate-50/90 transition-colors cursor-pointer group"
+                        >
+                          <td className="px-5 py-4">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-black text-sm text-slate-900">{group.patientName}</span>
+                              {group.isCreditBlocked && (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                                  <Lock size={10} /> Crédit Bloqué
                                 </span>
                               )}
                             </div>
-                          ) : (
-                            <span className="text-xs text-slate-400 italic">Détails non spécifiés</span>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 text-right whitespace-nowrap">
-                          <span className="font-black text-sm text-slate-900">
-                            {(pr.totalAmount || 0).toLocaleString()} {establishment.currency}
-                          </span>
-                        </td>
-                        <td className="px-5 py-4 text-right whitespace-nowrap">
-                          {remaining > 0 ? (
-                            <span className="font-black text-sm text-rose-600">
-                              {remaining.toLocaleString()} {establishment.currency}
+                            <div className="text-[10px] font-medium text-slate-400 font-mono">
+                              ID: {group.patientId} • {formatDateTime(group.latestCreatedAt)}
+                            </div>
+                          </td>
+                          <td className="px-5 py-4">
+                            <div className="flex flex-wrap gap-1.5">
+                              {group.modules.map((mod) => (
+                                <span
+                                  key={mod}
+                                  className="inline-flex items-center px-2.5 py-0.5 rounded-lg text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200"
+                                >
+                                  {mod}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-5 py-4">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 text-xs font-bold">
+                              {group.requests.length} facture{group.requests.length > 1 ? 's' : ''}
+                              <span className="text-[10px] text-blue-600 underline ml-1">
+                                {isExpanded ? 'Masquer' : 'Voir détail'}
+                              </span>
                             </span>
-                          ) : (
-                            <span className="text-xs font-bold text-emerald-600">Soldé</span>
-                          )}
-                        </td>
-                        <td className="px-5 py-4 text-center whitespace-nowrap">
-                          <button 
-                            onClick={() => handleOpenPayment(pr)}
-                            disabled={isProcessing}
-                            className="bg-slate-900 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-emerald-600 hover:shadow-md hover:shadow-emerald-600/20 transition-all inline-flex items-center gap-2 text-xs uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            <CreditCard size={15} />
-                            Encaisser
-                          </button>
-                        </td>
-                      </tr>
+                          </td>
+                          <td className="px-5 py-4 text-right whitespace-nowrap">
+                            <span className="font-black text-base text-rose-600 font-mono">
+                              {group.totalGlobal.toLocaleString()} {establishment.currency}
+                            </span>
+                          </td>
+                          <td className="px-5 py-4 text-center whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenGroupCheckout(group.requests, group)}
+                                disabled={isProcessing}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider shadow-sm transition-all inline-flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                              >
+                                <CreditCard size={14} />
+                                Tout Encaisser
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+
+                        {isExpanded && (
+                          <tr className="bg-slate-50/70">
+                            <td colSpan={5} className="px-6 py-4">
+                              <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3 shadow-2xs">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                                  <span className="text-xs font-black uppercase tracking-wider text-slate-700">
+                                    Détail unifié des prestations impayées ({group.requests.length})
+                                  </span>
+                                  {selectedReqs.length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenGroupCheckout(selectedReqs, group)}
+                                      disabled={isProcessing}
+                                      className="px-3.5 py-1.5 bg-slate-900 hover:bg-emerald-600 text-white rounded-xl text-[11px] font-black uppercase tracking-wider transition-all cursor-pointer flex items-center gap-1.5"
+                                    >
+                                      <CheckCircle2 size={13} />
+                                      Encaisser la sélection ({selectedSum.toLocaleString()} {establishment.currency})
+                                    </button>
+                                  )}
+                                </div>
+
+                                <div className="divide-y divide-slate-100">
+                                  {group.requests.map((pr) => {
+                                    const rem = Math.max(0, Number((pr as any).remainingAmount ?? ((pr.totalAmount || 0) - (pr.amountPaid || 0))));
+                                    const isChecked = Boolean(selectedMap[pr.id]);
+                                    const itemsLabel = (pr.items || []).map((i: any) => `${i.name}${i.quantity > 1 ? ` ×${i.quantity}` : ''}`).join(', ') || pr.type;
+                                    return (
+                                      <div key={pr.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                                        <label className="flex items-center gap-2.5 cursor-pointer min-w-0 flex-1">
+                                          <input
+                                            type="checkbox"
+                                            checked={isChecked}
+                                            onChange={() =>
+                                              setSelectedLineIdsByPatient(prev => ({
+                                                ...prev,
+                                                [group.canonicalKey]: {
+                                                  ...(prev[group.canonicalKey] || {}),
+                                                  [pr.id]: !isChecked,
+                                                },
+                                              }))
+                                            }
+                                            className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                          />
+                                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 shrink-0">
+                                            {pr.type || pr.sourceModule || 'CAISSE'}
+                                          </span>
+                                          <span className="font-bold text-slate-800 truncate">{itemsLabel}</span>
+                                        </label>
+                                        <div className="flex items-center gap-3 shrink-0">
+                                          <span className="font-mono font-black text-slate-900">
+                                            {rem.toLocaleString()} {establishment.currency}
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenPayment(pr)}
+                                            className="px-3 py-1 bg-slate-100 hover:bg-slate-900 hover:text-white text-slate-700 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer"
+                                          >
+                                            Encaisser
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })
                 )}
