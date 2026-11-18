@@ -343,14 +343,19 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
     });
 
     nursingActs.filter(belongsToCurrentStay).forEach((na: any) => {
-      const ms = toMs(na.completedAt || na.executedAt || na.scheduledAt || na.createdAt);
-      const { dateStr, timeStr } = formatDateTimeParts(ms, na.scheduledDate, na.scheduledTime);
       const isCancelled = na.isCancelled === true || String(na.status || '').toUpperCase().includes('ANNUL');
       const isDone = !isCancelled && (na.status === 'FAIT' || na.status === 'Fait' || na.clinicalStatus === 'Fait');
       const isPrescribed = !isCancelled && !isDone && (na.status === 'Prescrit' || na.clinicalStatus === 'Prescrit');
+      // Timestamp Priority: anchor executed acts strictly to Execution Time (heure_execution / completedAt / executedAt / date_validation)
+      const ms = isDone
+        ? toMs(na.completedAt || na.executedAt || na.date_validation || na.updatedAt || na.scheduledAt || na.createdAt)
+        : toMs(na.scheduledAt || na.createdAt);
+      const { dateStr, timeStr } = formatDateTimeParts(ms, na.scheduledDate, na.scheduledTime);
       const schedTime = na.scheduledTime || na.scheduledTimeSnapshot || '';
       const execTime = na.heure_execution || na.executionTime || timeStr;
       const earlyMotif = na.earlyExecutionReason || na.motifAnticipation || '';
+      const actLabel = na.actName || na.actType || na.title || 'Soin prescrit';
+      const nurseName = na.executedBy || na.completedBy || 'Infirmier(ère)';
 
       let subtitleText: string | undefined = na.timing || (schedTime ? `📅 Prévu pour : ${schedTime}` : undefined);
       if (isDone) {
@@ -372,15 +377,19 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
       items.push({
         id: `na-${na.id}`,
         category: 'SOINS',
-        title: na.actName || na.actType || na.title || 'Soin prescrit',
+        title: isDone
+          ? `FAIT : ${actLabel} (Administré par ${nurseName})`
+          : isCancelled
+          ? `Annulé : ${actLabel}`
+          : `Prescrit : ${actLabel} (En attente d'exécution)`,
         subtitle: subtitleText,
         body: bodyText,
         actor: isDone
-          ? na.executedBy || na.completedBy || 'Infirmier(ère)'
+          ? nurseName
           : `Prescrit par ${na.prescribedBy || 'Médecin'}`,
         timestampMs: ms,
         dateStr,
-        timeStr,
+        timeStr: isDone ? execTime : timeStr,
         clinicalBadge: {
           label: isCancelled ? 'Statut : Annulé' : isDone ? 'Statut : Fait' : isPrescribed ? 'Statut : Prescrit' : 'Statut : En attente de soin',
           tone: isCancelled ? 'rose' : isDone ? 'emerald' : isPrescribed ? 'slate' : 'amber',
@@ -395,7 +404,7 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
 
     // B. Laboratoire
     labRequests.filter(belongsToCurrentStay).forEach((lr: any) => {
-      const ms = toMs(lr.validatedAt || lr.updatedAt || lr.createdAt);
+      const ms = toMs(lr.date_validation || lr.validatedAt || lr.publishedAt || lr.updatedAt || lr.createdAt);
       const { dateStr, timeStr } = formatDateTimeParts(ms, lr.date);
       const examNames = (lr.exams || [])
         .map((e: any) => (typeof e === 'string' ? e : e.name))
@@ -460,7 +469,7 @@ export const InpatientTrackingDashboard: React.FC<InpatientTrackingDashboardProp
     const matchedOrderIds = new Set<string>();
     pharmacyOrders.filter(belongsToCurrentStay).forEach((po: any) => {
       matchedOrderIds.add(po.id);
-      const ms = toMs(po.administeredAt || po.dispensedAt || po.updatedAt || po.createdAt);
+      const ms = toMs(po.date_execution || po.administeredAt || po.date_validation || po.dispensedAt || po.updatedAt || po.createdAt);
       const { dateStr, timeStr } = formatDateTimeParts(ms);
       const meds = (po.items || po.medications || [])
         .map((m: any) => `${m.name || m.nom} (x${m.quantity || m.qty || 1}${m.dosage ? ` • ${m.dosage}` : ''})`)

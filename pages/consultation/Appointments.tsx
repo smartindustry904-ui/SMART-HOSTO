@@ -26,6 +26,7 @@ interface AppointmentsProps {
 const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initialPatient, moduleFilter, onStartConsultation }) => {
   const activeTenantId = getActiveTenantId(user as any, establishment);
   const [appointments, setAppointments] = useState<any[]>([]);
+  const [liveServiceQueues, setLiveServiceQueues] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
@@ -146,7 +147,18 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
     return false;
   };
 
-  // Subscribe to real-time appointments collection in Firestore (strict active session isolation)
+  // Subscribe to real-time appointments & service_queues in Firestore
+  useEffect(() => {
+    const unsubQueues = onSnapshot(collection(db, 'service_queues'), (snap) => {
+      setLiveServiceQueues(
+        snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter(q => belongsToTenant(q, activeTenantId))
+      );
+    }, () => {});
+    return () => unsubQueues();
+  }, [activeTenantId]);
+
   useEffect(() => {
     const q = query(collection(db, 'appointments'), orderBy('date', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -435,21 +447,42 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
     }
   };
 
-  // Only show appointments validated through Accueil check-in (and matching moduleFilter if provided)
-  const isValidatedByAccueil = (rdv: any) =>
-    rdv.status === 'CHECKED_IN' ||
-    rdv.status === 'IN_PROGRESS' ||
-    rdv.status === 'COMPLETED' ||
-    Boolean(rdv.checkedInAt);
-
+  // Global Rendez-vous Visibility: fetch ALL scheduled appointments (validated & unvalidated)
   const validatedAppointments = appointments.filter(rdv => {
-    if (!isValidatedByAccueil(rdv)) return false;
     if (moduleFilter === 'MATERNITE') {
       const txt = `${rdv.reason || ''} ${rdv.motif || ''} ${rdv.service || ''}`.toLowerCase();
       return txt.includes('cpn') || txt.includes('prénatale') || txt.includes('maternit') || txt.includes('accouchement') || txt.includes('obstétri') || rdv.serviceId === 'SRV-MATERNITE';
     }
     return true;
   });
+
+  // Determine real-time presence stage for an appointment:
+  // 'EXPECTED' (⏳ À venir) | 'ARRIVED' (✅ Présent) | 'IN_WAITING_ROOM' (🩺 En salle d'attente)
+  const resolveRdvPresenceStage = (rdv: any): 'EXPECTED' | 'ARRIVED' | 'IN_WAITING_ROOM' | 'COMPLETED' | 'OTHER' => {
+    if (rdv.status === 'COMPLETED') return 'COMPLETED';
+    if (rdv.status === 'CANCELLED' || rdv.status === 'ABSENT' || rdv.status === 'POSTPONED') return 'OTHER';
+    const isCheckedIn = rdv.status === 'CHECKED_IN' || rdv.status === 'IN_PROGRESS' || Boolean(rdv.checkedInAt);
+    if (!isCheckedIn && rdv.status === 'PENDING') return 'EXPECTED';
+
+    const pids = [rdv.patientId, rdv.dmeId].filter(Boolean);
+    const matchingQueue = liveServiceQueues.find(q => {
+      const matchesPt = pids.includes(q.patientId) || pids.includes(q.dmeId);
+      if (!matchesPt) return false;
+      const st = String(q.status || '').toLowerCase();
+      return !['completed', 'done', 'discharged', 'reoriented', 'cancelled', 'cloture', 'consulted'].includes(st);
+    });
+
+    if (rdv.status === 'IN_PROGRESS') return 'IN_WAITING_ROOM';
+    if (matchingQueue) {
+      const qSt = String(matchingQueue.status || '').toLowerCase();
+      const qSrv = String(matchingQueue.service || matchingQueue.queueName || '').toLowerCase();
+      const isTriageOrUnpaid = qSt === 'waiting_triage' || qSt === 'triage' || qSrv.includes('soins') || qSrv.includes('triage');
+      if (!isTriageOrUnpaid && (qSt === 'waiting' || qSt === 'ready' || qSt === 'in_consultation')) {
+        return 'IN_WAITING_ROOM';
+      }
+    }
+    return 'ARRIVED';
+  };
 
   // Filter & Search appointments (including Day / Week / Month planning filter)
   const filteredAppointments = validatedAppointments.filter(rdv => {
@@ -475,7 +508,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
     if (filterStatus === 'ALL') {
       matchesStatus = rdv.status !== 'CANCELLED' && rdv.status !== 'ABSENT';
     } else if (filterStatus === 'CHECKED_IN' || filterStatus === 'PENDING') {
-      matchesStatus = rdv.status === 'CHECKED_IN' || rdv.status === 'IN_PROGRESS';
+      matchesStatus = rdv.status === 'PENDING' || rdv.status === 'CHECKED_IN' || rdv.status === 'IN_PROGRESS';
     } else if (filterStatus === 'COMPLETED') {
       matchesStatus = rdv.status === 'COMPLETED';
     } else if (filterStatus === 'HISTORY') {
@@ -487,9 +520,9 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
     return matchesSearch && matchesStatus;
   });
 
-  // Calculate live statistics (Accueil-validated only)
+  // Calculate live statistics (all scheduled appointments for planning visibility)
   const totalCount = validatedAppointments.length;
-  const upcomingCount = validatedAppointments.filter(a => a.status === 'CHECKED_IN' || a.status === 'IN_PROGRESS').length;
+  const upcomingCount = validatedAppointments.filter(a => a.status === 'PENDING' || a.status === 'CHECKED_IN' || a.status === 'IN_PROGRESS').length;
   const completedCount = validatedAppointments.filter(a => a.status === 'COMPLETED').length;
 
   return (
@@ -651,21 +684,41 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between lg:justify-end w-full lg:w-auto gap-3 pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-100">
-                      {/* Status & Past/Upcoming Badge */}
+                      {/* Status & Real-Time Presence Badges */}
                       <div className="flex items-center gap-2">
-                        {rdv.status === 'PENDING' && isPast ? (
-                          <span className="px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1 shadow-sm">
-                            <AlertTriangle size={12} className="text-rose-600" /> Échu / Manqué
-                          </span>
-                        ) : rdv.status === 'PENDING' && !isPast ? (
-                          <span className="px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-blue-100 text-blue-800 border border-blue-300 flex items-center gap-1 shadow-sm">
-                            <Clock size={12} /> À venir
-                          </span>
-                        ) : (
-                          <div className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border shrink-0 ${getStatusBadge(rdv)}`}>
-                            {rdv.status === 'CHECKED_IN' ? 'Validé Accueil' : rdv.status === 'IN_PROGRESS' ? 'En cours' : rdv.status === 'COMPLETED' ? 'Terminé' : rdv.status === 'ABSENT' ? 'Absent' : rdv.status === 'CANCELLED' ? 'Annulé' : rdv.status === 'POSTPONED' ? 'Reporté' : rdv.status}
-                          </div>
-                        )}
+                        {(() => {
+                          const stage = resolveRdvPresenceStage(rdv);
+                          if (stage === 'EXPECTED') {
+                            return isPast ? (
+                              <span className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1 shadow-sm">
+                                <AlertTriangle size={12} className="text-rose-600" /> ⏳ À venir (Échu)
+                              </span>
+                            ) : (
+                              <span className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-300 flex items-center gap-1 shadow-sm">
+                                ⏳ À venir
+                              </span>
+                            );
+                          }
+                          if (stage === 'ARRIVED') {
+                            return (
+                              <span className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-sm">
+                                ✅ Présent (Caisse/Triage)
+                              </span>
+                            );
+                          }
+                          if (stage === 'IN_WAITING_ROOM') {
+                            return (
+                              <span className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 border border-blue-300 flex items-center gap-1 shadow-sm animate-pulse">
+                                🩺 En salle d&apos;attente
+                              </span>
+                            );
+                          }
+                          return (
+                            <div className={`px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border shrink-0 ${getStatusBadge(rdv)}`}>
+                              {rdv.status === 'COMPLETED' ? 'Terminé' : rdv.status === 'ABSENT' ? 'Absent' : rdv.status === 'CANCELLED' ? 'Annulé' : rdv.status === 'POSTPONED' ? 'Reporté' : rdv.status}
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Action Buttons */}
