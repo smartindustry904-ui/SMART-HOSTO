@@ -2780,6 +2780,26 @@ const Reception: React.FC<ReceptionProps> = ({
         tenantId: activeTenantId,
       });
 
+      // Immediately revert any occupied bed for this patient back to LIBRE (strict binary bed state)
+      const bedsToFree = (radarBeds || []).filter(
+        (b: any) =>
+          String(b.status || '').toUpperCase().includes('OCCUP') &&
+          ((b.patientId && targetPatientIds.includes(b.patientId)) ||
+            (b.patientDme && targetPatientIds.includes(b.patientDme)))
+      );
+      const p6 = Promise.all(
+        bedsToFree.map((b: any) =>
+          updateDoc(doc(db, 'beds', b.id), {
+            status: 'LIBRE',
+            patientId: null,
+            patientName: null,
+            patientDossier: null,
+            currentInpatientId: null,
+            lastUpdated: new Date().toISOString(),
+          }).catch(() => {})
+        )
+      );
+
       await Promise.all([p1, p2, p3, p4, p5]);
 
       // Local state sync

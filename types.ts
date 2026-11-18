@@ -225,7 +225,7 @@ export type LabSubMenu = 'dashboard' | 'demandes' | 'encours' | 'resultats' | 'v
 
 export type InpatientSubMenu = 'beds' | 'patient_bed' | 'requests' | 'history' | 'dashboard' | 'planner';
 
-export type BedStatus = 'LIBRE' | 'OCCUPÉ' | 'EN NETTOYAGE' | 'AVAILABLE' | 'OCCUPIED' | 'MAINTENANCE' | 'CLEANING';
+export type BedStatus = 'LIBRE' | 'OCCUPÉ' | 'AVAILABLE' | 'OCCUPIED';
 
 export type BedCategory = 'hospitalisation' | 'materniter' | 'all' | 'other';
 

@@ -1,13 +1,11 @@
 import { BedStatus } from '../../types';
 
 /**
- * Normalizes any bed status string (French canonical or legacy English)
- * to one of the 3 strict states: 'LIBRE' | 'OCCUPÉ' | 'EN NETTOYAGE'.
+ * Normalizes any bed status string to the strict binary states: 'LIBRE' | 'OCCUPÉ'.
  */
-export function normalizeBedStatus(status?: string): 'LIBRE' | 'OCCUPÉ' | 'EN NETTOYAGE' {
+export function normalizeBedStatus(status?: string): 'LIBRE' | 'OCCUPÉ' {
   const s = String(status || '').trim().toUpperCase();
   if (s === 'OCCUPÉ' || s === 'OCCUPE' || s === 'OCCUPIED') return 'OCCUPÉ';
-  if (s === 'EN NETTOYAGE' || s === 'EN_NETTOYAGE' || s === 'CLEANING' || s === 'MAINTENANCE') return 'EN NETTOYAGE';
   return 'LIBRE';
 }
 
@@ -20,7 +18,8 @@ export function isBedOccupe(status?: BedStatus | string): boolean {
 }
 
 export function isBedEnNettoyage(status?: BedStatus | string): boolean {
-  return normalizeBedStatus(status) === 'EN NETTOYAGE';
+  const s = String(status || '').trim().toUpperCase();
+  return s === 'EN_NETTOYAGE' || s === 'NETTOYAGE' || s === 'CLEANING' || s === 'EN NETTOYAGE';
 }
 
 export interface ActiveInpatientLocation {

@@ -7,7 +7,7 @@ import {
 import { Bed, Room } from '../../types';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../../src/firebase';
-import { isBedLibre, isBedOccupe, isBedEnNettoyage } from '../../src/utils/hospitalisation';
+import { isBedLibre, isBedOccupe } from '../../src/utils/hospitalisation';
 
 interface BedsOverviewTabProps {
   beds: Bed[];
@@ -28,7 +28,7 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
   onSeedDefaultBeds,
   theme = 'light'
 }) => {
-  const [filterView, setFilterView] = useState<'all' | 'available' | 'occupied' | 'cleaning'>('all');
+  const [filterView, setFilterView] = useState<'all' | 'available' | 'occupied'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoomId, setSelectedRoomId] = useState<string>('all');
 
@@ -37,17 +37,13 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
     return beds.filter(b => !b.category || b.category === 'hospitalisation' || b.category === 'all');
   }, [beds]);
 
-  // Available, Occupied & Cleaning beds
+  // Available & Occupied beds (strict binary state machine: LIBRE | OCCUPÉ)
   const availableBeds = useMemo(() => {
     return hospitalBeds.filter(b => isBedLibre(b.status));
   }, [hospitalBeds]);
 
   const occupiedBeds = useMemo(() => {
     return hospitalBeds.filter(b => isBedOccupe(b.status));
-  }, [hospitalBeds]);
-
-  const cleaningBeds = useMemo(() => {
-    return hospitalBeds.filter(b => isBedEnNettoyage(b.status));
   }, [hospitalBeds]);
 
   const handleMarkBedLibre = async (bed: Bed) => {
@@ -210,14 +206,6 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
               >
                 Occupés ({occupiedBeds.length})
               </button>
-              <button
-                onClick={() => setFilterView('cleaning')}
-                className={`px-3.5 py-1.5 rounded-xl font-black uppercase tracking-wider transition-all cursor-pointer ${
-                  filterView === 'cleaning' ? 'bg-amber-500 text-white shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Nettoyage ({cleaningBeds.length})
-              </button>
             </div>
 
             <button
@@ -363,22 +351,21 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
         </div>
       )}
 
-      {/* SECONDARY SECTION: LITS LIBRES & EN NETTOYAGE (COMPACT & DISCRET) */}
-      {(filterView === 'all' || filterView === 'available' || filterView === 'cleaning') && hospitalBeds.length > 0 && (
+      {/* SECONDARY SECTION: LITS LIBRES (COMPACT & DISCRET) */}
+      {(filterView === 'all' || filterView === 'available') && hospitalBeds.length > 0 && (
         <div className="space-y-4 pt-4 border-t border-slate-200/80">
           <div className="flex items-center justify-between">
             <h2 className="text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span>
               <span>
-                Lits Libres ({filteredAvailable.length}) &amp; En Nettoyage ({filteredCleaning.length})
+                Lits Libres ({filteredAvailable.length})
               </span>
             </h2>
-            <span className="text-[11px] font-bold text-slate-400">Disponibilité &amp; Désinfection</span>
+            <span className="text-[11px] font-bold text-slate-400">Disponibilité immédiate</span>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {(filterView === 'all' || filterView === 'available') &&
-              filteredAvailable.map(bed => {
+            {filteredAvailable.map(bed => {
                 const room = rooms.find(r => r.id === bed.roomId);
                 return (
                   <div
@@ -408,45 +395,11 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
                   </div>
                 );
               })}
-
-            {(filterView === 'all' || filterView === 'cleaning') &&
-              filteredCleaning.map(bed => {
-                const room = rooms.find(r => r.id === bed.roomId);
-                return (
-                  <div
-                    key={bed.id}
-                    className="bg-amber-50/30 rounded-2xl border border-amber-200/70 p-3.5 space-y-2.5 flex flex-col justify-between"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between gap-1">
-                        <span className="px-2 py-0.5 bg-amber-100/80 text-amber-700 text-[9px] font-black uppercase rounded-lg">
-                          Nettoyage
-                        </span>
-                        <span className="text-[10px] font-bold text-slate-400 truncate">
-                          {room?.name || 'Ch.'}
-                        </span>
-                      </div>
-                      <h3 className="font-black text-slate-700 text-xs truncate">{bed.name}</h3>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => handleMarkBedLibre(bed)}
-                      className="w-full py-1.5 bg-amber-100/80 hover:bg-emerald-600 hover:text-white text-amber-800 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <CheckCircle2 size={12} />
-                      <span>Marquer Libre</span>
-                    </button>
-                  </div>
-                );
-              })}
           </div>
 
-          {((filterView === 'available' && filteredAvailable.length === 0) ||
-            (filterView === 'cleaning' && filteredCleaning.length === 0) ||
-            (filterView === 'all' && filteredAvailable.length === 0 && filteredCleaning.length === 0)) && (
+          {filteredAvailable.length === 0 && (
             <div className="bg-slate-50 rounded-2xl border border-slate-200 p-5 text-center text-slate-400 text-xs font-bold">
-              Aucun lit libre ou en nettoyage correspondant aux filtres.
+              Aucun lit libre correspondant aux filtres.
             </div>
           )}
         </div>

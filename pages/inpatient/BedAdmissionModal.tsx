@@ -159,9 +159,6 @@ export const BedAdmissionModal: React.FC<BedAdmissionModalProps> = ({
       if (isBedOccupe(bedData.status) && bedData.patientId !== selectedPatient.id) {
         throw new Error(`Le lit ${bedData.name} est déjà occupé par un autre patient (${bedData.patientName || 'Inconnu'}).`);
       }
-      if (isBedEnNettoyage(bedData.status)) {
-        throw new Error(`Le lit ${bedData.name} est actuellement EN NETTOYAGE.`);
-      }
 
       // 2. Check if patient is already admitted
       const patientRef = doc(db, 'patients', selectedPatient.id);

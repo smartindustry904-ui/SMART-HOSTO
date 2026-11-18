@@ -4,7 +4,7 @@ import { db, sanitizeData } from '../../src/firebase';
 import { collection, onSnapshot, doc, getDoc, writeBatch } from 'firebase/firestore';
 import { Bed, Room, User as UserType, EstablishmentConfig } from '../../types';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../../src/utils/tenant';
-import { isBedLibre, isBedOccupe, isBedEnNettoyage, findActiveInpatientLocationFromLists } from '../../src/utils/hospitalisation';
+import { isBedLibre, isBedOccupe, findActiveInpatientLocationFromLists } from '../../src/utils/hospitalisation';
 
 export interface UniversalHospitalisationPatient {
   id: string;
@@ -138,9 +138,6 @@ export const UniversalHospitalisationModal: React.FC<UniversalHospitalisationMod
       const bedData = { id: bedSnap.id, ...bedSnap.data() } as Bed;
       if (isBedOccupe(bedData.status) && bedData.patientId !== patient.id) {
         throw new Error(`Le lit ${bedData.name} est déjà occupé par ${bedData.patientName || 'un autre patient'}.`);
-      }
-      if (isBedEnNettoyage(bedData.status)) {
-        throw new Error(`Le lit ${bedData.name} est actuellement EN NETTOYAGE.`);
       }
 
       const roomObj = rooms.find(r => r.id === bedData.roomId);
@@ -331,7 +328,7 @@ export const UniversalHospitalisationModal: React.FC<UniversalHospitalisationMod
             </select>
             {libreBeds.length === 0 && (
               <p className="text-[11px] text-rose-600 font-bold mt-1.5">
-                Aucun lit LIBRE disponible dans les paramètres. Configurez des lits dans Paramètres &gt; Hospitalisation ou libérez un lit en nettoyage.
+                Aucun lit LIBRE disponible dans les paramètres. Configurez des lits dans Paramètres &gt; Hospitalisation.
               </p>
             )}
           </div>

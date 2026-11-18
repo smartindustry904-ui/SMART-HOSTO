@@ -230,10 +230,10 @@ export const BedDischargeModal: React.FC<BedDischargeModalProps> = ({
         }, currentUser)));
       }
 
-      // 4. Transition Bed to EN NETTOYAGE
+      // 4. Immediately revert Bed to LIBRE
       const bedRef = doc(db, 'beds', bed.id);
       batch.update(bedRef, {
-        status: 'EN NETTOYAGE',
+        status: 'LIBRE',
         patientId: null,
         patientName: null,
         patientAge: null,
