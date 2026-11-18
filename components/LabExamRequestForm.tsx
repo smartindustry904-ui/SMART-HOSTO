@@ -63,17 +63,18 @@ const LabExamRequestForm: React.FC<LabExamRequestFormProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    const q = collection(db, 'medical_acts');
+    // Strict Catalog Isolation: Section Laboratoire ONLY queries Examens de Laboratoire (type === 'examen')
+    const q = query(collection(db, 'medical_acts'), where('type', '==', 'examen'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as MedicalAct));
-      const labActs = list.filter(act => 
-        !act.servicePrincipal || 
-        act.servicePrincipal === 'laboratoire' || 
-        act.type === 'examen' || 
+      const labActs = list.filter(act =>
+        act.type === 'examen' ||
+        act.servicePrincipal === 'laboratoire' ||
+        act.servicePrincipal === 'SRV-LABO' ||
         act.category === 'Laboratoire' ||
         EXAM_CATEGORIES.includes(act.category || '')
       );
-      setActs(labActs.length > 0 ? labActs : list);
+      setActs(labActs);
       setIsLoadingActs(false);
     });
     return () => unsubscribe();

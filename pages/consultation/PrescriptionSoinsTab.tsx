@@ -120,35 +120,19 @@ export const PrescriptionSoinsTab: React.FC<PrescriptionSoinsTabProps> = ({
         console.warn("Could not listen to hospital_protocols:", err);
       });
 
-      unsubActs = onSnapshot(collection(db, 'medical_acts'), (snapshot) => {
-        const list = snapshot.docs
-          .map(d => ({ id: d.id, ...d.data() }))
-          .filter(a => belongsToTenant(a, activeTenantId));
-        if (list.length > 0 || (activeTenantId && activeTenantId !== 'default_hospital' && activeTenantId !== 'ALL')) {
-          const actsList = list.filter((a: any) => 
-            a.category === 'soin' || 
-            a.category === 'soins' || 
-            a.servicePrincipal === 'soins_infirmiers' || 
-            (a.type && String(a.type).toLowerCase().includes('soin'))
-          );
-          setSettingsMedicalActs(actsList);
-        } else {
-          const saved = localStorage.getItem('hospital_medical_acts');
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved);
-              setSettingsMedicalActs(parsed.filter((a: any) => 
-                a.category === 'soin' || 
-                a.category === 'soins' || 
-                a.servicePrincipal === 'soins_infirmiers' || 
-                (a.type && String(a.type).toLowerCase().includes('soin'))
-              ));
-            } catch (e) {}
-          }
+      // Strict Catalog Isolation: Section Soins ONLY queries Soins Infirmiers (category in ['soin', 'soins'])
+      unsubActs = onSnapshot(
+        query(collection(db, 'medical_acts'), where('category', 'in', ['soin', 'soins'])),
+        (snapshot) => {
+          const list = snapshot.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(a => belongsToTenant(a, activeTenantId));
+          setSettingsMedicalActs(list);
+        },
+        (err) => {
+          console.warn("Could not listen to medical_acts:", err);
         }
-      }, (err) => {
-        console.warn("Could not listen to medical_acts:", err);
-      });
+      );
     } catch (e) {
       console.warn("Error subscribing to settings referentials:", e);
     }

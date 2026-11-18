@@ -972,6 +972,7 @@ const Reception: React.FC<ReceptionProps> = ({
   
   const [visitMotif, setVisitMotif] = useState<VisitMotif | null>(null);
   const [selectedMotif, setSelectedMotif] = useState<MotifPriseEnCharge | null>(null);
+  const [selectedSoinsMotifs, setSelectedSoinsMotifs] = useState<MotifPriseEnCharge[]>([]);
   const [currentMotifCategory, setCurrentMotifCategory] = useState<'CONSULTATIONS' | 'SOINS' | 'MATERNITE' | 'URGENCES' | 'HOSPITALISATION' | 'AUTRES'>('CONSULTATIONS');
   const [isEditingPatientProfile, setIsEditingPatientProfile] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -1828,13 +1829,17 @@ const Reception: React.FC<ReceptionProps> = ({
   };
 
   const totalToPay = useMemo(() => {
+    if (selectedSoinsMotifs.length > 0 && currentMotifCategory === 'SOINS') {
+      const soinsTotal = selectedSoinsMotifs.reduce((sum, m) => sum + (m.fee || 0), 0);
+      return (activeFollowUpCheck.isFreeFollowUp ? 0 : soinsTotal) + (notebookAdded ? 1000 : 0);
+    }
     if (selectedMotif) {
       const baseFee = activeFollowUpCheck.isFreeFollowUp ? 0 : selectedMotif.fee;
       return baseFee + (notebookAdded ? 1000 : 0);
     }
     if (!visitMotif) return 0;
     return getOrientationData(visitMotif).fee + (notebookAdded ? 1000 : 0);
-  }, [selectedMotif, visitMotif, notebookAdded, activeFollowUpCheck.isFreeFollowUp]);
+  }, [selectedSoinsMotifs, currentMotifCategory, selectedMotif, visitMotif, notebookAdded, activeFollowUpCheck.isFreeFollowUp]);
 
   const paymentStats = useMemo(() => {
     const received = parseFloat(amountReceived) || 0;
@@ -2073,7 +2078,22 @@ const Reception: React.FC<ReceptionProps> = ({
 
       // Create PaymentRequest
       const items = [];
-      if (selectedMotif) {
+      if (selectedSoinsMotifs.length > 0 && currentMotifCategory === 'SOINS') {
+        selectedSoinsMotifs.forEach((sm, idx) => {
+          items.push({
+            id: `ITEM-SOIN-${idx}-${Math.floor(Math.random() * 1000)}`,
+            name: sm.label,
+            quantity: 1,
+            unitPrice: sm.fee,
+            totalPrice: sm.fee,
+            actId: sm.actId || sm.id,
+            codeInterne: sm.codeInterne || '',
+            practitionerId: user?.id || '',
+            practitionerName: user?.name || user?.username || 'Agent Accueil',
+            practitionerRole: user?.role || 'RECEPTIONIST'
+          });
+        });
+      } else if (selectedMotif) {
         items.push({
           id: `ITEM-${Math.floor(Math.random() * 1000)}`,
           name: selectedMotif.label,
@@ -2505,32 +2525,44 @@ const Reception: React.FC<ReceptionProps> = ({
         (targetService || '').toLowerCase().includes('soin');
 
       if (isSoinRecourse) {
-        const actDocRef = doc(collection(db, 'nursing_acts'));
-        const actLabel = selectedMotif?.label || 'Soin Infirmier / Pansement Ambulatoire';
-        p9 = setDoc(actDocRef, sanitizeData(stampTenantData({
-          id: actDocRef.id,
-          patientId: patientId,
-          patientDme: dmeId,
-          patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
-          careName: actLabel,
-          actName: actLabel,
-          name: actLabel,
-          actType: actLabel,
-          motif: actLabel,
-          source: 'ACCUEIL',
-          origin: 'ACCUEIL',
-          status: 'EN ATTENTE',
-          priority: computedPriorityAndAlerts.priority === 'normal' ? 'NORMAL' : (computedPriorityAndAlerts.priority === 'urgent' ? 'HIGH' : 'CRITICAL'),
-          paymentStatus: 'AWAITING_PAYMENT',
-          paymentRequestId: createdRequest?.id || '',
-          prescriberName: soinsPrescriberName.trim() || undefined,
-          prescriberLicense: soinsPrescriberLicense.trim() || undefined,
-          requiresPrescription: Boolean(selectedMotif?.requiresPrescription),
-          createdAt: new Date().toISOString(),
-          requestedBy: user?.name || user?.username || 'Agent Accueil',
-          requestedById: user?.id || '',
-          admittedAt: todayStr
-        }, user, establishment)));
+        const soinsToCreate =
+          selectedSoinsMotifs.length > 0 && currentMotifCategory === 'SOINS'
+            ? selectedSoinsMotifs
+            : [selectedMotif || { id: 'SOIN-DEFAULT', label: 'Soin Infirmier / Pansement Ambulatoire', fee: 2500, requiresPrescription: false }];
+
+        p9 = Promise.all(
+          soinsToCreate.map((soinMotif: any) => {
+            const actDocRef = doc(collection(db, 'nursing_acts'));
+            const actLabel = soinMotif?.label || 'Soin Infirmier / Pansement Ambulatoire';
+            return setDoc(actDocRef, sanitizeData(stampTenantData({
+              id: actDocRef.id,
+              visite_id: activeVisiteId,
+              patientId: patientId,
+              patientDme: dmeId,
+              patientName: `${finalPatient.lastName} ${finalPatient.firstName}`,
+              careName: actLabel,
+              actName: actLabel,
+              name: actLabel,
+              actType: actLabel,
+              motif: actLabel,
+              unitPrice: Number(soinMotif?.fee || 0),
+              source: 'ACCUEIL',
+              origin: 'ACCUEIL',
+              status: 'EN ATTENTE',
+              priority: computedPriorityAndAlerts.priority === 'normal' ? 'NORMAL' : (computedPriorityAndAlerts.priority === 'urgent' ? 'HIGH' : 'CRITICAL'),
+              paymentStatus: 'AWAITING_PAYMENT',
+              payment_status: 'EN_ATTENTE_CAISSE',
+              paymentRequestId: createdRequest?.id || '',
+              prescriberName: soinsPrescriberName.trim() || undefined,
+              prescriberLicense: soinsPrescriberLicense.trim() || undefined,
+              requiresPrescription: Boolean(soinMotif?.requiresPrescription),
+              createdAt: new Date().toISOString(),
+              requestedBy: user?.name || user?.username || 'Agent Accueil',
+              requestedById: user?.id || '',
+              admittedAt: todayStr
+            }, user, establishment)));
+          })
+        ).then(() => {});
       }
 
       let p10 = Promise.resolve();
@@ -2618,6 +2650,7 @@ const Reception: React.FC<ReceptionProps> = ({
     } finally {
       setIsSaving(false);
       setRerouteVisitId(null);
+      setSelectedSoinsMotifs([]);
     }
   };
 
@@ -3792,10 +3825,47 @@ const Reception: React.FC<ReceptionProps> = ({
                             type="text"
                             value={soinsSearchQuery}
                             onChange={(e) => setSoinsSearchQuery(e.target.value)}
-                            placeholder="Rechercher un soin infirmier (ex: Pansement, Injection IV, Perfusion, Suture...)"
+                            placeholder="Rechercher un ou plusieurs soins infirmiers (ex: Pansement, Injection IV, Perfusion...)"
                             className="w-full pl-10 pr-4 py-2.5 bg-indigo-50/40 border border-indigo-200 rounded-xl outline-none focus:border-indigo-500 focus:bg-white text-xs sm:text-sm font-semibold text-slate-800"
                           />
                         </div>
+
+                        {/* Selected Soins Multi-Select Summary Chips + Live Total */}
+                        {selectedSoinsMotifs.length > 0 && (
+                          <div className="p-3 rounded-xl bg-indigo-50/70 border border-indigo-200 space-y-2">
+                            <div className="flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-indigo-800">
+                              <span>Soins sélectionnés ({selectedSoinsMotifs.length})</span>
+                              <span className="font-mono text-indigo-900">
+                                Total : {selectedSoinsMotifs.reduce((s, m) => s + (m.fee || 0), 0).toLocaleString()} FCFA
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {selectedSoinsMotifs.map((sm) => (
+                                <span
+                                  key={sm.id}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-indigo-200 text-[11px] font-bold text-slate-800 shadow-2xs"
+                                >
+                                  <span>{sm.label}</span>
+                                  <span className="font-mono text-indigo-700">{(sm.fee || 0).toLocaleString()} F</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const next = selectedSoinsMotifs.filter(x => x.id !== sm.id);
+                                      setSelectedSoinsMotifs(next);
+                                      setSelectedMotif(next[0] || null);
+                                      setVisitMotif(next.length > 0 ? 'SOIN_INFIRMIER' : null);
+                                    }}
+                                    className="text-slate-400 hover:text-rose-600 cursor-pointer ml-0.5"
+                                    title="Retirer ce soin"
+                                  >
+                                    <X size={12} />
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100 max-h-[280px] overflow-y-auto custom-scrollbar shadow-2xs">
                           {activeMotifs
                             .filter(m => m.category === 'SOINS')
@@ -3809,34 +3879,45 @@ const Reception: React.FC<ReceptionProps> = ({
                               );
                             })
                             .map((motif) => {
-                              const isSelected = selectedMotif?.id === motif.id;
+                              const isSelected = selectedSoinsMotifs.some(x => x.id === motif.id);
                               return (
                                 <button
                                   key={motif.id}
                                   type="button"
                                   onClick={() => {
-                                    setSelectedMotif(motif);
-                                    setVisitMotif('SOIN_INFIRMIER');
-                                    setSoinsPrescriberName('');
-                                    setSoinsPrescriberLicense('');
+                                    const exists = selectedSoinsMotifs.some(x => x.id === motif.id);
+                                    const next = exists
+                                      ? selectedSoinsMotifs.filter(x => x.id !== motif.id)
+                                      : [...selectedSoinsMotifs, motif];
+                                    setSelectedSoinsMotifs(next);
+                                    setSelectedMotif(next[0] || null);
+                                    setVisitMotif(next.length > 0 ? 'SOIN_INFIRMIER' : null);
                                   }}
                                   className={`w-full px-4 py-3 flex items-center justify-between gap-3 text-left transition-all cursor-pointer ${
                                     isSelected ? 'bg-indigo-50/90 border-l-4 border-l-indigo-600' : 'hover:bg-slate-50'
                                   }`}
                                 >
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <span className="font-bold text-xs sm:text-sm text-slate-900">{motif.label}</span>
-                                      {motif.codeInterne && (
-                                        <span className="text-[10px] font-mono text-slate-400">{motif.codeInterne}</span>
-                                      )}
-                                      {motif.requiresPrescription && (
-                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-black uppercase">
-                                          <Lock size={10} /> Soumis à ordonnance
-                                        </span>
-                                      )}
+                                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                                    <input
+                                      type="checkbox"
+                                      readOnly
+                                      checked={isSelected}
+                                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 pointer-events-none shrink-0"
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-bold text-xs sm:text-sm text-slate-900">{motif.label}</span>
+                                        {motif.codeInterne && (
+                                          <span className="text-[10px] font-mono text-slate-400">{motif.codeInterne}</span>
+                                        )}
+                                        {motif.requiresPrescription && (
+                                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-black uppercase">
+                                            <Lock size={10} /> Soumis à ordonnance
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-[11px] text-slate-500 mt-0.5">{motif.queueName}</p>
                                     </div>
-                                    <p className="text-[11px] text-slate-500 mt-0.5">{motif.queueName}</p>
                                   </div>
                                   <span className="font-black text-xs text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-200/80 shrink-0 tabular-nums">
                                     {(motif.fee || 0).toLocaleString()} FCFA
@@ -3940,7 +4021,16 @@ const Reception: React.FC<ReceptionProps> = ({
 
                   {/* Sticky Action Bar inside card when motif is selected */}
                   {selectedMotif && (() => {
-                    const requiresRx = Boolean(selectedMotif.requiresPrescription);
+                    const isMultiSoins = currentMotifCategory === 'SOINS' && selectedSoinsMotifs.length > 0;
+                    const displayLabel = isMultiSoins
+                      ? selectedSoinsMotifs.map(s => s.label).join(' + ')
+                      : selectedMotif.label;
+                    const displayFee = isMultiSoins
+                      ? selectedSoinsMotifs.reduce((sum, s) => sum + (s.fee || 0), 0)
+                      : (selectedMotif.fee || 0);
+                    const requiresRx = isMultiSoins
+                      ? selectedSoinsMotifs.some(s => Boolean(s.requiresPrescription))
+                      : Boolean(selectedMotif.requiresPrescription);
                     const hasValidPrescriber = !requiresRx || soinsPrescriberName.trim().length > 0 || soinsPrescriberLicense.trim().length > 0;
                     return (
                     <div className="mt-4 pt-4 border-t border-slate-200 space-y-3 bg-blue-50/50 p-3.5 rounded-xl border border-blue-200/80 animate-in fade-in">
@@ -3951,11 +4041,11 @@ const Reception: React.FC<ReceptionProps> = ({
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-extrabold text-sm text-slate-900 truncate">{selectedMotif.label}</h4>
+                              <h4 className="font-extrabold text-sm text-slate-900 truncate">{displayLabel}</h4>
                               {activeFollowUpCheck.isFreeFollowUp ? (
                                 <>
                                   <span className="text-xs font-bold text-slate-400 line-through tabular-nums">
-                                    {(selectedMotif.fee || 0).toLocaleString()} FCFA
+                                    {displayFee.toLocaleString()} FCFA
                                   </span>
                                   <span className="text-xs font-black text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-md border border-emerald-300 flex items-center gap-1">
                                     <CheckCircle2 size={12} /> Suivi / Contrôle Gratuit (0 FCFA)
@@ -3963,7 +4053,7 @@ const Reception: React.FC<ReceptionProps> = ({
                                 </>
                               ) : (
                                 <span className="text-xs font-black text-blue-600 bg-white px-2 py-0.5 rounded-md border border-blue-200 tabular-nums">
-                                  {(selectedMotif.fee || 0).toLocaleString()} FCFA
+                                  {displayFee.toLocaleString()} FCFA
                                 </span>
                               )}
                               {requiresRx && (
