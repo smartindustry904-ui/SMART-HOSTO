@@ -46,17 +46,6 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
     return hospitalBeds.filter(b => isBedOccupe(b.status));
   }, [hospitalBeds]);
 
-  const handleMarkBedLibre = async (bed: Bed) => {
-    try {
-      await updateDoc(doc(db, 'beds', bed.id), {
-        status: 'LIBRE',
-        lastUpdated: new Date().toISOString()
-      });
-    } catch (e) {
-      console.error('Error marking bed libre:', e);
-    }
-  };
-
   // Filtered by search & room
   const filteredAvailable = useMemo(() => {
     return availableBeds.filter(b => {
@@ -84,18 +73,6 @@ export const BedsOverviewTab: React.FC<BedsOverviewTabProps> = ({
       return matchesRoom && matchesSearch;
     });
   }, [occupiedBeds, rooms, selectedRoomId, searchQuery]);
-
-  const filteredCleaning = useMemo(() => {
-    return cleaningBeds.filter(b => {
-      const room = rooms.find(r => r.id === b.roomId);
-      const matchesRoom = selectedRoomId === 'all' || b.roomId === selectedRoomId;
-      const term = searchQuery.toLowerCase().trim();
-      const matchesSearch = !term ||
-        b.name.toLowerCase().includes(term) ||
-        (room?.name || '').toLowerCase().includes(term);
-      return matchesRoom && matchesSearch;
-    });
-  }, [cleaningBeds, rooms, selectedRoomId, searchQuery]);
 
   // Overall occupancy rate
   const occupancyRate = hospitalBeds.length > 0
