@@ -1179,6 +1179,7 @@ interface WhatsAppAgentConfig {
   voiceEnabled: boolean;
   voiceName: string;
   allowUnregisteredPreview: boolean;
+  documentTemplateName?: string;
   systemPrompt: string;
   updatedAt?: string;
 }
@@ -3773,6 +3774,24 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
   }
 });
 
+// 2.5 Meta WhatsApp Templates Listing Endpoint
+app.get(['/api/whatsapp/templates', '/whatsapp/templates'], async (_req, res) => {
+  try {
+    const config = await getWhatsAppConfig();
+    const wabaId = config.businessAccountId || '1635250944216380';
+    if (!config.accessToken) {
+      return res.status(400).json({ error: 'TOKEN_REQUIRED', message: 'Token Meta requis' });
+    }
+    const response = await fetch(`https://graph.facebook.com/v21.0/${encodeURIComponent(wabaId)}/message_templates`, {
+      headers: { Authorization: `Bearer ${config.accessToken}` }
+    });
+    const data: any = await response.json().catch(() => ({}));
+    return res.json({ success: true, templates: data?.data || [] });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'TEMPLATE_FETCH_ERROR', message: err?.message });
+  }
+});
+
 // 3. Get & Save WhatsApp Agent Configuration
 app.get(['/api/whatsapp/config', '/whatsapp/config'], async (_req, res) => {
   try {
@@ -3804,6 +3823,7 @@ app.post(['/api/whatsapp/config', '/whatsapp/config'], async (req, res) => {
       voiceEnabled: req.body.voiceEnabled !== undefined ? Boolean(req.body.voiceEnabled) : current.voiceEnabled,
       voiceName: req.body.voiceName !== undefined ? String(req.body.voiceName).trim() : current.voiceName,
       allowUnregisteredPreview: req.body.allowUnregisteredPreview ?? current.allowUnregisteredPreview,
+      documentTemplateName: req.body.documentTemplateName !== undefined ? String(req.body.documentTemplateName).trim() : current.documentTemplateName,
       systemPrompt: req.body.systemPrompt !== undefined ? String(req.body.systemPrompt).trim() : current.systemPrompt,
       updatedAt: new Date().toISOString()
     };
@@ -4300,18 +4320,19 @@ app.post(['/api/whatsapp/send-document', '/whatsapp/send-document'], async (req,
         patientId || 'Dossier SMART-HOSTO',
         nowFormatted
       ];
+      const templateNameToUse = config.documentTemplateName || 'smarthosto_document_patient';
       templateRes = await sendMetaWhatsAppTemplate(
         cleanPhone,
-        'smarthosto_document_patient',
+        templateNameToUse,
         'fr',
         bodyParams,
         repIdParam,
         config
       );
       if (templateRes.sent) {
-        console.log(`✅ [WhatsApp Template] Delivered template smarthosto_document_patient to +${cleanPhone}`);
+        console.log(`✅ [WhatsApp Template] Delivered template "${templateNameToUse}" to +${cleanPhone}`);
       } else {
-        console.warn(`⚠️ [WhatsApp Template] Template dispatch notice:`, templateRes.error);
+        console.warn(`⚠️ [WhatsApp Template] Template "${templateNameToUse}" dispatch notice:`, templateRes.error);
       }
     }
 
