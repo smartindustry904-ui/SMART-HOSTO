@@ -363,6 +363,7 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
 
   // 4. TRANSMISSION & VALIDATION
   const handleFinalValidate = async () => {
+    if (isSubmitting) return;
     setIsSubmitting(true);
     try {
       const ordonnance: Ordonnance = {
@@ -930,7 +931,7 @@ const DigitalPrescription: React.FC<DigitalPrescriptionProps> = ({
                 className="px-8 py-3.5 bg-blue-600 disabled:bg-slate-300 text-white rounded-xl font-black hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-lg shadow-blue-600/20 cursor-pointer disabled:cursor-not-allowed"
               >
                 {isSubmitting ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
-                {isSubmitting ? 'Validation...' : "Valider l'Ordonnance"}
+                {isSubmitting ? 'Envoi en cours...' : "Valider l'Ordonnance"}
               </button>
             </div>
 

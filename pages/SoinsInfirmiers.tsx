@@ -451,10 +451,6 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
         priority = 'urgent';
         alerts.push(`Douleur intense (EVA: ${vitals.painScore}/10)`);
       }
-      if (vitals.bloodGlucose && (vitals.bloodGlucose < 0.6 || vitals.bloodGlucose > 3.0)) {
-        priority = 'urgent';
-        alerts.push(`Déséquilibre glycémique majeur (${vitals.bloodGlucose} g/L)`);
-      }
     }
 
     return { priority, alerts };
@@ -1294,21 +1290,6 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                       <p className="text-[10px] text-slate-400 font-medium mt-1">Normal: 12 - 20 /min</p>
                     </div>
 
-                    {/* Glycémie */}
-                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
-                        Glycémie (g/L)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={vitals.bloodGlucose}
-                        onChange={(e) => setVitals({ ...vitals, bloodGlucose: parseFloat(e.target.value) || 0 })}
-                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl font-bold text-sm text-center"
-                      />
-                      <p className="text-[10px] text-slate-400 font-medium mt-1">À jeun: 0.70 - 1.10 g/L</p>
-                    </div>
-
                     {/* Taille */}
                     <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">
@@ -1467,11 +1448,11 @@ export const SoinsInfirmiers: React.FC<SoinsInfirmiersProps> = ({
                         <button
                           disabled={isSubmitting}
                           onClick={handleTransferToDoctor}
-                          className="w-full sm:w-auto px-8 py-4 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg hover:shadow-teal-600/30 flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50"
+                          className="w-full sm:w-auto px-8 py-4 bg-teal-600 hover:bg-teal-700 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-lg hover:shadow-teal-600/30 flex items-center justify-center gap-3 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <CheckCircle size={18} />
-                          <span>{isSubmitting ? 'Validation en cours...' : 'Valider le Triage'}</span>
-                          <ChevronRight size={18} />
+                          {isSubmitting ? <RefreshCw size={18} className="animate-spin" /> : <CheckCircle size={18} />}
+                          <span>{isSubmitting ? 'Envoi en cours...' : 'Valider le Triage'}</span>
+                          {!isSubmitting && <ChevronRight size={18} />}
                         </button>
                       </div>
                     );

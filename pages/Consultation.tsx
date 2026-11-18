@@ -225,6 +225,13 @@ const Consultation: React.FC<ConsultationProps> = ({
   const [isHospitalizing, setIsHospitalizing] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [compilationData, setCompilationData] = useState<any | null>(null);
+  const [closureUnpaidSummary, setClosureUnpaidSummary] = useState<{
+    acts: any[];
+    labs: any[];
+    pharma: any[];
+    totalGlobal: number;
+    loading: boolean;
+  }>({ acts: [], labs: [], pharma: [], totalGlobal: 0, loading: false });
   const [showReorientModal, setShowReorientModal] = useState(false);
   const [activePatientAppointments, setActivePatientAppointments] = useState<any[]>([]);
   const [isCurrentlyHospitalized, setIsCurrentlyHospitalized] = useState(false);
@@ -382,6 +389,167 @@ const Consultation: React.FC<ConsultationProps> = ({
       setCurrentHospLocation('');
     }
   }, [activePatient?.id, activeTenantId, beds, rooms]);
+
+  useEffect(() => {
+    if (!showClosureDialog || !activePatient) return;
+    let cancelled = false;
+
+    const loadSessionUnpaidSummary = async () => {
+      setClosureUnpaidSummary(prev => ({ ...prev, loading: true }));
+      try {
+        const visiteId = activePatient.visite_id || '';
+        const pids = [activePatient.patientId, activePatient.id, activePatient.dmeId].filter(Boolean) as string[];
+
+        const isUnpaidCaisseItem = (d: any) => {
+          if (d.isCancelled || d.isPaid === true) return false;
+          const ps = String(d.payment_status || d.paymentStatus || d.statut_financier || '').toUpperCase().trim();
+          const st = String(d.status || '').toUpperCase().trim();
+          if (['PAID', 'PAYE', 'PAYÉ', 'SOLDE', 'SOLDÉ', 'EXONERE', 'EXONÉRÉ', 'ANNULE', 'CANCELLED'].includes(ps)) return false;
+          if (['PAID', 'SOLDE', 'CANCELLED', 'ANNULE'].includes(st)) return false;
+          return (
+            ps === 'EN_ATTENTE_CAISSE' ||
+            ps === 'PENDING' ||
+            ps === 'UNPAID' ||
+            !ps ||
+            st === 'PENDING' ||
+            st === 'EN_ATTENTE_CAISSE'
+          );
+        };
+
+        const matchesSession = (d: any) => {
+          if (visiteId && d.visite_id) return d.visite_id === visiteId;
+          return pids.includes(d.patientId) || pids.includes(d.patientDme) || pids.includes(d.dmeId);
+        };
+
+        const [actsSnap, labsSnap, pharmaSnap] = await Promise.all([
+          getDocs(visiteId ? query(collection(db, 'nursing_acts'), where('visite_id', '==', visiteId)) : query(collection(db, 'nursing_acts'), where('patientId', '==', pids[0] || ''))),
+          getDocs(visiteId ? query(collection(db, 'lab_requests'), where('visite_id', '==', visiteId)) : query(collection(db, 'lab_requests'), where('patientId', '==', pids[0] || ''))),
+          getDocs(visiteId ? query(collection(db, 'pending_prescriptions'), where('visite_id', '==', visiteId)) : query(collection(db, 'pending_prescriptions'), where('patientId', '==', pids[0] || ''))),
+        ]);
+
+        // Group Actes & Soins (deduplicating grouped recurring prescriptions by prescriptionGroupId/actName)
+        const actsSeen = new Set<string>();
+        const actsList: any[] = [];
+        actsSnap.docs.forEach(docSnap => {
+          const d = { id: docSnap.id, ...(docSnap.data() as any) };
+          if (!belongsToTenant(d, activeTenantId) || !matchesSession(d) || !isUnpaidCaisseItem(d)) return;
+          const groupKey = d.prescriptionGroupId || d.id;
+          if (actsSeen.has(groupKey)) return;
+          actsSeen.add(groupKey);
+          const qty = Number(d.totalScheduledDoses || d.quantity || 1);
+          const unitPrice = Number(d.unitPrice ?? d.price ?? 0);
+          actsList.push({
+            id: d.id,
+            name: d.actName || d.name || 'Soin / Acte Infirmier',
+            quantity: qty,
+            unitPrice,
+            totalPrice: Number(d.totalPrice ?? unitPrice * qty),
+          });
+        });
+
+        // Examens Labo
+        const labsList: any[] = [];
+        labsSnap.docs.forEach(docSnap => {
+          const d = { id: docSnap.id, ...(docSnap.data() as any) };
+          if (!belongsToTenant(d, activeTenantId) || !matchesSession(d) || !isUnpaidCaisseItem(d)) return;
+          if (Array.isArray(d.exams) && d.exams.length > 0) {
+            d.exams.forEach((ex: any, i: number) => {
+              const unitPrice = Number(ex.price ?? 0);
+              labsList.push({
+                id: `${d.id}-${i}`,
+                name: ex.name || ex.examName || 'Examen Labo',
+                quantity: 1,
+                unitPrice,
+                totalPrice: unitPrice,
+              });
+            });
+          } else {
+            const unitPrice = Number(d.price ?? d.totalAmount ?? 0);
+            labsList.push({
+              id: d.id,
+              name: d.examName || d.name || 'Examen Labo',
+              quantity: 1,
+              unitPrice,
+              totalPrice: unitPrice,
+            });
+          }
+        });
+
+        // Ordonnance (Pharmacie)
+        const pharmaList: any[] = [];
+        pharmaSnap.docs.forEach(docSnap => {
+          const d = { id: docSnap.id, ...(docSnap.data() as any) };
+          if (!belongsToTenant(d, activeTenantId) || !matchesSession(d) || !isUnpaidCaisseItem(d)) return;
+          if (Array.isArray(d.items) && d.items.length > 0) {
+            d.items.forEach((it: any, i: number) => {
+              const qty = Number(it.quantity || 1);
+              const unitPrice = Number(it.unitPrice ?? it.price ?? 0);
+              pharmaList.push({
+                id: `${d.id}-${i}`,
+                name: it.name || it.medicationName || 'Médicament',
+                quantity: qty,
+                unitPrice,
+                totalPrice: Number(it.totalPrice ?? unitPrice * qty),
+              });
+            });
+          } else {
+            const qty = Number(d.quantity || 1);
+            const unitPrice = Number(d.unitPrice ?? d.price ?? d.totalAmount ?? 0);
+            pharmaList.push({
+              id: d.id,
+              name: d.medicationName || d.name || 'Ordonnance Pharmacie',
+              quantity: qty,
+              unitPrice,
+              totalPrice: unitPrice * qty,
+            });
+          }
+        });
+
+        // Merge unsaved/pending items from compilationData if not already in Firestore
+        (compilationData?.prescriptions || []).forEach((p: any, idx: number) => {
+          if (p.isPaid || p.isTransmitted) return;
+          const exists = pharmaList.some(x => x.name.toLowerCase() === String(p.name || '').toLowerCase());
+          if (!exists) {
+            const unitPrice = Number(p.price || 0);
+            pharmaList.push({ id: `local-ph-${idx}`, name: p.name, quantity: 1, unitPrice, totalPrice: unitPrice });
+          }
+        });
+        (compilationData?.examensDemandes || []).forEach((e: any, idx: number) => {
+          if (e.isPaid || e.isTransmitted) return;
+          const exists = labsList.some(x => x.name.toLowerCase() === String(e.name || '').toLowerCase());
+          if (!exists) {
+            const unitPrice = Number(e.price || 0);
+            labsList.push({ id: `local-lab-${idx}`, name: e.name, quantity: 1, unitPrice, totalPrice: unitPrice });
+          }
+        });
+
+        const totalGlobal = [...actsList, ...labsList, ...pharmaList].reduce(
+          (sum, item) => sum + Number(item.totalPrice || 0),
+          0
+        );
+
+        if (!cancelled) {
+          setClosureUnpaidSummary({
+            acts: actsList,
+            labs: labsList,
+            pharma: pharmaList,
+            totalGlobal,
+            loading: false,
+          });
+        }
+      } catch (err) {
+        console.warn('Error loading end-of-consultation unpaid summary:', err);
+        if (!cancelled) {
+          setClosureUnpaidSummary(prev => ({ ...prev, loading: false }));
+        }
+      }
+    };
+
+    loadSessionUnpaidSummary();
+    return () => {
+      cancelled = true;
+    };
+  }, [showClosureDialog, activePatient?.id, activePatient?.visite_id, activeTenantId]);
 
   const handleDischargeDirectly = async (patient: any) => {
     if (!patient) return;
@@ -3484,6 +3652,54 @@ const Consultation: React.FC<ConsultationProps> = ({
                   </div>
                 );
               })()}
+
+              {/* Check 5: Complete Aggregated Unpaid Summary by visite_id (EN_ATTENTE_CAISSE) */}
+              <div className="p-5 bg-amber-50/70 border border-amber-200 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-amber-900 uppercase tracking-wider">
+                    5. Bilan des Prescriptions (EN_ATTENTE_CAISSE)
+                  </h4>
+                  {closureUnpaidSummary.loading && (
+                    <Loader2 size={14} className="animate-spin text-amber-700" />
+                  )}
+                </div>
+
+                {[
+                  { title: 'Actes & Soins', items: closureUnpaidSummary.acts },
+                  { title: 'Examens Labo', items: closureUnpaidSummary.labs },
+                  { title: 'Ordonnance (Pharmacie)', items: closureUnpaidSummary.pharma },
+                ].map((group) => (
+                  <div key={group.title} className="space-y-1">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-amber-800">
+                      {group.title} ({group.items.length})
+                    </p>
+                    {group.items.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 italic pl-2">Aucun élément en attente Caisse</p>
+                    ) : (
+                      <div className="space-y-1 pl-2">
+                        {group.items.map((it: any) => (
+                          <div key={it.id} className="flex justify-between items-center text-[11px] font-semibold text-slate-700">
+                            <span className="truncate max-w-[200px]">
+                              {it.name} {it.quantity > 1 ? `×${it.quantity}` : ''}
+                            </span>
+                            <span className="font-mono font-bold text-slate-900 shrink-0">
+                              {Number(it.unitPrice || 0).toLocaleString()} F
+                              {it.quantity > 1 ? ` (${Number(it.totalPrice || 0).toLocaleString()} F)` : ''}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                <div className="pt-2.5 border-t border-amber-200 flex items-center justify-between">
+                  <span className="text-xs font-black text-amber-950 uppercase">Total Global à payer à la Caisse :</span>
+                  <span className="text-sm font-black font-mono text-rose-700">
+                    {closureUnpaidSummary.totalGlobal.toLocaleString()} FCFA
+                  </span>
+                </div>
+              </div>
             </div>
 
             <div className="flex gap-4">
@@ -3505,7 +3721,7 @@ const Consultation: React.FC<ConsultationProps> = ({
                 {isClosing ? (
                   <>
                     <RefreshCw className="animate-spin text-white shrink-0" size={14} />
-                    Clôture...
+                    Envoi en cours...
                   </>
                 ) : (
                   'Confirmer & Valoriser'
