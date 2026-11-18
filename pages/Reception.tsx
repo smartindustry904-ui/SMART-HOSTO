@@ -254,7 +254,8 @@ export const buildMotifsFromMedicalActsAndServices = (
       category = 'HOSPITALISATION';
     } else if (
       serviceId === 'SRV-INFIRMIER' ||
-      /soin|infirmier|pansement|injection|perfusion|suture/i.test(actName + ' ' + (act.categorie || '') + ' ' + (matchedService?.name || ''))
+      String(act.category || '').toLowerCase() === 'soin' ||
+      /soin|infirmier|pansement|injection|perfusion|suture|ablation|n[eé]bulisation|lavage|sondage/i.test(actName + ' ' + (act.categorie || '') + ' ' + (matchedService?.name || ''))
     ) {
       category = 'SOINS';
     } else if (

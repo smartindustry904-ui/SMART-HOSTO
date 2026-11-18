@@ -66,6 +66,7 @@ import { LicenseSettings } from './settings/LicenseSettings';
 import { db, sanitizeData, handleFirestoreError, OperationType } from '../src/firebase';
 import { collection, onSnapshot, doc, setDoc, deleteDoc, query, orderBy, where, addDoc, updateDoc, getDocs, limit, getDoc } from 'firebase/firestore';
 import { getActiveTenantId, belongsToTenant, stampTenantData } from '../src/utils/tenant';
+import { seedCommonReferentials } from '../src/utils/seedReferentials';
 
 interface SettingsProps {
   activeTab: 'users' | 'roles' | 'establishment' | 'appearance' | 'referentials' | 'cashier_settings' | 'services' | 'protocols' | 'whatsapp_agent' | 'licence';
@@ -2073,7 +2074,24 @@ const Settings: React.FC<SettingsProps> = ({ activeTab, setActiveTab, user, onBa
 
           {activeTab === 'referentials' && (
             <div className="space-y-8">
-              <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Référentiels de Base</h2>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Référentiels de Base</h2>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await seedCommonReferentials(user, establishment);
+                      showMessage(`Référentiels initialisés (+${res.addedActs} actes/examens, +${res.addedMeds} médicaments, +${res.addedConsumables} consommables).`, 'success');
+                    } catch (err) {
+                      console.error('Seed referentials failed:', err);
+                      showMessage("Erreur lors de l'initialisation des référentiels.", 'error');
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-sm transition-all cursor-pointer"
+                >
+                  ⚡ Initialiser Référentiels Communs
+                </button>
+              </div>
               
               {/* Referential Tabs */}
               <div className="flex bg-slate-100 p-1.5 rounded-2xl gap-1 overflow-x-auto">
