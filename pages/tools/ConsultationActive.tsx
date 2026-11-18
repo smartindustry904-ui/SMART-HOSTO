@@ -396,13 +396,30 @@ export default function ConsultationActive({
     }
   }, [user, patient]);
 
-  // Fetch exam catalog from central medical_acts (Strict Tenant Isolation, No Dummy Data)
+  // Fetch exam catalog from central medical_acts (Strict Lab-Only Isolation, No Consultations/Soins)
   useEffect(() => {
     try {
       const activeTenantId = getActiveTenantId(user, patient);
-      const q = query(collection(db, 'medical_acts'));
+      const LAB_ONLY_CATS = new Set([
+        'laboratoire', 'labo', 'hématologie', 'hematologie', 'biochimie',
+        'sérologie', 'serologie', 'parasitologie', 'bactériologie', 'bacteriologie',
+        'immunologie', 'urines', 'imagerie'
+      ]);
+      const q = query(collection(db, 'medical_acts'), where('type', '==', 'examen'));
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        const tenantDocs = snapshot.docs.filter(ds => belongsToTenant(ds.data(), activeTenantId));
+        const tenantDocs = snapshot.docs.filter(ds => {
+          const d = ds.data();
+          if (!belongsToTenant(d, activeTenantId)) return false;
+          const t = String(d.type || '').toLowerCase();
+          const sp = String(d.servicePrincipal || '').toLowerCase();
+          const cat = String(d.category || d.categorie || '').toLowerCase();
+          return (
+            t === 'examen' ||
+            sp === 'srv-labo' ||
+            sp === 'laboratoire' ||
+            LAB_ONLY_CATS.has(cat)
+          );
+        });
 
         if (tenantDocs.length === 0) {
           setDbExams([]);
@@ -413,7 +430,7 @@ export default function ConsultationActive({
               id: ds.id,
               name: d.name || d.nom || 'Examen',
               price: parseFloat(d.price) || parseFloat(d.prixVente) || parseFloat(d.tarif) || 0,
-              category: d.category || d.categorie || d.sousCategorie || 'Général'
+              category: d.category || d.categorie || d.sousCategorie || 'Laboratoire'
             };
           });
           setDbExams(list);
