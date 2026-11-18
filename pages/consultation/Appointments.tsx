@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, User, Plus, Search, Edit2, X, Trash2, Calendar, Activity, RefreshCw, AlertTriangle, ShieldAlert, Zap } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, User, Plus, Search, Edit2, X, Trash2, Calendar, Activity, RefreshCw, AlertTriangle, ShieldAlert, Zap, MessageSquare } from 'lucide-react';
 import { db } from '../../src/firebase';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs } from 'firebase/firestore';
 import { AvatarPlaceholder } from '../../components/common/AvatarPlaceholder';
@@ -37,6 +37,51 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<any | null>(null);
+
+  // WhatsApp Invite State
+  const [showWhatsAppInviteModal, setShowWhatsAppInviteModal] = useState(false);
+  const [invitePhone, setInvitePhone] = useState('');
+  const [invitePatientName, setInvitePatientName] = useState('');
+  const [isSendingInvite, setIsSendingInvite] = useState(false);
+  const [inviteSuccessMsg, setInviteSuccessMsg] = useState('');
+  const [inviteErrorMsg, setInviteErrorMsg] = useState('');
+
+  const handleSendWhatsAppInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!invitePhone) {
+      setInviteErrorMsg('Le numéro de téléphone WhatsApp est requis.');
+      return;
+    }
+    setIsSendingInvite(true);
+    setInviteErrorMsg('');
+    setInviteSuccessMsg('');
+
+    try {
+      const res = await fetch('/api/whatsapp/send-booking-invitation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: invitePhone.trim(),
+          patientName: invitePatientName.trim()
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || data.error || 'Erreur lors de l’envoi');
+      }
+      setInviteSuccessMsg(`Invitation interactive WhatsApp envoyée avec succès à +${invitePhone.trim()} !`);
+      setTimeout(() => {
+        setShowWhatsAppInviteModal(false);
+        setInvitePhone('');
+        setInvitePatientName('');
+        setInviteSuccessMsg('');
+      }, 2000);
+    } catch (err: any) {
+      setInviteErrorMsg(err?.message || 'Échec de l’envoi');
+    } finally {
+      setIsSendingInvite(false);
+    }
+  };
 
   // Patient Search State
   const [patientSearch, setPatientSearch] = useState('');
@@ -549,6 +594,18 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
           >
             <Plus size={18} /> Nouveau RDV
           </button>
+          <button 
+            onClick={() => {
+              setInvitePhone(initialPatient?.phone || initialPatient?.telephone || '');
+              setInvitePatientName(initialPatient ? `${initialPatient.lastName || ''} ${initialPatient.firstName || initialPatient.name || ''}`.trim() : '');
+              setInviteErrorMsg('');
+              setInviteSuccessMsg('');
+              setShowWhatsAppInviteModal(true);
+            }}
+            className="bg-emerald-600 text-white px-5 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer"
+          >
+            <MessageSquare size={18} /> RDV WhatsApp
+          </button>
         </div>
       </div>
 
@@ -1057,6 +1114,95 @@ const Appointments: React.FC<AppointmentsProps> = ({ user, establishment, initia
                   'Mettre à jour le Rendez-vous'
                 )}
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: INVITER RDV WHATSAPP */}
+      {showWhatsAppInviteModal && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[40px] border border-slate-200 shadow-2xl w-full max-w-lg p-8">
+            <div className="flex justify-between items-center mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <MessageSquare size={20} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900">Prendre RDV via WhatsApp</h3>
+                  <p className="text-xs font-semibold text-slate-500">Envoyer le formulaire interactif au patient</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowWhatsAppInviteModal(false)}
+                disabled={isSendingInvite}
+                className="p-3 bg-slate-50 text-slate-400 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {inviteSuccessMsg && (
+              <div className="mb-4 p-4 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-2xl text-xs font-bold flex items-center gap-2">
+                <Activity size={16} /> {inviteSuccessMsg}
+              </div>
+            )}
+
+            {inviteErrorMsg && (
+              <div className="mb-4 p-4 bg-rose-50 border border-rose-200 text-rose-700 rounded-2xl text-xs font-bold flex items-center gap-2">
+                <AlertTriangle size={16} /> {inviteErrorMsg}
+              </div>
+            )}
+
+            <form onSubmit={handleSendWhatsAppInvite} className="space-y-5">
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Nom du Patient (Optionnel)</label>
+                <input
+                  type="text"
+                  value={invitePatientName}
+                  onChange={e => setInvitePatientName(e.target.value)}
+                  placeholder="Ex: Jean Dupont"
+                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-emerald-600/10 focus:border-emerald-600 transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2">Numéro WhatsApp *</label>
+                <input
+                  type="tel"
+                  required
+                  value={invitePhone}
+                  onChange={e => setInvitePhone(e.target.value)}
+                  placeholder="Ex: 237688252720"
+                  className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm font-bold text-slate-900 focus:outline-none focus:ring-4 focus:ring-emerald-600/10 focus:border-emerald-600 transition-all"
+                />
+                <p className="text-[11px] text-slate-400 mt-1 font-semibold">Avec indicatif pays (ex: 237 pour le Cameroun).</p>
+              </div>
+
+              <div className="bg-emerald-50/60 border border-emerald-100 p-4 rounded-2xl text-xs font-medium text-emerald-800 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">💡 Comment ça marche ?</p>
+                <p>Le patient recevra directement sur WhatsApp un message interactif avec des boutons et un menu déroulant pour choisir sa spécialité, sa date et son heure.</p>
+                <p>Dès confirmation par le patient, son rendez-vous apparaîtra automatiquement ici.</p>
+              </div>
+
+              <div className="flex gap-4 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowWhatsAppInviteModal(false)}
+                  disabled={isSendingInvite}
+                  className="flex-1 py-4 border border-slate-200 text-slate-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all cursor-pointer"
+                >
+                  Fermer
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSendingInvite}
+                  className="flex-1 py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer disabled:opacity-50"
+                >
+                  {isSendingInvite ? <RefreshCw className="animate-spin" size={16} /> : <MessageSquare size={16} />}
+                  {isSendingInvite ? 'Envoi...' : 'Envoyer'}
+                </button>
+              </div>
             </form>
           </div>
         </div>

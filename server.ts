@@ -3392,6 +3392,686 @@ async function downloadMetaMedia(
 }
 
 // Public Download Endpoint for Generated WhatsApp Vocal Notes (Audio)
+// ==========================================
+// WHATSAPP INTERACTIVE BUTTONS & LISTS HELPERS
+// ==========================================
+
+export async function sendMetaWhatsAppButtons(
+  toPhone: string,
+  bodyText: string,
+  buttons: Array<{ id: string; title: string }>,
+  options: { headerText?: string; footerText?: string } = {},
+  config?: WhatsAppAgentConfig
+): Promise<{ sent: boolean; metaMessageId?: string; error?: string }> {
+  const cleanPhone = normalizePhone(toPhone);
+  const cfg = config || (await getWhatsAppConfig());
+  if (!cleanPhone || !cfg?.phoneNumberId || !cfg?.accessToken) {
+    return { sent: false, error: 'Identifiants Meta Cloud API non configurés' };
+  }
+
+  try {
+    const url = `https://graph.facebook.com/v21.0/${encodeURIComponent(cfg.phoneNumberId)}/messages`;
+    const interactiveObj: any = {
+      type: 'button',
+      body: { text: bodyText.slice(0, 1024) },
+      action: {
+        buttons: buttons.slice(0, 3).map(b => ({
+          type: 'reply',
+          reply: {
+            id: b.id.slice(0, 256),
+            title: b.title.slice(0, 20)
+          }
+        }))
+      }
+    };
+
+    if (options.headerText) {
+      interactiveObj.header = { type: 'text', text: options.headerText.slice(0, 60) };
+    }
+    if (options.footerText) {
+      interactiveObj.footer = { text: options.footerText.slice(0, 60) };
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${cfg.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'interactive',
+        interactive: interactiveObj
+      })
+    });
+
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.warn('Meta Buttons send error:', data);
+      return { sent: false, error: data?.error?.message || `Erreur Meta (${response.status})` };
+    }
+
+    return { sent: true, metaMessageId: data?.messages?.[0]?.id };
+  } catch (err: any) {
+    return { sent: false, error: err?.message || 'Erreur réseau Meta Buttons' };
+  }
+}
+
+export async function sendMetaWhatsAppList(
+  toPhone: string,
+  bodyText: string,
+  buttonLabel: string,
+  sections: Array<{ title: string; rows: Array<{ id: string; title: string; description?: string }> }>,
+  options: { headerText?: string; footerText?: string } = {},
+  config?: WhatsAppAgentConfig
+): Promise<{ sent: boolean; metaMessageId?: string; error?: string }> {
+  const cleanPhone = normalizePhone(toPhone);
+  const cfg = config || (await getWhatsAppConfig());
+  if (!cleanPhone || !cfg?.phoneNumberId || !cfg?.accessToken) {
+    return { sent: false, error: 'Identifiants Meta Cloud API non configurés' };
+  }
+
+  try {
+    const url = `https://graph.facebook.com/v21.0/${encodeURIComponent(cfg.phoneNumberId)}/messages`;
+    const interactiveObj: any = {
+      type: 'list',
+      body: { text: bodyText.slice(0, 1024) },
+      action: {
+        button: buttonLabel.slice(0, 20),
+        sections: sections.slice(0, 10).map(s => ({
+          title: s.title.slice(0, 24),
+          rows: s.rows.slice(0, 10).map(r => ({
+            id: r.id.slice(0, 200),
+            title: r.title.slice(0, 24),
+            description: r.description ? r.description.slice(0, 72) : undefined
+          }))
+        }))
+      }
+    };
+
+    if (options.headerText) {
+      interactiveObj.header = { type: 'text', text: options.headerText.slice(0, 60) };
+    }
+    if (options.footerText) {
+      interactiveObj.footer = { text: options.footerText.slice(0, 60) };
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${cfg.accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: cleanPhone,
+        type: 'interactive',
+        interactive: interactiveObj
+      })
+    });
+
+    const data: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.warn('Meta List send error:', data);
+      return { sent: false, error: data?.error?.message || `Erreur Meta (${response.status})` };
+    }
+
+    return { sent: true, metaMessageId: data?.messages?.[0]?.id };
+  } catch (err: any) {
+    return { sent: false, error: err?.message || 'Erreur réseau Meta List' };
+  }
+}
+
+// ==========================================
+// PATIENT APPOINTMENT BOOKING SESSION & LOGIC
+// ==========================================
+
+export interface BookingSession {
+  phone: string;
+  step: 'IDLE' | 'AWAITING_DEPT' | 'AWAITING_DATE' | 'AWAITING_SLOT' | 'AWAITING_NAME' | 'AWAITING_CONFIRMATION';
+  patientId?: string;
+  patientName?: string;
+  departmentId?: string;
+  departmentName?: string;
+  appointmentDate?: string;
+  appointmentDateFormatted?: string;
+  timeSlotId?: string;
+  timeSlot?: string;
+  timeVal?: string;
+  updatedAt: string;
+}
+
+export async function getBookingSession(phone: string): Promise<BookingSession> {
+  const clean = normalizePhone(phone);
+  try {
+    const snap = await withFastTimeout(getDoc(doc(db, 'whatsapp_booking_sessions', clean)), 1500);
+    if (snap && snap.exists()) {
+      return snap.data() as BookingSession;
+    }
+  } catch (err) {
+    console.warn('Error reading booking session:', err);
+  }
+  return { phone: clean, step: 'IDLE', updatedAt: new Date().toISOString() };
+}
+
+export async function saveBookingSession(session: BookingSession): Promise<void> {
+  const clean = normalizePhone(session.phone);
+  try {
+    session.updatedAt = new Date().toISOString();
+    await setDoc(doc(db, 'whatsapp_booking_sessions', clean), session, { merge: true });
+  } catch (err) {
+    console.warn('Error saving booking session:', err);
+  }
+}
+
+export async function clearBookingSession(phone: string): Promise<void> {
+  const clean = normalizePhone(phone);
+  try {
+    await setDoc(doc(db, 'whatsapp_booking_sessions', clean), { phone: clean, step: 'IDLE', updatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.warn('Error clearing booking session:', err);
+  }
+}
+
+export async function findPatientByPhone(phone: string): Promise<any | null> {
+  if (!phone) return null;
+  const clean = normalizePhone(phone);
+  try {
+    const snap = await withFastTimeout(getDocs(collection(db, 'patients')), 2000);
+    for (const d of snap.docs) {
+      const data = d.data();
+      const pPhone = data.phone || data.telephone || data.contact;
+      if (pPhone && phonesMatch(pPhone, clean)) {
+        return { id: d.id, ...data };
+      }
+    }
+  } catch (err) {
+    console.warn('Error finding patient by phone:', err);
+  }
+  return null;
+}
+
+export function getAvailableBookingDates(): Array<{ id: string; title: string; description: string; dateStr: string; dateFormatted: string }> {
+  const results: Array<{ id: string; title: string; description: string; dateStr: string; dateFormatted: string }> = [];
+  const daysFr = ['Dimanche', 'Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
+  const monthsFr = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Août', 'Sep', 'Oct', 'Nov', 'Déc'];
+
+  const now = new Date();
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getTime() + i * 24 * 60 * 60 * 1000);
+    const dayOfWeek = d.getDay();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+
+    let title = '';
+    let dateFormatted = '';
+    if (i === 0) {
+      title = `Aujourd'hui (${dd}/${mm})`;
+      dateFormatted = `Aujourd'hui (${dd} ${monthsFr[d.getMonth()]})`;
+    } else if (i === 1) {
+      title = `Demain (${dd}/${mm})`;
+      dateFormatted = `Demain (${dd} ${monthsFr[d.getMonth()]})`;
+    } else {
+      title = `${daysFr[dayOfWeek].slice(0, 3)}. ${dd} ${monthsFr[d.getMonth()]}`;
+      dateFormatted = `${daysFr[dayOfWeek]} ${dd} ${monthsFr[d.getMonth()]} ${yyyy}`;
+    }
+
+    const desc = dayOfWeek === 0 ? 'Service de Garde & Urgences' : 'Consultations normales';
+    results.push({
+      id: `date_${dateStr}`,
+      title: title.slice(0, 24),
+      description: desc.slice(0, 72),
+      dateStr,
+      dateFormatted
+    });
+  }
+  return results;
+}
+
+export async function startPatientInteractiveBooking(
+  toPhone: string,
+  patientName?: string,
+  config?: WhatsAppAgentConfig
+): Promise<{ success: boolean; metaMessageId?: string; error?: string }> {
+  const cleanPhone = normalizePhone(toPhone);
+  if (!cleanPhone) return { success: false, error: 'Numéro invalide' };
+  const currentConfig = config || (await getWhatsAppConfig());
+
+  // Search if patient exists in records
+  const existingPatient = await findPatientByPhone(cleanPhone);
+  const resolvedName = patientName || (existingPatient ? `${existingPatient.firstName || ''} ${existingPatient.lastName || existingPatient.name || ''}`.trim() : '');
+
+  const session: BookingSession = {
+    phone: cleanPhone,
+    step: 'IDLE',
+    patientId: existingPatient?.id || '',
+    patientName: resolvedName,
+    updatedAt: new Date().toISOString()
+  };
+  await saveBookingSession(session);
+
+  const welcomeText = resolvedName
+    ? `Bonjour *${resolvedName}* !\nBienvenue sur l'Accueil de l'Hôpital SMART-HOSTO.\n\nSouhaitez-vous planifier un rendez-vous médical ?`
+    : `Bonjour !\nBienvenue sur l'Accueil de l'Hôpital SMART-HOSTO.\n\nSouhaitez-vous planifier un rendez-vous médical ?`;
+
+  const buttons = [
+    { id: 'btn_rdv_start', title: '📅 Prendre RDV' },
+    { id: 'btn_hospital_services', title: '🏥 Nos Services' },
+    { id: 'btn_urgences', title: '🚨 Urgences' }
+  ];
+
+  const res = await sendMetaWhatsAppButtons(
+    cleanPhone,
+    welcomeText,
+    buttons,
+    { headerText: '🏥 SMART-HOSTO - RDV', footerText: 'Accueil & Admissions' },
+    currentConfig
+  );
+
+  await logWhatsAppMessage({
+    direction: 'OUTBOUND',
+    staffName: resolvedName || 'Patient',
+    staffRole: 'PATIENT',
+    phone: cleanPhone,
+    message: welcomeText,
+    source: 'NOTIFICATION',
+    metaMessageId: res.metaMessageId
+  });
+
+  return { success: res.sent, metaMessageId: res.metaMessageId, error: res.error };
+}
+
+export async function handlePatientInteractiveBookingStep(
+  fromPhone: string,
+  contactName: string,
+  textBody: string,
+  interactiveId: string,
+  staffDoc: any | null,
+  config: WhatsAppAgentConfig
+): Promise<boolean> {
+  const cleanPhone = normalizePhone(fromPhone);
+  if (!cleanPhone) return false;
+
+  let session = await getBookingSession(cleanPhone);
+  const lowerText = (textBody || '').trim().toLowerCase();
+
+  // If user is staff and didn't click an interactive booking button, and is not in an active booking flow, let staff AI handle
+  if (staffDoc && !interactiveId && session.step === 'IDLE') {
+    const isExplicitBookingIntent =
+      lowerText === 'prendre rdv' ||
+      lowerText === 'rdv' ||
+      lowerText === 'rendez-vous' ||
+      lowerText === 'rendez vous';
+    if (!isExplicitBookingIntent) {
+      return false; // Leave to staff AI
+    }
+  }
+
+  // 1. Check if user clicked or typed Main Menu
+  if (interactiveId === 'btn_main_menu' || lowerText === 'menu' || lowerText === 'accueil') {
+    await clearBookingSession(cleanPhone);
+    const buttons = [
+      { id: 'btn_rdv_start', title: '📅 Prendre RDV' },
+      { id: 'btn_hospital_services', title: '🏥 Nos Services' },
+      { id: 'btn_urgences', title: '🚨 Urgences' }
+    ];
+    await sendMetaWhatsAppButtons(
+      cleanPhone,
+      `Bienvenue sur l'Accueil SMART-HOSTO.\n\nComment pouvons-nous vous aider aujourd'hui ?`,
+      buttons,
+      { headerText: '🏥 Hôpital SMART-HOSTO', footerText: 'Service Numérique Hôpital' },
+      config
+    );
+    return true;
+  }
+
+  // 2. Cancel request
+  if (interactiveId === 'btn_cancel_rdv' || lowerText === 'annuler') {
+    await clearBookingSession(cleanPhone);
+    const buttons = [
+      { id: 'btn_rdv_start', title: '📅 Prendre RDV' },
+      { id: 'btn_main_menu', title: '🏠 Accueil' }
+    ];
+    await sendMetaWhatsAppButtons(
+      cleanPhone,
+      `Votre démarche de rendez-vous a été annulée.\nVous pouvez reprendre à tout moment en cliquant ci-dessous.`,
+      buttons,
+      { headerText: 'Annulation RDV', footerText: 'Accueil SMART-HOSTO' },
+      config
+    );
+    return true;
+  }
+
+  // 3. Hospital services overview
+  if (interactiveId === 'btn_hospital_services' || lowerText === 'nos services' || lowerText === 'services') {
+    const servicesText =
+      `🏥 *Nos Pôles & Spécialités Médicales*\n\n` +
+      `• *Médecine Générale* : Consultations 24h/24, bilans de santé\n` +
+      `• *Pédiatrie* : Soins enfants & nourrissons, vaccinations\n` +
+      `• *Gynécologie & Maternité* : Suivi de grossesse, accouchements\n` +
+      `• *Cardiologie* : ECG, bilans cardiovasculaires, suivi tension\n` +
+      `• *Chirurgie Dentaire* : Soins, extractions, détartrage\n` +
+      `• *Laboratoire & Analyses* : Prises de sang, bilans biologiques\n\n` +
+      `Souhaitez-vous planifier une consultation ?`;
+    const buttons = [
+      { id: 'btn_rdv_start', title: '📅 Prendre RDV' },
+      { id: 'btn_main_menu', title: '🏠 Accueil' }
+    ];
+    await sendMetaWhatsAppButtons(cleanPhone, servicesText, buttons, { headerText: 'Services SMART-HOSTO' }, config);
+    return true;
+  }
+
+  // 4. Urgences & Hotline
+  if (interactiveId === 'btn_urgences' || lowerText === 'urgence' || lowerText === 'urgences' || lowerText === 'sos') {
+    const urgenceText =
+      `🚨 *Service des Urgences Médicales*\n\n` +
+      `Le service d'accueil des urgences est ouvert *24h/24 et 7j/7* sans rendez-vous.\n\n` +
+      `📞 *Ligne d'Urgence :* +237 6 81 05 11 23\n` +
+      `📍 *Accès :* Pavillon des Urgences, Entrée Principale\n\n` +
+      `En cas d'urgence vitale, présentez-vous immédiatement à l'accueil des urgences.`;
+    const buttons = [
+      { id: 'btn_rdv_start', title: '📅 Prendre RDV' },
+      { id: 'btn_main_menu', title: '🏠 Accueil' }
+    ];
+    await sendMetaWhatsAppButtons(cleanPhone, urgenceText, buttons, { headerText: '🚨 Urgences 24/7' }, config);
+    return true;
+  }
+
+  // 5. Start Appointment Booking
+  if (
+    interactiveId === 'btn_rdv' ||
+    interactiveId === 'btn_rdv_start' ||
+    lowerText === 'rdv' ||
+    lowerText.includes('prendre rdv') ||
+    lowerText.includes('rendez-vous') ||
+    lowerText.includes('rendez vous') ||
+    (!staffDoc && session.step === 'IDLE' && (lowerText.includes('consult') || lowerText.includes('docteur') || lowerText.includes('bonjour') || lowerText.includes('salut')))
+  ) {
+    const existingPatient = await findPatientByPhone(cleanPhone);
+    const existingName = existingPatient
+      ? `${existingPatient.firstName || ''} ${existingPatient.lastName || existingPatient.name || ''}`.trim()
+      : contactName !== 'Personnel' ? contactName : '';
+
+    session = {
+      phone: cleanPhone,
+      step: 'AWAITING_DEPT',
+      patientId: existingPatient?.id || '',
+      patientName: existingName || '',
+      updatedAt: new Date().toISOString()
+    };
+    await saveBookingSession(session);
+
+    const greeting = session.patientName ? `Bonjour *${session.patientName}* !\n` : 'Bonjour !\n';
+    const listBody = `${greeting}Veuillez choisir le service médical pour votre rendez-vous :`;
+
+    const sections = [
+      {
+        title: 'Spécialités Médicales',
+        rows: [
+          { id: 'dept_general', title: 'Médecine Générale', description: 'Consultations courantes, bilans' },
+          { id: 'dept_pediatrie', title: 'Pédiatrie', description: 'Nourrissons, enfants et ados' },
+          { id: 'dept_maternite', title: 'Gynéco & Maternité', description: 'Suivi grossesse, santé femmes' },
+          { id: 'dept_cardiologie', title: 'Cardiologie', description: 'Cœur, hypertension, ECG' },
+          { id: 'dept_ophtalmo', title: 'Ophtalmologie', description: 'Vision, soins des yeux' },
+          { id: 'dept_dentaire', title: 'Chirurgie Dentaire', description: 'Soins dentaires, caries' },
+          { id: 'dept_laboratoire', title: 'Analyses Médicales', description: 'Prises de sang, bilans bio' }
+        ]
+      }
+    ];
+
+    await sendMetaWhatsAppList(
+      cleanPhone,
+      listBody,
+      'Choisir le service',
+      sections,
+      { headerText: '1/3 • Choix du Service', footerText: 'SMART-HOSTO Rendez-vous' },
+      config
+    );
+    return true;
+  }
+
+  // 6. Department selected
+  if (interactiveId.startsWith('dept_')) {
+    const deptMap: Record<string, string> = {
+      dept_general: 'Médecine Générale',
+      dept_pediatrie: 'Pédiatrie',
+      dept_maternite: 'Gynécologie & Maternité',
+      dept_cardiologie: 'Cardiologie',
+      dept_ophtalmo: 'Ophtalmologie',
+      dept_dentaire: 'Chirurgie Dentaire',
+      dept_laboratoire: 'Analyses Médicales'
+    };
+    const deptName = deptMap[interactiveId] || 'Médecine Générale';
+
+    session.departmentId = interactiveId;
+    session.departmentName = deptName;
+    session.step = 'AWAITING_DATE';
+    await saveBookingSession(session);
+
+    const availableDates = getAvailableBookingDates();
+    const dateRows = availableDates.map(d => ({
+      id: d.id,
+      title: d.title,
+      description: d.description
+    }));
+
+    await sendMetaWhatsAppList(
+      cleanPhone,
+      `Service retenu : *${deptName}*\n\nPour quel jour souhaitez-vous planifier votre consultation ?`,
+      'Choisir une date',
+      [{ title: 'Dates Disponibles', rows: dateRows }],
+      { headerText: '2/3 • Choix de la Date', footerText: 'Accueil SMART-HOSTO' },
+      config
+    );
+    return true;
+  }
+
+  // 7. Date selected
+  if (interactiveId.startsWith('date_')) {
+    const selectedDateStr = interactiveId.replace('date_', '');
+    const availableDates = getAvailableBookingDates();
+    const found = availableDates.find(d => d.dateStr === selectedDateStr);
+    const dateFormatted = found ? found.dateFormatted : selectedDateStr;
+
+    session.appointmentDate = selectedDateStr;
+    session.appointmentDateFormatted = dateFormatted;
+    session.step = 'AWAITING_SLOT';
+    await saveBookingSession(session);
+
+    const buttons = [
+      { id: 'slot_08_10', title: '08h00 - 10h00' },
+      { id: 'slot_10_12', title: '10h00 - 12h00' },
+      { id: 'slot_14_16', title: '14h00 - 16h00' }
+    ];
+
+    await sendMetaWhatsAppButtons(
+      cleanPhone,
+      `Service : *${session.departmentName || 'Consultation'}*\nDate : *${dateFormatted}*\n\nChoisissez la tranche horaire souhaitée :`,
+      buttons,
+      { headerText: '3/3 • Créneau Horaire', footerText: 'Accueil SMART-HOSTO' },
+      config
+    );
+    return true;
+  }
+
+  // 8. Time slot selected
+  if (interactiveId.startsWith('slot_')) {
+    const slotMap: Record<string, { title: string; timeVal: string }> = {
+      slot_08_10: { title: '08h00 - 10h00 (Matin)', timeVal: '08:30' },
+      slot_10_12: { title: '10h00 - 12h00 (Midi)', timeVal: '10:30' },
+      slot_14_16: { title: '14h00 - 16h00 (Après-midi)', timeVal: '14:30' }
+    };
+    const slotInfo = slotMap[interactiveId] || { title: '09h00 - 10h00', timeVal: '09:00' };
+
+    session.timeSlot = slotInfo.title;
+    session.timeVal = slotInfo.timeVal;
+
+    // Check if patient name is already known
+    if (session.patientName && session.patientName.trim().length > 2) {
+      session.step = 'AWAITING_CONFIRMATION';
+      await saveBookingSession(session);
+
+      const summaryText =
+        `Veuillez vérifier les informations de votre rendez-vous :\n\n` +
+        `👤 *Patient :* ${session.patientName}\n` +
+        `🏥 *Service :* ${session.departmentName}\n` +
+        `📅 *Date :* ${session.appointmentDateFormatted || session.appointmentDate}\n` +
+        `⏰ *Tranche horaire :* ${session.timeSlot}\n` +
+        `📱 *Téléphone :* +${cleanPhone}\n\n` +
+        `Confirmez-vous l'enregistrement de ce rendez-vous ?`;
+
+      const buttons = [
+        { id: 'btn_confirm_rdv', title: '✅ Confirmer' },
+        { id: 'btn_cancel_rdv', title: '❌ Annuler' }
+      ];
+
+      await sendMetaWhatsAppButtons(cleanPhone, summaryText, buttons, { headerText: '📋 Récapitulatif du RDV', footerText: 'SMART-HOSTO' }, config);
+      return true;
+    } else {
+      // Need patient name
+      session.step = 'AWAITING_NAME';
+      await saveBookingSession(session);
+
+      await sendMetaWhatsAppMessage(
+        cleanPhone,
+        `Parfait ! Veuillez saisir votre *Nom et Prénom* complets pour finaliser l'enregistrement de votre rendez-vous :`,
+        config
+      );
+      return true;
+    }
+  }
+
+  // 9. User typed their name
+  if (session.step === 'AWAITING_NAME' && textBody && textBody.trim().length > 1) {
+    session.patientName = textBody.trim();
+    session.step = 'AWAITING_CONFIRMATION';
+    await saveBookingSession(session);
+
+    const summaryText =
+      `Veuillez vérifier les informations de votre rendez-vous :\n\n` +
+      `👤 *Patient :* ${session.patientName}\n` +
+      `🏥 *Service :* ${session.departmentName}\n` +
+      `📅 *Date :* ${session.appointmentDateFormatted || session.appointmentDate}\n` +
+      `⏰ *Tranche horaire :* ${session.timeSlot}\n` +
+      `📱 *Téléphone :* +${cleanPhone}\n\n` +
+      `Confirmez-vous l'enregistrement de ce rendez-vous ?`;
+
+    const buttons = [
+      { id: 'btn_confirm_rdv', title: '✅ Confirmer' },
+      { id: 'btn_cancel_rdv', title: '❌ Annuler' }
+    ];
+
+    await sendMetaWhatsAppButtons(cleanPhone, summaryText, buttons, { headerText: '📋 Récapitulatif du RDV', footerText: 'SMART-HOSTO' }, config);
+    return true;
+  }
+
+  // 10. Confirmation clicked
+  if (interactiveId === 'btn_confirm_rdv') {
+    const rdvId = `RDV-${Math.floor(10000 + Math.random() * 90000)}`;
+    const nowIso = new Date().toISOString();
+
+    // Auto-create patient record if not already existing
+    let patId = session.patientId;
+    if (!patId) {
+      patId = `PAT-${Date.now()}`;
+      const nameParts = (session.patientName || 'Patient').split(' ');
+      const pDoc = {
+        id: patId,
+        name: session.patientName || 'Patient WhatsApp',
+        firstName: nameParts[0] || '',
+        lastName: nameParts.slice(1).join(' ') || nameParts[0] || '',
+        phone: cleanPhone,
+        telephone: cleanPhone,
+        contact: cleanPhone,
+        gender: 'M',
+        source: 'WHATSAPP_BOOKING',
+        createdAt: nowIso
+      };
+      await setDoc(doc(db, 'patients', patId), pDoc).catch(() => {});
+    }
+
+    // Save appointment in Firestore 'appointments'
+    const appointmentDoc = {
+      id: rdvId,
+      patientId: patId,
+      patient: session.patientName || 'Patient',
+      phone: cleanPhone,
+      contact: cleanPhone,
+      department: session.departmentName || 'Médecine Générale',
+      speciality: session.departmentName || 'Médecine Générale',
+      reason: `Consultation en ${session.departmentName || 'Médecine Générale'} (Réservation WhatsApp)`,
+      doctor: 'Médecin de garde',
+      practitionerName: 'Médecin de garde',
+      date: session.appointmentDate || nowIso.split('T')[0],
+      time: session.timeVal || '09:00',
+      timeSlot: session.timeSlot || '08h00 - 10h00',
+      status: 'SCHEDULED',
+      source: 'WHATSAPP_INTERACTIVE',
+      createdAt: nowIso
+    };
+
+    await setDoc(doc(db, 'appointments', rdvId), appointmentDoc);
+
+    // Add audit log for staff/reception visibility
+    await setDoc(doc(collection(db, 'audit_logs')), {
+      user: `Patient WhatsApp (+${cleanPhone})`,
+      role: 'PATIENT',
+      date: new Date().toLocaleDateString('fr-FR'),
+      time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: nowIso,
+      action: `Nouveau Rendez-vous WhatsApp - ${session.patientName} (${session.departmentName})`,
+      details: { rdvId, date: session.appointmentDate, timeSlot: session.timeSlot },
+      module: 'Reception'
+    }).catch(() => {});
+
+    // Clear session
+    await clearBookingSession(cleanPhone);
+
+    const successText =
+      `🎉 Félicitations *${session.patientName}* !\n\n` +
+      `Votre rendez-vous a été enregistré avec succès dans notre système hospitalier.\n\n` +
+      `🔖 *N° Dossier / Réf :* ${rdvId}\n` +
+      `🏥 *Service :* ${session.departmentName}\n` +
+      `📅 *Date :* ${session.appointmentDateFormatted || session.appointmentDate}\n` +
+      `⏰ *Créneau :* ${session.timeSlot}\n\n` +
+      `📍 *Consignes pour le jour J :*\n` +
+      `Présentez-vous au guichet d'accueil de l'Hôpital SMART-HOSTO 15 minutes à l'avance muni(e) de votre référence *${rdvId}*.\n\n` +
+      `À très bientôt à SMART-HOSTO !`;
+
+    const buttons = [
+      { id: 'btn_main_menu', title: '🏠 Menu Principal' }
+    ];
+
+    await sendMetaWhatsAppButtons(cleanPhone, successText, buttons, { headerText: '✅ RDV Confirmé !', footerText: 'Hôpital SMART-HOSTO' }, config);
+    return true;
+  }
+
+  // If not staff, provide general friendly guidance with menu buttons
+  if (!staffDoc) {
+    const buttons = [
+      { id: 'btn_rdv_start', title: '📅 Prendre RDV' },
+      { id: 'btn_hospital_services', title: '🏥 Nos Services' },
+      { id: 'btn_urgences', title: '🚨 Urgences' }
+    ];
+    await sendMetaWhatsAppButtons(
+      cleanPhone,
+      `Bonjour ! Bienvenue sur le service d'accueil de l'Hôpital SMART-HOSTO.\n\nComment pouvons-nous vous aider aujourd'hui ?`,
+      buttons,
+      { headerText: '🏥 Hôpital SMART-HOSTO', footerText: 'Accueil & Admissions' },
+      config
+    );
+    return true;
+  }
+
+  return false;
+}
+
+// Public Download Endpoint for Generated WhatsApp Vocal Notes (Audio)
 app.get(['/api/whatsapp/audio/download', '/whatsapp/audio/download'], (req, res) => {
   try {
     const audioId = String(req.query.id || '');
@@ -3537,14 +4217,20 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
                 textBody = `[Note vocale reçue de ${contactName}]`;
               }
             }
-          } else if (msg.type === 'interactive') {
-            textBody =
-              msg.interactive?.button_reply?.title ||
-              msg.interactive?.list_reply?.title ||
-              '';
           }
 
-          if (!fromPhone || (!textBody && !audioPayload)) continue;
+          let interactiveId = '';
+          if (msg.type === 'interactive') {
+            if (msg.interactive?.type === 'button_reply') {
+              interactiveId = msg.interactive.button_reply?.id || '';
+              textBody = msg.interactive.button_reply?.title || '';
+            } else if (msg.interactive?.type === 'list_reply') {
+              interactiveId = msg.interactive.list_reply?.id || '';
+              textBody = msg.interactive.list_reply?.title || '';
+            }
+          }
+
+          if (!fromPhone || (!textBody && !audioPayload && !interactiveId)) continue;
 
           let staffDoc = await findStaffByPhoneOrId(fromPhone, undefined);
 
@@ -3554,7 +4240,7 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
             staffName: staffDoc?.name || contactName,
             staffRole: staffDoc?.role || 'UNLINKED',
             phone: fromPhone,
-            message: textBody,
+            message: textBody || `[Bouton cliqué: ${interactiveId}]`,
             source: 'META_WEBHOOK',
             metaMessageId: msg.id
           });
@@ -3568,22 +4254,30 @@ app.post(['/api/whatsapp/webhook', '/whatsapp/webhook'], async (req, res) => {
             continue;
           }
 
+          // 1. Check patient interactive booking flow (Buttons & List navigation)
+          const isBookingHandled = await handlePatientInteractiveBookingStep(
+            fromPhone,
+            contactName,
+            textBody,
+            interactiveId,
+            staffDoc,
+            config
+          );
+
+          if (isBookingHandled) {
+            continue;
+          }
+
           if (!staffDoc && !config.allowUnregisteredPreview) {
-            const unlinkedReply =
-              `🔒 *Accès Restreint — SMART-HOSTO Staff*\n\n` +
-              `Votre numéro WhatsApp (+${normalizePhone(fromPhone)}) n'est pas encore rattaché à un profil du personnel.\n` +
-              `Rendez-vous dans *Mon Profil* ou *Paramètres → Agent WhatsApp IA* sur votre application SMART-HOSTO pour associer votre numéro.`;
-            const sendRes = await sendMetaWhatsAppMessage(fromPhone, unlinkedReply, config);
-            await logWhatsAppMessage({
-              direction: 'OUTBOUND',
-              staffName: contactName,
-              staffRole: 'UNLINKED',
-              phone: fromPhone,
-              message: unlinkedReply,
-              source: 'META_WEBHOOK',
-              aiModel: 'security-guard',
-              metaMessageId: sendRes.metaMessageId
-            });
+            // Welcome patient with interactive portal buttons
+            await handlePatientInteractiveBookingStep(
+              fromPhone,
+              contactName,
+              'menu',
+              'btn_main_menu',
+              staffDoc,
+              config
+            );
             continue;
           }
 
@@ -4011,6 +4705,35 @@ app.post(['/api/whatsapp/send-notification', '/whatsapp/send-notification'], asy
     });
   } catch (err: any) {
     return res.status(500).json({ error: 'SEND_ERROR', message: err?.message });
+  }
+});
+
+// 5b. Send Interactive Patient Booking Invitation via Meta Cloud API
+app.post(['/api/whatsapp/send-booking-invitation', '/whatsapp/send-booking-invitation'], async (req, res) => {
+  try {
+    const { phone, patientName } = req.body || {};
+    if (!phone) {
+      return res.status(400).json({ error: 'MISSING_PHONE', message: 'Le numéro de téléphone est obligatoire.' });
+    }
+
+    const config = await getWhatsAppConfig();
+    const result = await startPatientInteractiveBooking(phone, patientName, config);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        error: 'META_API_ERROR',
+        message: result.error || 'Échec d’envoi de l’invitation interactive WhatsApp'
+      });
+    }
+
+    return res.json({
+      success: true,
+      metaMessageId: result.metaMessageId,
+      message: `Invitation interactive envoyée avec succès à +${normalizePhone(phone)}`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'INVITATION_ERROR', message: err?.message });
   }
 });
 
