@@ -468,8 +468,35 @@ const Reception: React.FC<ReceptionProps> = ({
   const [activeVisits, setActiveVisits] = useState<VisitCycle[]>([]);
   const [activeCycleLockModal, setActiveCycleLockModal] = useState<{ patient: Patient; visit: VisitCycle } | null>(null);
   const [rerouteVisitId, setRerouteVisitId] = useState<string | null>(null);
-  const [rerouteTargetService, setRerouteTargetService] = useState<string>('Laboratoire');
+  const [rerouteTargetService, setRerouteTargetService] = useState<string>('');
+  const [rerouteSubMotifsSelected, setRerouteSubMotifsSelected] = useState<MotifPriseEnCharge[]>([]);
+  const [rerouteSubSearch, setRerouteSubSearch] = useState<string>('');
+  const [reroutePrescriberName, setReroutePrescriberName] = useState<string>('');
+  const [reroutePrescriberLicense, setReroutePrescriberLicense] = useState<string>('');
   const [isReroutingDirect, setIsReroutingDirect] = useState(false);
+
+  // Active Structure Services Only (strictly driven by current hospital's activated services)
+  const activeRerouteServices = useMemo(() => {
+    const excludedIds = new Set(['SRV-ACCUEIL', 'SRV-CAISSE', 'SRV-ADMIN', 'SRV-RH', 'SRV-ARCHIVES', 'SRV-PHARMACIE']);
+    return (hospitalServices || []).filter((s: any) => {
+      const isAct = s.status === 'active' || s.isActive === true || s.active === true || (!s.status && s.isActive !== false);
+      if (!isAct) return false;
+      if (excludedIds.has(s.id)) return false;
+      if (s.type === 'administratif' && !String(s.id || '').toLowerCase().includes('consult')) return false;
+      return true;
+    });
+  }, [hospitalServices]);
+
+  useEffect(() => {
+    if (activeCycleLockModal) {
+      const firstSrv = activeRerouteServices[0];
+      setRerouteTargetService(firstSrv ? firstSrv.id : '');
+      setRerouteSubMotifsSelected([]);
+      setRerouteSubSearch('');
+      setReroutePrescriberName('');
+      setReroutePrescriberLicense('');
+    }
+  }, [activeCycleLockModal, activeRerouteServices]);
   const [patientsToDischarge, setPatientsToDischarge] = useState<any[]>([]);
   const [sortieLabRequests, setSortieLabRequests] = useState<any[]>([]);
   const [sortiePharmaOrders, setSortiePharmaOrders] = useState<any[]>([]);
@@ -5151,73 +5178,220 @@ const Reception: React.FC<ReceptionProps> = ({
         />
       )}
 
-      {/* Active Cycle Lock Modal (Parcours Patient) */}
-      {activeCycleLockModal && (
+      {/* Active Cycle Lock / Réorienter Modal (Synchronized with Tenant Services & Registered Sub-Services) */}
+      {activeCycleLockModal && (() => {
+        const selectedSrv = activeRerouteServices.find((s: any) => s.id === rerouteTargetService) || activeRerouteServices[0];
+        const isSoinsTarget = Boolean(
+          selectedSrv && (selectedSrv.id === 'SRV-INFIRMIER' || /soin|infirmier/i.test(selectedSrv.name || ''))
+        );
+        const matchingSubMotifs = activeMotifs.filter((m) => {
+          if (!selectedSrv) return false;
+          const srvNameLow = String(selectedSrv.name || '').toLowerCase();
+          if (m.serviceId && m.serviceId === selectedSrv.id) return true;
+          if (isSoinsTarget && m.category === 'SOINS') return true;
+          if (/matern/i.test(srvNameLow) && m.category === 'MATERNITE') return true;
+          if (/urgence/i.test(srvNameLow) && m.category === 'URGENCES') return true;
+          if (/hospitalis/i.test(srvNameLow) && m.category === 'HOSPITALISATION') return true;
+          if (/consult/i.test(srvNameLow) && m.category === 'CONSULTATIONS') return true;
+          if (m.queueName && m.queueName.toLowerCase() === srvNameLow) return true;
+          return false;
+        });
+        const filteredSubMotifs = matchingSubMotifs.filter((m) => {
+          if (!rerouteSubSearch.trim()) return true;
+          const q = rerouteSubSearch.toLowerCase().trim();
+          return (m.label || '').toLowerCase().includes(q) || (m.codeInterne || '').toLowerCase().includes(q);
+        });
+        const rerouteTotalFee = rerouteSubMotifsSelected.reduce((sum, m) => sum + (m.fee || 0), 0);
+        const requiresRx = rerouteSubMotifsSelected.some((m) => Boolean(m.requiresPrescription));
+        const hasValidPrescriber = !requiresRx || reroutePrescriberName.trim().length > 0 || reroutePrescriberLicense.trim().length > 0;
+        const canSubmitReroute = Boolean(selectedSrv) && (matchingSubMotifs.length === 0 || rerouteSubMotifsSelected.length > 0) && hasValidPrescriber;
+
+        return (
         <div className="fixed inset-0 z-[88] flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="p-6 bg-gradient-to-r from-amber-600 to-orange-600 text-white flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
-                <Lock size={22} />
+          <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200 max-h-[92vh] flex flex-col">
+            <div className="p-5 bg-gradient-to-r from-amber-600 to-orange-600 text-white flex items-center gap-3 shrink-0">
+              <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                <Lock size={20} />
               </div>
-              <div>
-                <h3 className="text-base font-black tracking-tight">Cycle Patient Actif</h3>
-                <p className="text-[11px] font-bold text-amber-100">
+              <div className="min-w-0">
+                <h3 className="text-base font-black tracking-tight">Réorienter — Cycle Patient Actif</h3>
+                <p className="text-[11px] font-bold text-amber-100 truncate">
                   {activeCycleLockModal.patient.lastName} {activeCycleLockModal.patient.firstName} — Visite #{activeCycleLockModal.visit.visite_id.slice(-6).toUpperCase()}
                 </p>
               </div>
             </div>
-            <div className="p-6 space-y-4">
-              <p className="text-sm font-bold text-slate-800 leading-relaxed">
-                ⚠️ Ce patient est déjà actif dans l&apos;hôpital. Voulez-vous le rediriger vers un nouveau service ?
+            <div className="p-5 space-y-4 overflow-y-auto custom-scrollbar flex-1">
+              <p className="text-xs font-bold text-slate-700 leading-relaxed">
+                ⚠️ Ce patient est déjà actif dans l&apos;hôpital. Sélectionnez un service actif et ses actes enregistrés pour le rediriger sur le même cycle :
               </p>
-              <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 space-y-1.5 text-xs text-amber-900">
-                <div className="font-black uppercase tracking-wider text-[10px] text-amber-700">
-                  Cycle ouvert le {activeCycleLockModal.visit.openedDate} à {activeCycleLockModal.visit.openedTime}
-                </div>
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  {(activeCycleLockModal.visit.destinations || []).map((dest, idx) => (
-                    <span key={idx} className="px-2 py-0.5 rounded-md bg-white border border-amber-200 font-bold text-[10px] text-amber-800">
-                      {dest.motifLabel || dest.service}
-                    </span>
-                  ))}
-                </div>
+
+              {/* Existing destinations */}
+              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 flex flex-wrap items-center gap-1.5 text-[10px]">
+                <span className="font-black uppercase text-amber-700">Cycle ({activeCycleLockModal.visit.openedDate} {activeCycleLockModal.visit.openedTime}) :</span>
+                {(activeCycleLockModal.visit.destinations || []).map((dest, idx) => (
+                  <span key={idx} className="px-2 py-0.5 rounded-md bg-white border border-amber-200 font-bold text-amber-800">
+                    {dest.motifLabel || dest.service}
+                  </span>
+                ))}
               </div>
+
+              {/* Active Structure Services Dropdown (Zero hardcoded inactive services) */}
               <div>
                 <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1.5">
-                  Nouveau service de destination
+                  Service actif de la structure ({activeRerouteServices.length})
                 </label>
                 <select
-                  value={rerouteTargetService}
-                  onChange={(e) => setRerouteTargetService(e.target.value)}
+                  value={selectedSrv?.id || ''}
+                  onChange={(e) => {
+                    setRerouteTargetService(e.target.value);
+                    setRerouteSubMotifsSelected([]);
+                    setRerouteSubSearch('');
+                    setReroutePrescriberName('');
+                    setReroutePrescriberLicense('');
+                  }}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold text-slate-800 outline-none focus:border-amber-500"
                 >
-                  {['Laboratoire', 'Consultation', 'Urgences', 'Soins Infirmiers', 'Maternité', 'Pharmacie', 'Hospitalisation']
-                    .concat((hospitalServices || []).map((s: any) => s.name).filter((n: string) => n && !['Laboratoire', 'Consultation', 'Urgences', 'Soins Infirmiers', 'Maternité', 'Pharmacie', 'Hospitalisation'].includes(n)))
-                    .map((srvName: string) => (
-                      <option key={srvName} value={srvName}>{srvName}</option>
-                    ))}
+                  {activeRerouteServices.map((srv: any) => (
+                    <option key={srv.id} value={srv.id}>{srv.name}</option>
+                  ))}
                 </select>
               </div>
-              <p className="text-[11px] font-medium text-slate-500">
-                La création d&apos;une nouvelle visite est verrouillée (409 Cycle Actif Existant) jusqu&apos;à la clôture via <span className="font-black text-slate-700">Sortie Admin</span>.
-              </p>
+
+              {/* Registered Sub-Services / Acts Picker (Mirrors Admission, Multi-Select for Soins) */}
+              {matchingSubMotifs.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                      {isSoinsTarget ? 'Soins Infirmiers enregistrés (Multi-sélection)' : 'Actes / Sous-services enregistrés'}
+                    </label>
+                    {rerouteSubMotifsSelected.length > 0 && (
+                      <span className="text-[11px] font-black font-mono text-indigo-700">
+                        Total : {rerouteTotalFee.toLocaleString()} FCFA
+                      </span>
+                    )}
+                  </div>
+
+                  {rerouteSubMotifsSelected.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 p-2 rounded-xl bg-indigo-50/70 border border-indigo-200">
+                      {rerouteSubMotifsSelected.map((sm) => (
+                        <span key={sm.id} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-indigo-200 text-[10px] font-bold text-slate-800">
+                          {sm.label} ({(sm.fee || 0).toLocaleString()} F)
+                          <button
+                            type="button"
+                            onClick={() => setRerouteSubMotifsSelected(prev => prev.filter(x => x.id !== sm.id))}
+                            className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                          >
+                            <X size={11} />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                    <input
+                      type="text"
+                      value={rerouteSubSearch}
+                      onChange={(e) => setRerouteSubSearch(e.target.value)}
+                      placeholder="Filtrer les actes enregistrés..."
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold outline-none focus:border-amber-500 focus:bg-white"
+                    />
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 divide-y divide-slate-100 max-h-44 overflow-y-auto custom-scrollbar">
+                    {filteredSubMotifs.map((m) => {
+                      const isChecked = rerouteSubMotifsSelected.some(x => x.id === m.id);
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSoinsTarget) {
+                              setRerouteSubMotifsSelected(prev =>
+                                isChecked ? prev.filter(x => x.id !== m.id) : [...prev, m]
+                              );
+                            } else {
+                              setRerouteSubMotifsSelected(isChecked ? [] : [m]);
+                            }
+                          }}
+                          className={`w-full px-3 py-2 flex items-center justify-between gap-2 text-left text-xs transition-colors cursor-pointer ${
+                            isChecked ? 'bg-amber-50 font-black text-slate-900' : 'hover:bg-slate-50 font-semibold text-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type={isSoinsTarget ? 'checkbox' : 'radio'}
+                              readOnly
+                              checked={isChecked}
+                              className="w-3.5 h-3.5 text-amber-600 pointer-events-none shrink-0"
+                            />
+                            <span className="truncate">{m.label}</span>
+                            {m.requiresPrescription && (
+                              <span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 text-[9px] font-black uppercase shrink-0">
+                                Ordonnance
+                              </span>
+                            )}
+                          </div>
+                          <span className="font-mono text-[11px] font-black text-slate-700 shrink-0">
+                            {(m.fee || 0).toLocaleString()} F
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Soumis à ordonnance Guard */}
+              {requiresRx && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+                  <p className="text-[10px] font-black text-rose-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <ShieldAlert size={13} className="text-rose-600" />
+                    Soumis à ordonnance — Prescripteur requis
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      value={reroutePrescriberName}
+                      onChange={(e) => setReroutePrescriberName(e.target.value)}
+                      placeholder="Nom du Prescripteur *"
+                      className="w-full px-3 py-2 bg-white border border-rose-200 rounded-lg text-xs font-bold outline-none focus:border-rose-500"
+                    />
+                    <input
+                      type="text"
+                      value={reroutePrescriberLicense}
+                      onChange={(e) => setReroutePrescriberLicense(e.target.value)}
+                      placeholder="OU Numéro d'Ordre *"
+                      className="w-full px-3 py-2 bg-white border border-rose-200 rounded-lg text-xs font-bold outline-none focus:border-rose-500"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-col sm:flex-row gap-2 pt-2">
                 <button
-                  disabled={isReroutingDirect}
+                  disabled={isReroutingDirect || !canSubmitReroute}
                   onClick={async () => {
-                    if (!activeCycleLockModal) return;
+                    if (!activeCycleLockModal || !selectedSrv) return;
                     setIsReroutingDirect(true);
                     try {
                       const targetVisit = activeCycleLockModal.visit;
                       const pt = activeCycleLockModal.patient;
                       const now = new Date();
+                      const nowIso = now.toISOString();
+                      const chosenList = rerouteSubMotifsSelected.length > 0
+                        ? rerouteSubMotifsSelected
+                        : [{ id: selectedSrv.id, label: selectedSrv.name, fee: 0, serviceId: selectedSrv.id, queueName: selectedSrv.name, speciality: selectedSrv.name } as any];
+                      const combinedLabel = chosenList.map((m: any) => m.label).join(' + ');
                       const queueDocRef = doc(collection(db, 'service_queues'));
                       const destMeta = {
-                        service: rerouteTargetService,
+                        service: selectedSrv.name,
+                        serviceId: selectedSrv.id,
                         motif: 'REDIRECTION_ACCUEIL',
-                        motifLabel: `Redirection -> ${rerouteTargetService}`,
+                        motifLabel: combinedLabel,
                         queueId: queueDocRef.id,
-                        routedAt: now.toISOString(),
+                        routedAt: nowIso,
                         routedBy: user?.name || user?.username || 'Agent Accueil',
                         isReroute: true,
                       };
@@ -5228,27 +5402,93 @@ const Reception: React.FC<ReceptionProps> = ({
                       await setDoc(queueDocRef, sanitizeData(stampTenantData({
                         id: queueDocRef.id,
                         patientId: pt.patientId || pt.id,
+                        dmeId: (pt as any).dmeId || pt.id,
                         firstName: pt.firstName || '',
                         lastName: pt.lastName || '',
                         age: pt.age || 0,
                         gender: pt.gender || 'M',
                         visite_id: targetVisit.visite_id,
-                        service: rerouteTargetService,
-                        speciality: rerouteTargetService,
-                        queueName: rerouteTargetService,
-                        motif: `Redirection Accueil -> ${rerouteTargetService}`,
+                        service: selectedSrv.name,
+                        speciality: chosenList[0]?.speciality || selectedSrv.name,
+                        queueName: chosenList[0]?.queueName || selectedSrv.name,
+                        motif: combinedLabel,
+                        motifLabel: combinedLabel,
+                        acte_id: chosenList[0]?.actId || chosenList[0]?.id || '',
                         status: 'waiting',
                         time: now.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
                         date: now.toLocaleDateString('fr-FR'),
-                        createdAt: now.toISOString(),
+                        createdAt: nowIso,
                       }, user, establishment)));
+
+                      // Generate Caisse payment_requests for paid sub-services under the existing visite_id
+                      const paidItems = chosenList.filter((m: any) => Number(m.fee || 0) > 0);
+                      let createdPrId = '';
+                      if (paidItems.length > 0) {
+                        const prRef = doc(collection(db, 'payment_requests'));
+                        createdPrId = prRef.id;
+                        const totalFee = paidItems.reduce((s: number, m: any) => s + Number(m.fee || 0), 0);
+                        await setDoc(prRef, sanitizeData(stampTenantData({
+                          id: prRef.id,
+                          patientId: pt.patientId || pt.id,
+                          patientDme: (pt as any).dmeId || pt.id,
+                          patientName: `${pt.lastName || ''} ${pt.firstName || ''}`.trim(),
+                          visite_id: targetVisit.visite_id,
+                          requestingService: 'Accueil',
+                          sourceModule: 'Reception',
+                          type: isSoinsTarget ? 'SOIN' : /lab/i.test(selectedSrv.name) ? 'LABORATOIRE' : 'CONSULTATION',
+                          items: paidItems.map((m: any, i: number) => ({
+                            id: `REROUTE-${i}-${m.id}`,
+                            name: m.label,
+                            quantity: 1,
+                            unitPrice: Number(m.fee || 0),
+                            totalPrice: Number(m.fee || 0),
+                            actId: m.actId || m.id,
+                          })),
+                          totalAmount: totalFee,
+                          amountPaid: 0,
+                          remainingAmount: totalFee,
+                          status: 'PENDING',
+                          createdAt: nowIso,
+                        }, user, establishment)));
+                      }
+
+                      // If Soins Infirmiers, push each selected soin to nursing_acts tied to active visite_id
+                      if (isSoinsTarget) {
+                        await Promise.all(
+                          chosenList.map((sm: any) => {
+                            const actRef = doc(collection(db, 'nursing_acts'));
+                            return setDoc(actRef, sanitizeData(stampTenantData({
+                              id: actRef.id,
+                              visite_id: targetVisit.visite_id,
+                              patientId: pt.patientId || pt.id,
+                              patientDme: (pt as any).dmeId || pt.id,
+                              patientName: `${pt.lastName || ''} ${pt.firstName || ''}`.trim(),
+                              careName: sm.label,
+                              actName: sm.label,
+                              name: sm.label,
+                              actType: sm.label,
+                              unitPrice: Number(sm.fee || 0),
+                              source: 'ACCUEIL',
+                              status: 'EN ATTENTE',
+                              paymentStatus: paidItems.length > 0 ? 'AWAITING_PAYMENT' : 'EXONERE',
+                              payment_status: paidItems.length > 0 ? 'EN_ATTENTE_CAISSE' : 'EXONERE',
+                              paymentRequestId: createdPrId,
+                              prescriberName: reroutePrescriberName.trim() || undefined,
+                              prescriberLicense: reroutePrescriberLicense.trim() || undefined,
+                              requiresPrescription: Boolean(sm.requiresPrescription),
+                              createdAt: nowIso,
+                            }, user, establishment)));
+                          })
+                        );
+                      }
+
                       fetch(`/api/visites/${encodeURIComponent(targetVisit.visite_id)}`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ destination: destMeta }),
                       }).catch(() => {});
                       window.dispatchEvent(new CustomEvent('app-notification', {
-                        detail: `✅ ${pt.lastName} ${pt.firstName} redirigé vers ${rerouteTargetService} (Cycle #${targetVisit.visite_id.slice(-6).toUpperCase()}).`
+                        detail: `✅ ${pt.lastName} ${pt.firstName} redirigé vers ${selectedSrv.name} (${combinedLabel}) sur le cycle actif.`
                       }));
                       setActiveCycleLockModal(null);
                       setRerouteVisitId(null);
@@ -5259,29 +5499,19 @@ const Reception: React.FC<ReceptionProps> = ({
                       setIsReroutingDirect(false);
                     }
                   }}
-                  className="flex-1 py-3 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-200 transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="flex-1 py-3 px-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-amber-200 transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <CheckCircle2 size={14} />
-                  OK (Rediriger)
+                  {isReroutingDirect ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                  <span>{!hasValidPrescriber ? 'Prescripteur Requis' : isReroutingDirect ? 'Envoi en cours...' : 'OK (Rediriger)'}</span>
                 </button>
                 <button
-                  onClick={() => {
-                    setRerouteVisitId(activeCycleLockModal.visit.visite_id);
-                    setActiveCycleLockModal(null);
-                    setStep('triage');
-                  }}
-                  className="py-3 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-black text-xs uppercase tracking-wider transition-all cursor-pointer flex items-center justify-center gap-1"
-                >
-                  <ArrowRightLeft size={14} />
-                  Triage
-                </button>
-                <button
+                  type="button"
                   onClick={() => {
                     setActiveCycleLockModal(null);
                     setRerouteVisitId(null);
                     setStep('search');
                   }}
-                  className="py-3 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
+                  className="py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs uppercase tracking-wider transition-all cursor-pointer"
                 >
                   Annuler
                 </button>
@@ -5289,7 +5519,8 @@ const Reception: React.FC<ReceptionProps> = ({
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Smart Rendez-vous Intercept Modal */}
       {interceptedAppointment && (
