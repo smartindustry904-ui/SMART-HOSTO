@@ -1132,7 +1132,7 @@ const HistoriquePatient: React.FC<HistoriquePatientProps> = ({
 
               {/* Chronological Visits List */}
               {detailPatientGroup.events.map((ev: PatientHistoryEvent) => {
-                const style = getEventTypeStyle(ev.type);
+                const style = getEventBadge(ev.type);
                 const IconComp = style.icon;
                 return (
                   <div key={ev.id} className="p-3.5 rounded-2xl border border-slate-200 bg-white space-y-1.5 shadow-2xs">
